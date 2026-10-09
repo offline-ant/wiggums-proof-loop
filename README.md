@@ -1,5 +1,9 @@
 # wiggums-proof-loop
 
+OpenAI dropped a set of proofs, and a lot of people are trying to formulate their interpretation on what this means for their field in general.
+
+The goal here is to add a data point to the discussion.
+
 **151,287 → 113,990 lines of Lean code: a 24.65% reduction.**
 Blank lines and comments are not counted. The theorem statement stayed the same.
 
