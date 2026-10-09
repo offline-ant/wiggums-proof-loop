@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Tactic.Linarith
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticBlockFrequenciesLemmas
@@ -179,55 +180,6 @@ end
 section
 
 /-!
-The quantitative one-point step of the KMS mixed-norm induction. This applies
-the exact basis-invariant point recurrence to an arbitrary actual Fourier
-slice. The only loss is the explicit number of dependent graph terms.
--/
-
-namespace UniqueGamesTheorem.Inverse.KMSFourthMoment
-noncomputable section
-open scoped BigOperators Classical
-open UniqueGamesTheorem.Fourier.MatrixCharacters
-open UniqueGamesTheorem.Inverse.KMSAnalytic
-
-variable {E F I : Type*}
-  [AddCommGroup E] [Module F2 E] [AddCommGroup F] [Module F2 F]
-  [AddCommGroup I] [Module F2 I]
-  [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
-  [Fintype ((E × F2) →ₗ[F2] F)] [Fintype (F →ₗ[F2] (E × F2))]
-  [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)]
-  [Fintype ((I × F2) →ₗ[F2] F)] [Fintype (F →ₗ[F2] (I × F2))]
-  [Fintype (F →ₗ[F2] F2)] [Fintype (I →ₗ[F2] F2)]
-
-omit [Fintype ((I × F2) →ₗ[F2] F)] in
-/-- Actual one-point mixed-energy recurrence; the remaining fixed-character
-slice P is arbitrary, and all smaller components are the genuine functions. -/
-theorem point_sliceEnergy_le (ι : I →ₗ[F2] E) (hι : Function.Injective ι)
-    (f : ((E × F2) →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f)
-    (a : F) (P : (F →ₗ[F2] I) → Prop) :
-    sliceEnergy P (pointRestrict (smallComponent (pointLift ι) f) a) ≤
-      2 * (sliceEnergy P (smallComponent ι (pointRestrict f a)) +
-        (Fintype.card (I →ₗ[F2] F2) : ℝ) ^ 2 *
-          sliceEnergy P (smallComponent (pointPad ι) f)) := by
-  have he : pointRestrict (smallComponent (pointLift ι) f) a =
-      fun X => smallComponent ι (pointRestrict f a) X -
-        ∑ φ : I →ₗ[F2] F2, smallComponent (pointPad ι) f (X + φ.smulRight a) := by
-    funext X
-    exact point_restriction_recursion ι hι f hf X a
-  rw [he]
-  exact sliceEnergy_sub_translates_le (E := I) (F := F)
-    (J := I →ₗ[F2] F2) P (smallComponent ι (pointRestrict f a))
-    (smallComponent (pointPad ι) f) (fun φ : I →ₗ[F2] F2 => φ.smulRight a)
-
-end
-end UniqueGamesTheorem.Inverse.KMSFourthMoment
-
-end
-
-section
-
-/-!
 Move one fixed coordinate to the last position while preserving the free
 block. These are identities of actual linear maps and restricted functions;
 no Fourier support or analytic estimate is assumed.
@@ -249,26 +201,11 @@ variable {A0 A I F : Type*}
 /-- Put the last coordinate into the fixed block through `e`, keeping the
 free block unchanged. -/
 def pointShuffle (e : (A0 × F2) ≃ₗ[F2] A) :
-    ((A0 × I) × F2) ≃ₗ[F2] (A × I) where
-  toFun p := (e (p.1.1, p.2), p.1.2)
-  invFun p := (((e.symm p.1).1, p.2), (e.symm p.1).2)
-  left_inv p := by
-    rcases p with ⟨⟨u, v⟩, c⟩
-    simp
-  right_inv p := by
-    rcases p with ⟨u, v⟩
-    simp
-  map_add' p q := by
-    apply Prod.ext
-    · change e (p.1.1 + q.1.1, p.2 + q.2) =
-        e (p.1.1, p.2) + e (q.1.1, q.2)
-      exact map_add e (p.1.1, p.2) (q.1.1, q.2)
-    · rfl
-  map_smul' c p := by
-    apply Prod.ext
-    · change e (c • p.1.1, c • p.2) = c • e (p.1.1, p.2)
-      exact map_smul e c (p.1.1, p.2)
-    · rfl
+    ((A0 × I) × F2) ≃ₗ[F2] (A × I) :=
+  LinearEquiv.prodAssoc F2 A0 I F2 ≪≫ₗ
+    (LinearEquiv.refl F2 A0).prodCongr (LinearEquiv.prodComm F2 I F2) ≪≫ₗ
+    (LinearEquiv.prodAssoc F2 A0 F2 I).symm ≪≫ₗ
+    e.prodCongr (LinearEquiv.refl F2 I)
 
 @[simp] theorem pointShuffle_apply (e : (A0 × F2) ≃ₗ[F2] A)
     (u : A0) (v : I) (c : F2) :
@@ -285,18 +222,11 @@ theorem coprod_comp_pointShuffle (e : (A0 × F2) ≃ₗ[F2] A)
     (a.coprod X).comp (pointShuffle e).toLinearMap =
       pointAppend (((a.comp e.toLinearMap).comp (LinearMap.inl F2 A0 F2)).coprod X)
         (a (e (0, 1))) := by
-  apply LinearMap.ext
-  intro p
-  rcases p with ⟨⟨u, v⟩, c⟩
-  change a (e (u, c)) + X v =
-    (a (e (u, 0)) + X v) + c • a (e (0, 1))
-  have hp : (u, c) = (u, (0 : F2)) + c • ((0 : A0), (1 : F2)) := by
-    simp
-  have ha : a (e (u, c)) = a (e (u, 0)) + c • a (e (0, 1)) := by
-    rw [hp]
-    simp only [map_add, map_smul]
-  rw [ha]
-  abel
+  apply LinearMap.prod_ext
+  · ext u <;> simp [pointAppend, pointShuffle, LinearEquiv.prodAssoc]
+    exact (a.comp e.toLinearMap).map_zero
+  · apply LinearMap.ext_ring
+    simp [pointAppend, pointShuffle, LinearEquiv.prodAssoc]
 
 /-- Express a function in the shuffled coordinates. -/
 def pointShuffleTransport (e : (A0 × F2) ≃ₗ[F2] A)
@@ -318,11 +248,7 @@ theorem partialRestrict_pointRestrict_pointShuffleTransport
     (((a.comp e.toLinearMap).comp (LinearMap.inl F2 A0 F2)).coprod X)
     (a (e (0, 1)))).comp (pointShuffle e).symm.toLinearMap) = f (a.coprod X)
   rw [← coprod_comp_pointShuffle]
-  congr 1
-  apply LinearMap.ext
-  intro p
-  change (a.coprod X) ((pointShuffle e) ((pointShuffle e).symm p)) = (a.coprod X) p
-  rw [LinearEquiv.apply_symm_apply]
+  simp [LinearMap.comp_assoc]
 
 end
 end UniqueGamesTheorem.Inverse.KMSFourthMoment
@@ -364,20 +290,6 @@ theorem coefficient_hyperplane_restriction
   exact ((hyperplaneExtensionEquiv z).sum_comp
     (fun S => linearCoeff f S.val)).symm
 
-omit [Fintype (B →ₗ[F2] E)] in
-/-- KMS's genuine zoom-out recurrence, in product coordinates. The denominator
-is the exact number of independent extension vectors. Basis invariance is
-used to prove their Fourier coefficients coincide. -/
-theorem coefficient_zoomOut_recursion
-    (f : (E →ₗ[F2] (B × F2)) → ℝ)
-    (hf : KMSBasisInvariant.IsBasisInvariant f) (z : B →ₗ[F2] E)
-    {v : E} (hv : v ∉ z.range) :
-    linearCoeff f (hyperplaneExtend z v) =
-      (linearCoeff (fun X => f ((LinearMap.inl F2 B F2).comp X)) z -
-        ∑ u with u ∈ z.range, linearCoeff f (hyperplaneExtend z u)) /
-      ((Fintype.card E - Fintype.card z.range : ℕ) : ℝ) := by
-  rw [coefficient_hyperplane_restriction]
-  exact coefficient_hyperplaneExtend_recursion f hf z hv
 
 omit [Fintype (B →ₗ[F2] E)] in
 /-- A denominator-free form convenient for squared-norm estimates. -/
@@ -747,25 +659,18 @@ theorem fixedFrequencyEnergy_product_bound
       _ ≤ (N * (N + 1)) * ((N + 1) * (C * ε)) :=
         mul_le_mul_of_nonneg_left hsum (by positivity)
       _ = _ := by ring
-  have ht : t ≤ (N * (N + 1) ^ 2 * C / (D ^ 2 * P)) * ε := by
-    calc
-      t ≤ (N * (N + 1) ^ 2 * C * ε) / (D ^ 2 * P) :=
-        (le_div_iff₀ (show 0 < D ^ 2 * P by positivity)).mpr
-          (by simpa only [mul_comm] using hweighted)
-      _ = _ := by ring
-  have hc := fixedCharacter_constant_step n m ell hnell
-  change N * (N + 1) ^ 2 * C / (D ^ 2 * P) ≤
-    (2 : ℝ) ^ (4 * (n + 1) * (n + 1)) /
-      (2 : ℝ) ^ (((n + 1) + (m + 1)) * ell) at hc
-  have hfinal := ht.trans (mul_le_mul_of_nonneg_right hc hε)
   rw [Module.finrank_prod, Module.finrank_prod, Module.finrank_self]
   change (2 : ℝ) ^ (((n + 1) + (m + 1)) * ell) * t ≤
     (2 : ℝ) ^ (4 * (n + 1) * (n + 1)) * ε
-  have hresult := (le_div_iff₀
-    (show 0 < (2 : ℝ) ^ (((n + 1) + (m + 1)) * ell) by positivity)).mp
-      (show t ≤ ((2 : ℝ) ^ (4 * (n + 1) * (n + 1)) * ε) /
-        (2 : ℝ) ^ (((n + 1) + (m + 1)) * ell) from hfinal.trans_eq (by ring))
-  simpa only [mul_comm] using hresult
+  rw [mul_comm _ t, ← le_div_iff₀ (by positivity)]
+  calc
+    t ≤ (N * (N + 1) ^ 2 * C * ε) / (D ^ 2 * P) :=
+      (le_div_iff₀ (by positivity)).mpr (by simpa only [mul_comm] using hweighted)
+    _ = (N * (N + 1) ^ 2 * C / (D ^ 2 * P)) * ε := by ring
+    _ ≤ ((2 : ℝ) ^ (4 * (n + 1) * (n + 1)) /
+        (2 : ℝ) ^ (((n + 1) + (m + 1)) * ell)) * ε :=
+      mul_le_mul_of_nonneg_right (fixedCharacter_constant_step n m ell hnell) hε
+    _ = _ := by ring
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic

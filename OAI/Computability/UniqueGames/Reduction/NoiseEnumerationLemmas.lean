@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.NodupEquivFin
 import Mathlib.Data.List.Perm.Basic
 import OAI.Computability.UniqueGames.Reduction.ActualSourceLemmas
@@ -34,24 +35,6 @@ theorem nonempty (e : NoiseEnumeration g) : e.indices ≠ [] := by
   have hi := e.complete i
   simp only [h, List.not_mem_nil] at hi
 
-theorem perm_univ (e : NoiseEnumeration g) :
-    e.indices.Perm (Finset.univ : Finset g.NoiseIndex).toList := by
-  apply (List.perm_ext_iff_of_nodup e.nodup (Finset.nodup_toList _)).2
-  intro i
-  simp [e.complete i]
-
-theorem length_eq_card (e : NoiseEnumeration g) :
-    e.indices.length = Fintype.card g.NoiseIndex := by
-  simpa using e.perm_univ.length_eq
-
-theorem sum_eq_univ (e : NoiseEnumeration g) (f : g.NoiseIndex → ℚ) :
-    (e.indices.map f).sum = ∑ i, f i := by
-  rw [(e.perm_univ.map f).sum_eq, Finset.sum_map_toList]
-
-/-- A list average over index occurrences is precisely the uniform finite law. -/
-theorem average_eq_expect (e : NoiseEnumeration g) (f : g.NoiseIndex → ℚ) :
-    (e.indices.map f).sum / e.indices.length = Finset.univ.expect f := by
-  rw [e.sum_eq_univ, e.length_eq_card, Fintype.expect_eq_sum_div_card]
 
 end NoiseEnumeration
 end UniqueGamesTheorem.Reduction.ActualSource
@@ -69,33 +52,6 @@ open BinaryLinear UniqueGamesTheorem.Reduction.ActualSource
 
 variable {s d : Nat}
 
-/-- Reindexing changes the names of outcomes, retaining their uniform law. -/
-def reindex (g : SplitGadget s d) {I : Type} [Fintype I] [Nonempty I]
-    (e : I ≃ g.NoiseIndex) : SplitGadget s d where
-  f := g.f
-  equivariant := g.equivariant
-  NoiseIndex := I
-  noiseFintype := inferInstance
-  noiseNonempty := inferInstance
-  noise i := g.noise (e i)
-
-theorem reindex_stabilityError (g : SplitGadget s d)
-    {I : Type} [Fintype I] [Nonempty I] (e : I ≃ g.NoiseIndex) :
-    (reindex g e).stabilityError = g.stabilityError := by
-  apply Fintype.expect_equiv ((Equiv.refl (Ambient s d)).prodCongr e)
-  intro x
-  rfl
-
-theorem reindex_kernelProbability (g : SplitGadget s d)
-    {I : Type} [Fintype I] [Nonempty I] (e : I ≃ g.NoiseIndex)
-    {P : Type} [AddCommGroup P] [Module F2 P]
-    (S : Ambient s d →ₗ[F2] P) :
-    SplitGadget.kernelProbability (reindex g e) S =
-      SplitGadget.kernelProbability g S := by
-  classical
-  apply Fintype.expect_equiv e
-  intro i
-  rfl
 
 /-- Only a nonempty finite list of binary vectors is required as static noise
 data. The correcting function is a separate witness used in the proof. -/
@@ -157,25 +113,6 @@ theorem kernelProbability_ofEnumeration (g : SplitGadget s d)
   intro i
   rw [noise_positionEquiv]
 
-/-- Exact table conversion retains both mathematical gadget guarantees. -/
-theorem guarantees_ofEnumeration (g : SplitGadget s d) (en : NoiseEnumeration g)
-    {ζ ν : ℚ} {r : Nat}
-    (hstable : g.stabilityError ≤ ζ)
-    (hdisp : ∀ (P : Type) [AddCommGroup P] [Module F2 P]
-      (S : Ambient s d →ₗ[F2] P),
-      r ≤ Module.finrank F2 (S.comp (alphabetEmbedding s d)).range →
-      SplitGadget.kernelProbability g S ≤ ν) :
-    ((ofEnumeration g en).gadget g.f g.equivariant).stabilityError ≤ ζ ∧
-      ∀ (P : Type) [AddCommGroup P] [Module F2 P]
-        (S : Ambient s d →ₗ[F2] P),
-        r ≤ Module.finrank F2 (S.comp (alphabetEmbedding s d)).range →
-        SplitGadget.kernelProbability
-          ((ofEnumeration g en).gadget g.f g.equivariant) S ≤ ν := by
-  constructor
-  · simpa only [stabilityError_ofEnumeration] using hstable
-  · intro P _ _ S hS
-    rw [kernelProbability_ofEnumeration]
-    exact hdisp P S hS
 
 end Table
 end UniqueGamesTheorem.Integration.NoiseTables

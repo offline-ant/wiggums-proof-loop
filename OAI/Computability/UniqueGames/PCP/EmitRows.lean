@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.Addresses
 import OAI.Computability.UniqueGames.PCP.Table
 
@@ -180,17 +181,11 @@ def headerInTime {K Λ σ : Type} [DecidableEq K] (q n m : Nat)
   rw [bits_listCommands, headerCommands_bits] at run
   simpa only [headerCommands_length] using run
 
-private theorem encodeWords_flatMap {α : Type} (items : List α) (words : α → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun item => encodeWords (words item)) := by
-  induction items with
-  | nil => rfl
-  | cons item items ih => simp [encodeWords_append, ih]
-
 theorem blockCommands_bits {q : Nat} (input : GenericGraphTables.Table q)
     (edge : Fin input.darts) :
     (blockCommands q).flatMap (commandBits (rowValues input edge) (rowContext input edge)) =
       encodeWords (blockWords input edge) := by
-  simp only [blockCommands, blockWords, List.flatMap_assoc, encodeWords_flatMap,
+  simp only [blockCommands, blockWords, List.flatMap_assoc, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap,
     rowCommands_bits]
 
 theorem rowCommands_length_le (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
@@ -223,37 +218,6 @@ theorem blockCommands_length_le (q : Nat) :
   intro orientation _
   exact rowCommands_length_le q event slot orientation
 
-/-- Actual execution of all rows belonging to one old dart. The finite relation
-register is supplied by the checked row parser; only code equations are assumed
-about the enclosing program. The trace restores the five operand tapes. -/
-def blockInTime {K Λ : Type} [DecidableEq K] {q : Nat}
-    (input : GenericGraphTables.Table q) (edge : Fin input.darts)
-    (sources : Fin 5 → K) (scratch output : K)
-    (sourceScratch : ∀ i, sources i ≠ scratch)
-    (sourceOutput : ∀ i, sources i ≠ output) (scratchOutput : scratch ≠ output)
-    (labels : Label (blockCommands q).length (Addresses.fieldBound q) → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State (Context q)))
-    (atLabels : ∀ label, p (labels label) = statement (listCommands (blockCommands q))
-      sources scratch output labels exit label)
-    (base : K → List Bool)
-    (operands : ∀ i, base (sources i) = encodeWord (rowValues input edge i))
-    (scratchEmpty : base scratch = []) (N : Nat)
-    (bounded : ∀ i, rowValues input edge i ≤ N) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels (labelAt (blockCommands q).length (Addresses.fieldBound q) 0 .entry)),
-        ((rowContext input edge, ()), none), base⟩
-      (some ⟨exit, ((rowContext input edge, ()), none),
-        resultTapes output base (encodeWords (blockWords input edge))⟩)
-      (Enumeration.localCount q * (6 * (2 * 4104)) * (3 * (N + 1) + 3) + 1) := by
-  let run := planInTime (listCommands (blockCommands q)) sources scratch output sourceScratch
-    sourceOutput scratchOutput labels exit p atLabels (rowValues input edge) base operands
-    scratchEmpty (rowContext input edge) N bounded
-  have hbits := bits_listCommands (blockCommands q) (rowValues input edge) (rowContext input edge)
-  rw [blockCommands_bits] at hbits
-  rw [hbits] at run
-  exact { toEvalsTo := run.toEvalsTo, steps_le_m :=
-    run.steps_le_m.trans (Nat.add_le_add_right
-      (Nat.mul_le_mul_right _ (blockCommands_length_le q)) 1) }
 
 /-- Preserve additional finite parser/driver registers through a projection. -/
 def blockCommandsIn {σ : Type} (q : Nat) (context : σ → Context q) :

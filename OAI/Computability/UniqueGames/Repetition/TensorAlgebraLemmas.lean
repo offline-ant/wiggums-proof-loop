@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
@@ -16,99 +17,6 @@ namespace OAI
 
 section
 
-/-!
-Finite-sum tensor factorization used by projection-game collision operators.
-No restriction to coordinatewise strategies occurs: `f` below is an arbitrary
-function of both input questions and both input answers.
--/
-
-namespace UniqueGamesTheorem.Repetition
-
-open scoped BigOperators
-
-noncomputable section
-
-variable {X A Y B U D Z C I : Type*}
-  [Fintype X] [Fintype A] [Fintype U] [Fintype D] [Fintype I]
-
-/-- Apply a finite real kernel. Output indices need no finiteness assumption. -/
-def kernelApply (K : Y → B → X → A → ℝ) (f : X → A → ℝ) (y : Y) (b : B) : ℝ :=
-  ∑ x, ∑ a, K y b x a * f x a
-
-/-- Independent tensor of two kernels. -/
-def tensorKernel (K : Y → B → X → A → ℝ) (L : Z → C → U → D → ℝ)
-    (yz : Y × Z) (bc : B × C) (xu : X × U) (ad : A × D) : ℝ :=
-  K yz.1 bc.1 xu.1 ad.1 * L yz.2 bc.2 xu.2 ad.2
-
-/-- Applying the tensor first applies `L` separately for every fixed input of
-`K`, and then applies `K`. This is valid for arbitrary coupled inputs. -/
-theorem kernelApply_tensor
-    (K : Y → B → X → A → ℝ) (L : Z → C → U → D → ℝ)
-    (f : (X × U) → (A × D) → ℝ) (y : Y) (z : Z) (b : B) (c : C) :
-    kernelApply (tensorKernel K L) f (y,z) (b,c) =
-      kernelApply K (fun x a => kernelApply L (fun u d => f (x,u) (a,d)) z c) y b := by
-  classical
-  simp only [kernelApply, tensorKernel, Fintype.sum_prod_type]
-  apply Finset.sum_congr rfl
-  intro x _
-  rw [Finset.sum_comm]
-  apply Finset.sum_congr rfl
-  intro a _
-  simp only [Finset.mul_sum, mul_assoc]
-
-theorem kernelApply_nonnegative
-    (K : Y → B → X → A → ℝ) (f : X → A → ℝ)
-    (hK : ∀ y b x a, 0 ≤ K y b x a) (hf : ∀ x a, 0 ≤ f x a)
-    (y : Y) (b : B) : 0 ≤ kernelApply K f y b := by
-  apply Finset.sum_nonneg
-  intro x _
-  apply Finset.sum_nonneg
-  intro a _
-  exact mul_nonneg (hK y b x a) (hf x a)
-
-/-- Summing a family of input functions commutes with the finite operator. -/
-theorem kernelApply_sum
-    (K : Y → B → X → A → ℝ) (f : I → X → A → ℝ) (y : Y) (b : B) :
-    kernelApply K (fun x a => ∑ i, f i x a) y b =
-      ∑ i, kernelApply K (f i) y b := by
-  classical
-  simp only [kernelApply, Finset.mul_sum]
-  calc
-    (∑ x, ∑ a, ∑ i, K y b x a * f i x a) =
-        ∑ x, ∑ i, ∑ a, K y b x a * f i x a := by
-      apply Finset.sum_congr rfl
-      intro x _
-      rw [Finset.sum_comm]
-    _ = _ := by rw [Finset.sum_comm]
-
-theorem kernelApply_smul
-    (K : Y → B → X → A → ℝ) (f : X → A → ℝ) (r : ℝ) (y : Y) (b : B) :
-    kernelApply K (fun x a => r * f x a) y b = r * kernelApply K f y b := by
-  simp only [kernelApply, Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro x _
-  apply Finset.sum_congr rfl
-  intro a _
-  exact mul_left_comm _ _ _
-
-omit [Fintype X] in
-/-- Marginalizing the first answer of a joint input strategy after applying
-the second kernel is the same as applying the kernel to the answer marginal. -/
-theorem kernelApply_slice_mass
-    (L : Z → C → U → D → ℝ) (f : (X × U) → (A × D) → ℝ)
-    (x : X) (z : Z) (c : C) :
-    (∑ a, kernelApply L (fun u d => f (x,u) (a,d)) z c) =
-      kernelApply L (fun u d => ∑ a, f (x,u) (a,d)) z c := by
-  symm
-  exact kernelApply_sum L (fun a u d => f (x,u) (a,d)) z c
-
-end
-end UniqueGamesTheorem.Repetition
-
-end
-
-section
-
 /-! Exact tensor identities for normalized finite projection kernels. -/
 
 namespace UniqueGamesTheorem.Repetition
@@ -121,23 +29,6 @@ namespace ProjectionKernel
 variable {Q₁ Q₂ A₁ A₂ R₁ R₂ B₁ B₂ I : Type*}
   [Fintype Q₁] [Fintype Q₂] [Fintype A₁] [Fintype A₂]
   [Fintype R₁] [Fintype R₂] [Fintype B₁] [Fintype B₂] [Fintype I]
-
-/-- The coefficient form of the conditional projection operator. -/
-def coefficients (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (y : Q₂) (b : A₂) (x : Q₁) (a : A₁) : ℝ :=
-  (K.inner y).weight x * if K.accepts x y a b then 1 else 0
-
-theorem apply_eq_kernelApply (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (f : Q₁ → A₁ → ℝ) (y : Q₂) (b : A₂) :
-    K.apply f y b = kernelApply K.coefficients f y b := by
-  classical
-  unfold apply kernelApply coefficients
-  apply Finset.sum_congr rfl
-  intro x _
-  rw [Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro a _
-  by_cases h : K.accepts x y a b = true <;> simp [h]
 
 theorem apply_nonnegative (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (f : Q₁ → A₁ → ℝ) (hf : ∀ x a, 0 ≤ f x a) (y : Q₂) (b : A₂) :
@@ -154,14 +45,16 @@ theorem apply_nonnegative (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
 theorem apply_sum (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (f : I → Q₁ → A₁ → ℝ) (y : Q₂) (b : A₂) :
     K.apply (fun x a => ∑ i, f i x a) y b = ∑ i, K.apply (f i) y b := by
-  simp_rw [apply_eq_kernelApply]
-  exact kernelApply_sum _ _ _ _
+  simp_rw [apply_eq_linearCoefficient_sum, Finset.mul_sum]
+  conv_rhs => rw [Finset.sum_comm]
+  apply Finset.sum_congr rfl
+  intro x _
+  rw [Finset.sum_comm]
 
 theorem apply_smul (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (f : Q₁ → A₁ → ℝ) (r : ℝ) (y : Q₂) (b : A₂) :
     K.apply (fun x a => r * f x a) y b = r * K.apply f y b := by
-  simp_rw [apply_eq_kernelApply]
-  exact kernelApply_smul _ _ _ _ _
+  simp only [apply_eq_linearCoefficient_sum, Finset.mul_sum, mul_left_comm]
 
 /-- Independent product of the outer and conditional laws. -/
 def product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
@@ -176,14 +69,6 @@ def product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     exact Prod.ext (K.projection _ _ _ _ _ h₁.1 h₂.1)
       (H.projection _ _ _ _ _ h₁.2 h₂.2)
 
-theorem coefficients_product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (H : ProjectionKernel R₁ R₂ B₁ B₂) :
-    (K.product H).coefficients = tensorKernel K.coefficients H.coefficients := by
-  funext yz bc xu ad
-  unfold coefficients product tensorKernel FiniteDistribution.product
-  by_cases hk : K.accepts xu.1 yz.1 ad.1 bc.1 = true <;>
-    by_cases hh : H.accepts xu.2 yz.2 ad.2 bc.2 = true <;> simp [hk, hh]
-
 /-- Arbitrary product inputs factor through the second game operator. -/
 theorem apply_product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (H : ProjectionKernel R₁ R₂ B₁ B₂)
@@ -191,29 +76,20 @@ theorem apply_product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (y : Q₂) (z : R₂) (b : A₂) (c : B₂) :
     (K.product H).apply f (y,z) (b,c) =
       K.apply (fun x a => H.apply (fun u d => f (x,u) (a,d)) z c) y b := by
-  simp_rw [apply_eq_kernelApply]
-  rw [coefficients_product]
-  exact kernelApply_tensor _ _ _ _ _ _ _
+  simp only [apply_eq_linearCoefficient_sum, Fintype.sum_prod_type, Finset.mul_sum]
+  apply Finset.sum_congr rfl
+  intro x _
+  rw [Finset.sum_comm]
+  apply Finset.sum_congr rfl
+  intro a _
+  apply Finset.sum_congr rfl
+  intro u _
+  apply Finset.sum_congr rfl
+  intro d _
+  by_cases hk : K.accepts x y a b = true <;>
+    by_cases hh : H.accepts u z d c = true <;>
+    simp [linearCoefficient, product, FiniteDistribution.product, hk, hh, mul_assoc]
 
-/-- The kernel tensor realizes the ordinary independent conjunction game. -/
-theorem toGame_product (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (H : ProjectionKernel R₁ R₂ B₁ B₂) :
-    (K.product H).toGame = UniqueGamesTheorem.Repetition.product K.toGame H.toGame := by
-  have hquestions : (K.product H).toGame.questions =
-      (UniqueGamesTheorem.Repetition.product K.toGame H.toGame).questions := by
-    apply FiniteDistribution.eq_of_weight_eq
-    intro q
-    change (K.outer.weight q.2.1 * H.outer.weight q.2.2) *
-      ((K.inner q.2.1).weight q.1.1 * (H.inner q.2.2).weight q.1.2) =
-      (K.outer.weight q.2.1 * (K.inner q.2.1).weight q.1.1) *
-        (H.outer.weight q.2.2 * (H.inner q.2.2).weight q.1.2)
-    ring
-  exact congrArg
-    (fun questions : FiniteDistribution ((Q₁ × R₁) × (Q₂ × R₂)) =>
-      ({ questions := questions
-         accepts := fun x y a b =>
-           K.accepts x.1 y.1 a.1 b.1 && H.accepts x.2 y.2 a.2 b.2 } :
-        Game (Q₁ × R₁) (Q₂ × R₂) (A₁ × B₁) (A₂ × B₂))) hquestions
 
 end ProjectionKernel
 end
@@ -253,12 +129,6 @@ def repetition (K : ProjectionKernel Q₁ Q₂ A₁ A₂) (n : Nat) :
         funext i
         exact K.projection _ _ _ _ _ (hb i) (hb' i) }
 
-@[simp] theorem repetition_accepts_iff (K : ProjectionKernel Q₁ Q₂ A₁ A₂) (n : Nat)
-    (x : Fin n → Q₁) (y : Fin n → Q₂) (a : Fin n → A₁) (b : Fin n → A₂) :
-    (K.repetition n).accepts x y a b = true ↔
-      ∀ i, K.accepts (x i) (y i) (a i) (b i) = true := by
-  classical
-  simp [repetition]
 
 @[simp] theorem toGame_repetition (K : ProjectionKernel Q₁ Q₂ A₁ A₂) (n : Nat) :
     (K.repetition n).toGame = K.toGame.repetition n := by
@@ -427,53 +297,17 @@ theorem vectorEnergy_tensorSlice (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (H : ProjectionKernel R₁ R₂ B₁ B₂)
     (labels : (Q₁ × R₁) → (A₁ × B₁)) :
     K.vectorEnergy (H.tensorSlice labels) = (K.product H).assignmentEnergy labels := by
-  classical
-  let p := fun y z b c =>
-    K.apply (fun x a => H.apply (fun u d => assignment labels (x,u) (a,d)) z c) y b ^ 2
-  have hlhs : K.vectorEnergy (H.tensorSlice labels) =
-      ∑ z, ∑ c, ∑ y, ∑ b, K.outer.weight y * H.outer.weight z * p y z b c := by
-    simp only [vectorEnergy, energy, Fintype.sum_prod_type]
-    apply Finset.sum_congr rfl
-    intro z _
-    apply Finset.sum_congr rfl
-    intro c _
-    apply Finset.sum_congr rfl
-    intro y _
-    rw [Finset.mul_sum]
-    apply Finset.sum_congr rfl
-    intro b _
-    change K.outer.weight y *
-      (K.apply (fun x a => Real.sqrt (H.outer.weight z) *
-        H.apply (fun u d => assignment labels (x,u) (a,d)) z c) y b) ^ 2 = _
-    rw [apply_smul, mul_pow, Real.sq_sqrt (H.outer.nonnegative z)]
-    exact (mul_assoc _ _ _).symm
-  have hrhs : (K.product H).assignmentEnergy labels =
-      ∑ y, ∑ z, ∑ b, ∑ c, K.outer.weight y * H.outer.weight z * p y z b c := by
-    simp only [assignmentEnergy, energy, product, FiniteDistribution.product,
-      Fintype.sum_prod_type]
-    apply Finset.sum_congr rfl
-    intro y _
-    apply Finset.sum_congr rfl
-    intro z _
-    simp only [Finset.mul_sum]
-    apply Finset.sum_congr rfl
-    intro b _
-    apply Finset.sum_congr rfl
-    intro c _
-    congr 1
-    exact congrArg (fun r : ℝ => r ^ 2)
-      (apply_product K H (assignment labels) y z b c)
-  rw [hlhs, hrhs]
-  calc
-    (∑ z, ∑ c, ∑ y, ∑ b, K.outer.weight y * H.outer.weight z * p y z b c) =
-        ∑ z, ∑ y, ∑ b, ∑ c, K.outer.weight y * H.outer.weight z * p y z b c := by
-      apply Finset.sum_congr rfl
-      intro z _
-      rw [Finset.sum_comm]
-      apply Finset.sum_congr rfl
-      intro y _
-      rw [Finset.sum_comm]
-    _ = _ := by rw [Finset.sum_comm]
+  unfold vectorEnergy assignmentEnergy energy tensorSlice
+  simp only [Fintype.sum_prod_type, apply_smul, mul_pow,
+    Real.sq_sqrt (H.outer.nonnegative _), apply_product, Finset.mul_sum]
+  simp only [product, Foundations.Games.FiniteDistribution.product, mul_assoc]
+  conv_rhs => rw [Finset.sum_comm]
+  apply Finset.sum_congr rfl
+  intro z _
+  rw [Finset.sum_comm]
+  apply Finset.sum_congr rfl
+  intro y _
+  rw [Finset.sum_comm]
 
 end ProjectionKernel
 end
@@ -651,14 +485,6 @@ theorem projection_repetition_value
     (by simpa only [kernelOfGame_value] using hvalue) n
   simpa only [toGame_kernelOfGame, dsRate] using h
 
-theorem projection_repetition_success
-    (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G) (n : ℕ)
-    {gap : ℝ} (hgap₀ : 0 < gap) (hgap₁ : gap < 1)
-    (hvalue : G.value ≤ 1 - gap)
-    (strategy : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂)) :
-    (G.repetition n).success strategy ≤ (1 - gap ^ 2 / 16) ^ n :=
-  ((G.repetition n).success_le_value strategy).trans
-    (projection_repetition_value G hG n hgap₀ hgap₁ hvalue)
 
 theorem clean_repetition_value
     (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G) (n : ℕ)

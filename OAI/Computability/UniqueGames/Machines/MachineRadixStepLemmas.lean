@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fin.Embedding
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAddAt
@@ -163,23 +164,6 @@ theorem radixStepTrace (slots : Fin 6 ↪ K) (labels : Label → Λ) (exit : Opt
     Function.iterate_add_apply _ (2 * (digit + 2)), hmul, hcopy, hadd]
   exact hfinish
 
-def radixStepInTime (slots : Fin 6 ↪ K) (labels : Label → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (radix acc digit : ℕ)
-    (operandRadix : base (slots 0) = encodeWord radix)
-    (operandAcc : base (slots 1) = encodeWord acc)
-    (operandDigit : base (slots 2) = encodeWord digit)
-    (counterEmpty : base (slots 4) = []) (scratchEmpty : base (slots 5) = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels (.multiply .copyDrain)), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (radix * acc + digit)⟩)
-      (steps radix acc digit) where
-  steps := steps radix acc digit
-  evals_in_steps := radixStepTrace slots labels exit p atLabels base radix acc digit
-    operandRadix operandAcc operandDigit counterEmpty scratchEmpty ambient register
-  steps_le_m := Nat.le_refl _
 
 noncomputable def timePolynomial : Polynomial ℕ :=
   Polynomial.C 3 * Polynomial.X ^ 2 + Polynomial.C 11 * Polynomial.X + Polynomial.C 13
@@ -207,27 +191,6 @@ theorem programTrace (slots : Fin 6 ↪ K) (base : K → List Bool) (radix acc d
   radixStepTrace slots id none (program slots) (fun _ => rfl) base radix acc digit
     operandRadix operandAcc operandDigit counterEmpty scratchEmpty ambient register
 
-def programInPolynomialTime (slots : Fin 6 ↪ K) (base : K → List Bool) (radix acc digit : ℕ)
-    (operandRadix : base (slots 0) = encodeWord radix)
-    (operandAcc : base (slots 1) = encodeWord acc)
-    (operandDigit : base (slots 2) = encodeWord digit)
-    (counterEmpty : base (slots 4) = []) (scratchEmpty : base (slots 5) = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ) slots))
-      ⟨some (.multiply .copyDrain), ((ambient, ()), register), base⟩
-      (some ⟨none, ((ambient, ()), none), resultTapes slots base (radix * acc + digit)⟩)
-      (timePolynomial.eval
-        ((encodeWord radix).length + (encodeWord acc).length + (encodeWord digit).length)) where
-  steps := steps radix acc digit
-  evals_in_steps := programTrace slots base radix acc digit operandRadix operandAcc operandDigit
-    counterEmpty scratchEmpty ambient register
-  steps_le_m := by
-    have hlength : (encodeWord radix).length + (encodeWord acc).length + (encodeWord digit).length =
-        radix + acc + digit + 3 := by
-      simp only [encodeWord, List.length_append, List.length_replicate, List.length_singleton]
-      omega
-    rw [hlength]
-    exact steps_le_timePolynomial radix acc digit
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRadixStep
 
@@ -253,8 +216,6 @@ def parity : Nat → Bool
 
 def accumulator (flip : Bool) : Fin 6 := if flip then 2 else 1
 
-@[simp] theorem accumulator_ne (flip : Bool) : accumulator flip ≠ accumulator (!flip) := by
-  cases flip <;> decide
 
 def radixLayout (flip : Bool) (i : Fin width) : Fin 6 ↪ Layout width where
   toFun
@@ -685,64 +646,9 @@ theorem steps_le_timePolynomial (radix : Nat) (digits : Nat → Nat) (width magn
   unfold steps
   omega
 
-def hornerInTime (slots : Layout width ↪ K) (labels : Label width → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (radix : Nat) (digits : Nat → Nat)
-    (operandRadix : base (slots (.inl 0)) = encodeWord radix)
-    (operandDigits : ∀ i : Fin width, base (slots (.inr i)) = encodeWord (digits i.val))
-    (clean : Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .start), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (value radix digits width)⟩)
-      (steps radix digits width) where
-  steps := steps radix digits width
-  evals_in_steps := hornerTrace slots labels exit p atLabels base radix digits
-    operandRadix operandDigits clean ambient register
-  steps_le_m := Nat.le_refl _
-
-def hornerInPolynomialTime (slots : Layout width ↪ K) (labels : Label width → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (radix : Nat) (digits : Nat → Nat)
-    (operandRadix : base (slots (.inl 0)) = encodeWord radix)
-    (operandDigits : ∀ i : Fin width, base (slots (.inr i)) = encodeWord (digits i.val))
-    (clean : Clean slots base) (ambient : σ) (register : Option Bool) (magnitude : Nat)
-    (radixBound : radix ≤ magnitude)
-    (digitBound : ∀ i, i < width → digits i ≤ magnitude) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .start), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (value radix digits width)⟩)
-      ((timePolynomial width).eval magnitude) where
-  steps := steps radix digits width
-  evals_in_steps := hornerTrace slots labels exit p atLabels base radix digits
-    operandRadix operandDigits clean ambient register
-  steps_le_m := steps_le_timePolynomial radix digits width magnitude radixBound digitBound
 
 open scoped BigOperators
 
-/-- The actual total bit length of the isolated radix and digit fields. -/
-def operandLength (radix : Nat) (digits : Nat → Nat) (width : Nat) : Nat :=
-  (encodeWord radix).length + ∑ i ∈ Finset.range width, (encodeWord (digits i)).length
-
-omit [DecidableEq K] in
-theorem radix_le_operandLength (radix : Nat) (digits : Nat → Nat) (width : Nat) :
-    radix ≤ operandLength radix digits width := by
-  unfold operandLength
-  simp only [encodeWord, List.length_append, List.length_replicate, List.length_singleton]
-  omega
-
-omit [DecidableEq K] in
-theorem digit_le_operandLength (radix : Nat) (digits : Nat → Nat) (width i : Nat)
-    (hi : i < width) : digits i ≤ operandLength radix digits width := by
-  have h : (encodeWord (digits i)).length ≤
-      ∑ j ∈ Finset.range width, (encodeWord (digits j)).length :=
-    Finset.single_le_sum (fun j _ => Nat.zero_le ((encodeWord (digits j)).length))
-      (Finset.mem_range.mpr hi)
-  have hlen : digits i + 1 ≤ ∑ j ∈ Finset.range width, (encodeWord (digits j)).length := by
-    simpa only [encodeWord, List.length_append, List.length_replicate, List.length_singleton] using h
-  unfold operandLength
-  omega
 
 @[simp] theorem resultTapes_output (slots : Layout width ↪ K) (base : K → List Bool) (acc : Nat) :
     resultTapes slots base acc (slots (.inl 3)) = encodeWord acc ++ base (slots (.inl 3)) := by
@@ -752,23 +658,6 @@ theorem resultTapes_other (slots : Layout width ↪ K) (base : K → List Bool) 
     (k : K) (hk : k ≠ slots (.inl 3)) : resultTapes slots base acc k = base k := by
   simp [resultTapes, hk]
 
-/-- Actual subroutine time bounded in the concrete lengths of its operand
-fields. The destination suffix and unrelated tapes are preserved without scans. -/
-def hornerInEncodedPolynomialTime (slots : Layout width ↪ K) (labels : Label width → Λ)
-    (exit : Option Λ) (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (radix : Nat) (digits : Nat → Nat)
-    (operandRadix : base (slots (.inl 0)) = encodeWord radix)
-    (operandDigits : ∀ i : Fin width, base (slots (.inr i)) = encodeWord (digits i.val))
-    (clean : Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .start), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (value radix digits width)⟩)
-      ((timePolynomial width).eval (operandLength radix digits width)) :=
-  hornerInPolynomialTime slots labels exit p atLabels base radix digits operandRadix operandDigits
-    clean ambient register (operandLength radix digits width)
-    (radix_le_operandLength radix digits width)
-    (fun i hi => digit_le_operandLength radix digits width i hi)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineHorner
 

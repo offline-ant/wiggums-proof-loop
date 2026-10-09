@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.SourceContextClear
 import OAI.Computability.UniqueGames.PCP.SourceDescriptorEmissionLemmas
 import OAI.Computability.UniqueGames.PCP.SourceHeaderAccumulate
@@ -84,7 +85,6 @@ theorem sourceLoopInTime (F : Formula) (u D : Nat) (c : ClauseContext F u)
   exact h
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceQueryOrder
-
 
 
 namespace UniqueGamesTheorem.Foundations.Hastad.SourceRuntimeModel
@@ -192,15 +192,11 @@ def queryLayout : SourceTestAppend.Layout (Arena u Extra) where
   temporaryAccumulator := by simp [workTape]
   scratchAccumulator := by simp [workTape]
 
-/-- Retained global headers are excluded from cleanup. -/
-def perSlotCleanup : List (Arena u Extra) := [workTape .rank, workTape .leftBase]
-def finalBaseCleanup : List (Arena u Extra) := [workTape .rank, workTape .rightBase, workTape .zero]
 
 @[simp] theorem initializer_arena :
     SourceLoopInit.Tape u (BodyWork Extra) = Arena u Extra := rfl
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceRuntimeModel
-
 
 
 namespace UniqueGamesTheorem.Foundations.Hastad.SourceGeneratorModel
@@ -271,68 +267,13 @@ def initialState (u D : Nat) (hD : 0 < D) : State u D :=
 def initialAmbient (u D : Nat) (hD : 0 < D) : ControlAmbient u D :=
   ((controlStateEquiv u D).symm (initialState u D hD)).1
 
-theorem control_initial (u D : Nat) (hD : 0 < D) :
-    controlStateEquiv u D (initialAmbient u D hD, none) = initialState u D hD := rfl
 
-noncomputable def coefficientKeys (u D : Nat) : List (SourceHeaderCounts.Coefficients u D) :=
-  (List.finRange (CookLevin.PolynomialMachine.width
-    (SourceHeaderCounts.polynomial u D .left))).map Sum.inl ++
-  (List.finRange (CookLevin.PolynomialMachine.width
-    (SourceHeaderCounts.polynomial u D .right))).map (fun i => Sum.inr (Sum.inl i)) ++
-  (List.finRange (CookLevin.PolynomialMachine.width
-    (SourceHeaderCounts.polynomial u D .occurrences))).map (fun i => Sum.inr (Sum.inr i))
-
-theorem mem_coefficientKeys (u D : Nat) (i : SourceHeaderCounts.Coefficients u D) :
-    i ∈ coefficientKeys u D := by
-  cases i with
-  | inl i => simp [coefficientKeys]
-  | inr i => cases i <;> simp [coefficientKeys]
-
-noncomputable def workKeys (u D : Nat) : List (BodyWork (Extra u D)) :=
-  [.leftBlock, .dummy, .bitCount, .occurrenceCount, .zero, .rank, .rightBase, .leftBase,
-    .accA, .accB, .counter, .arithScratch, .coefficient, .queryTemporary,
-    .queryScratch, .accumulator] ++
-  (coefficientKeys u D).map (fun i => .extra (.inl i)) ++ [.extra (.inr ())]
-
-theorem mem_workKeys (u D : Nat) (i : BodyWork (Extra u D)) : i ∈ workKeys u D := by
-  cases i
-  case extra e =>
-    cases e with
-    | inl i =>
-      exact List.mem_append_left _ (List.mem_append_right _
-        (List.mem_map.mpr ⟨i, mem_coefficientKeys u D i, rfl⟩))
-    | inr i => cases i; simp [workKeys]
-  all_goals simp [workKeys]
-
-/-- An explicit tape enumeration, fixed before the input is supplied. It uses
-constructor lists and increasing finite coefficient indices. -/
-noncomputable def allTapes (u D : Nat) : List (Tape u D) :=
-  [.formula, .index, .work, .scratch, .copyScratch] ++
-  (List.finRange u).map SourceContextLoad.Tape.current ++
-  (List.finRange u).map SourceContextLoad.Tape.remaining ++
-  (List.finRange u).flatMap (fun i =>
-    (List.finRange 6).map (SourceContextLoad.Tape.field i)) ++
-  [variableHeader, clauseHeader] ++ (workKeys u D).map workTape
+/-- The finite tape type already supplies an input-independent enumeration.
+Cleanup only requires coverage, not a particular order. -/
+noncomputable def allTapes (u D : Nat) : List (Tape u D) := Finset.univ.toList
 
 theorem mem_allTapes (u D : Nat) (k : Tape u D) : k ∈ allTapes u D := by
-  cases k with
-  | formula => simp [allTapes]
-  | index => simp [allTapes]
-  | work => simp [allTapes]
-  | scratch => simp [allTapes]
-  | copyScratch => simp [allTapes]
-  | current i => simp [allTapes]
-  | remaining i => simp [allTapes]
-  | field i j => simp [allTapes]
-  | extra e =>
-    cases e with
-    | inl h => cases h <;> simp [allTapes, variableHeader, clauseHeader,
-        SourceLoopInit.variableHeader, SourceLoopInit.clauseHeader]
-    | inr w =>
-      have h : workTape (u := u) w ∈ (workKeys u D).map (workTape (u := u)) :=
-        List.mem_map.mpr ⟨w, mem_workKeys u D w, rfl⟩
-      simp only [allTapes, List.mem_append]
-      tauto
+  simp [allTapes]
 
 noncomputable def clearKeys (u D : Nat) : List (Tape u D) := by
   classical
@@ -348,7 +289,6 @@ theorem accumulator_ne_output (u D : Nat) : accumulatorTape u D ≠ outputTape u
   simp [accumulatorTape, outputTape, workTape]
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceGeneratorModel
-
 
 
 namespace UniqueGamesTheorem.Foundations.Hastad.SourceStartup
@@ -697,7 +637,6 @@ end
 end UniqueGamesTheorem.Foundations.Hastad.SourceStartup
 
 
-
 namespace UniqueGamesTheorem.Foundations.Hastad.SourceTupleTape
 
 open Turing Complexity SourceContexts SourceRuntimeModel
@@ -917,13 +856,6 @@ theorem empty_tapes (base : Arena u Extra → List Bool)
     tapes base {} = base := by
   simpa using final_tapes base [] hrank hright hleft hzero
 
-omit [DecidableEq Extra] in
-theorem clear_loaded (F : Target.Formula) (c : ClauseContext F u)
-    (base : Arena u Extra → List Bool) (s : Snapshot)
-    (hfields : ∀ j k, base (.field j k) = []) (hindex : base .index = []) (hwork : base .work = []) :
-    SourceContextClear.outputTapes (tapes (SourceContextLoad.stageTapes F c base u) s) = tapes base s := by
-  rw [tapes_stageTapes]
-  exact SourceContextClear.output_loaded_eq_base F c (tapes base s) hfields hindex hwork
 
 /-- Apply the checked actual field cleanup directly to an overlaid loaded context. -/
 def clearLoadedSnapshotInTime (F : Target.Formula) (c : ClauseContext F u)

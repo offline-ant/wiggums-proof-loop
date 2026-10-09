@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineCompare
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
@@ -22,19 +23,11 @@ inductive Tape
   | compareLeft | compareRight | reversed | output
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.original, .cursor, .scan, .vertices, .darts,
-  .counter, .edge, .tail, .reverseIndex, .head, .scratch, .indexScan, .compareLeft, .compareRight,
-  .reversed, .output]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.original, .cursor, .scan, .vertices, .darts,
+  .counter, .edge, .tail, .reverseIndex, .head, .scratch, .indexScan, .compareLeft, .compareRight,
+  .reversed, .output}
+  complete x := by cases x <;> simp
 
 abbrev Alphabet (_ : Tape) := Bool
 

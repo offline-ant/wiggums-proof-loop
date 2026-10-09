@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Reduction.ActualGame
 
 namespace OAI
@@ -174,9 +175,6 @@ noncomputable def semanticToExplicitVertices (S : Source) (k s d : Nat) :
       explicitVertexEncoding S k s d v := by
   simp [semanticToExplicitVertices]
 
-theorem explicitVertexCount_eq (S : Source) (k s d : Nat) :
-    explicitVertexCount S k s d = vertexCount S k s d := by
-  simpa using (Fintype.card_congr (semanticToExplicitVertices S k s d)).symm
 
 def explicitEdge (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d)
     (ω : Outcome S k g) : Constraint (explicitVertexCount S k s d) (2^s) where
@@ -206,12 +204,6 @@ def outputInstanceWithEnumeration (S : Source) (k : Nat) {s d : Nat}
     rw [h] at hm
     exact List.not_mem_nil hm
 
-@[simp] theorem outputInstanceWithEnumeration_length (S : Source) (k : Nat)
-    {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    (outputInstanceWithEnumeration S k g en).constraints.length =
-      Explicit.edgeCount S.occurrences k (s+d) en.indices.length := by
-  simp only [outputInstanceWithEnumeration, List.length_map,
-    ActualGame.explicitOutcomes, ActualEnumeration.length_indexedOutcomes]
 
 theorem explicitConstraints_perm_renamed (S : Source) (k : Nat) {s d : Nat}
     (g : SplitGadget s d) (en : NoiseEnumeration g) :
@@ -222,21 +214,6 @@ theorem explicitConstraints_perm_renamed (S : Source) (k : Nat) {s d : Nat}
     Function.comp_def, ← explicitEdge_eq_rename, outcomes] using
     (ActualGame.explicitOutcomes_perm_outcomes S k g en).map (explicitEdge S k g)
 
-theorem completeAt_outputInstanceWithEnumeration_iff (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    CompleteAt error (outputInstanceWithEnumeration S k g en) ↔
-      CompleteAt error (outputInstance S k g) :=
-  Integration.InstanceEquivalences.completeAt_iff_of_rename_perm error
-    (outputInstance S k g) (outputInstanceWithEnumeration S k g en)
-    (semanticToExplicitVertices S k s d) (explicitConstraints_perm_renamed S k g en)
-
-theorem soundAt_outputInstanceWithEnumeration_iff (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    SoundAt error (outputInstanceWithEnumeration S k g en) ↔
-      SoundAt error (outputInstance S k g) :=
-  Integration.InstanceEquivalences.soundAt_iff_of_rename_perm error
-    (outputInstance S k g) (outputInstanceWithEnumeration S k g en)
-    (semanticToExplicitVertices S k s d) (explicitConstraints_perm_renamed S k g en)
 
 end UniqueGamesTheorem.Decoder.TableKeysGame
 

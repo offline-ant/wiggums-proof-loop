@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Analysis.SpecialFunctions.Pow.Real
 import Mathlib.Basic.Real.Basic
@@ -41,32 +42,13 @@ theorem recover_weakA {A : Submodule F2 E} {B : Submodule F2 F}
     (p : A4IndexCount.Index A B) : weakA p.val = A := by
   rcases p with ⟨⟨A0, B0, X⟩, hA, hB, hK, hR⟩
   change X.range.comap A0.mkQ = A
-  rw [hR]
-  ext a
-  change A0.mkQ a ∈ A.map A0.mkQ ↔ a ∈ A
-  constructor
-  · intro ha
-    rcases Submodule.mem_map.mp ha with ⟨v, hv, he⟩
-    have hm : a - v ∈ A0 := by
-      apply (Submodule.Quotient.mk_eq_zero A0).mp
-      change A0.mkQ (a - v) = 0
-      rw [map_sub, he, sub_self]
-    simpa only [sub_add_cancel] using A.add_mem (hA hm) hv
-  · intro ha
-    exact Submodule.mem_map.mpr ⟨a, ha, rfl⟩
+  rw [hR, Submodule.comap_map_mkQ, sup_of_le_right hA]
 
 theorem recover_weakB {A : Submodule F2 E} {B : Submodule F2 F}
     (p : A4IndexCount.Index A B) : weakB p.val = B := by
   rcases p with ⟨⟨A0, B0, X⟩, hA, hB, hK, hR⟩
   change X.ker.map B0.subtype = B
-  rw [hK]
-  ext b
-  constructor
-  · intro hb
-    rcases Submodule.mem_map.mp hb with ⟨v, hv, rfl⟩
-    exact hv
-  · intro hb
-    exact Submodule.mem_map.mpr ⟨⟨b, hB hb⟩, hb, rfl⟩
+  rw [hK, Submodule.map_comap_subtype, inf_of_le_right hB]
 
 theorem canonicalValid (q : Triple (E := E) (F := F)) :
     A4IndexCount.Valid (weakA q) (weakB q) q := by
@@ -74,32 +56,9 @@ theorem canonicalValid (q : Triple (E := E) (F := F)) :
   change A0 ≤ X.range.comap A0.mkQ ∧ X.ker.map B0.subtype ≤ B0 ∧
     X.ker = (X.ker.map B0.subtype).comap B0.subtype ∧
     X.range = (X.range.comap A0.mkQ).map A0.mkQ
-  refine ⟨?_, ?_, ?_, ?_⟩
-  · intro a ha
-    change A0.mkQ a ∈ X.range
-    have hz : A0.mkQ a = 0 := (Submodule.Quotient.mk_eq_zero A0).mpr ha
-    rw [hz]
-    exact X.range.zero_mem
-  · intro b hb
-    rcases Submodule.mem_map.mp hb with ⟨v, hv, rfl⟩
-    exact v.property
-  · ext b
-    constructor
-    · intro hb
-      exact Submodule.mem_map.mpr ⟨b, hb, rfl⟩
-    · intro hb
-      change (b : F) ∈ X.ker.map B0.subtype at hb
-      rcases Submodule.mem_map.mp hb with ⟨v, hv, he⟩
-      have h : v = b := Subtype.ext he
-      simpa only [h] using hv
-  · ext z
-    constructor
-    · intro hz
-      obtain ⟨v, rfl⟩ := A0.mkQ_surjective z
-      exact Submodule.mem_map.mpr ⟨v, hz, rfl⟩
-    · intro hz
-      rcases Submodule.mem_map.mp hz with ⟨v, hv, rfl⟩
-      exact hv
+  exact ⟨A0.le_comap_mkQ _, B0.map_subtype_le _,
+    (Submodule.comap_map_eq_of_injective B0.subtype_injective _).symm,
+    (Submodule.map_comap_eq_of_surjective A0.mkQ_surjective _).symm⟩
 
 variable [FiniteDimensional F2 E] [FiniteDimensional F2 F]
 
@@ -112,13 +71,8 @@ theorem dim_weakA {A : Submodule F2 E} {B : Submodule F2 F}
   let Q := A4IndexCount.quotientRestriction A0 A
   have hQR : Q.range = X.range := by
     rw [hR]
-    ext z
-    constructor
-    · rintro ⟨a, rfl⟩
-      exact Submodule.mem_map.mpr ⟨a.val, a.property, rfl⟩
-    · intro hz
-      rcases Submodule.mem_map.mp hz with ⟨a, ha, he⟩
-      exact ⟨⟨a, ha⟩, he⟩
+    exact LinearMap.range_comp _ _ |>.trans (congrArg (Submodule.map A0.mkQ)
+      (Submodule.range_subtype A))
   have hQK : finrank F2 Q.ker = finrank F2 A0 := by
     rw [A4IndexCount.ker_quotientRestriction]
     exact (SubmoduleInterval.lowerIntervalSpaceEquiv A ⟨A0, hA⟩).finrank_eq.symm
@@ -336,11 +290,6 @@ theorem boolean_squared_norm_eq_density {f : α → ℝ} (hf : IsBoolean f) :
     (𝔼 x, f x ^ 2) = 𝔼 x, f x :=
   boolean_positive_moment hf 2 (by decide)
 
-theorem boolean_four_thirds_moment {f : α → ℝ} (hf : IsBoolean f) :
-    (𝔼 x, |f x| ^ ((4 : ℝ) / 3)) = 𝔼 x, f x := by
-  apply Finset.expect_congr rfl
-  intro x _
-  rcases hf x with h | h <;> norm_num [h]
 
 theorem boolean_holder_fourth {f : α → ℝ} (hf : IsBoolean f) (h : α → ℝ) :
     (𝔼 x, h x * f x) ^ 4 ≤ (𝔼 x, h x ^ 4) * (𝔼 x, f x) ^ 3 := by

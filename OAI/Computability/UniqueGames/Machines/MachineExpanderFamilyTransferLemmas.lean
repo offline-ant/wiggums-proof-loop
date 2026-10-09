@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamilyTapes
 import OAI.Computability.UniqueGames.Machines.MachineExpanderTableProgramLemmas
 
@@ -21,38 +22,6 @@ section Composition
 
 open MachineComposition
 
-theorem controlStatementInverse {K Λ σ τ : Type} {Γ : K → Type}
-    (states : σ ≃ τ) (q : TM2.Stmt Γ Λ σ) :
-    MachineControl.statement id states.symm (MachineControl.statement id states q) = q := by
-  induction q <;>
-    simp_all only [MachineControl.statement, Equiv.apply_symm_apply,
-      Equiv.symm_apply_apply, id_eq]
-
-/-- Static state-coordinate transport preserves every actual transition. -/
-theorem controlTrace {K Λ σ τ : Type} {Γ : K → Type} [DecidableEq K]
-    (states : σ ≃ τ) (target : Λ → TM2.Stmt Γ Λ τ)
-    (n : Nat) (start finish : TM2.Cfg Γ Λ σ)
-    (run : (advance (TM2.step (MachineControl.program (Equiv.refl Λ) states.symm target)))^[n]
-      (some start) = some finish) :
-    (advance (TM2.step target))^[n]
-      (some (MachineControl.configuration id states start)) =
-      some (MachineControl.configuration id states finish) := by
-  let source := MachineControl.program (Equiv.refl Λ) states.symm target
-  have roundtrip : MachineControl.program (Equiv.refl Λ) states source = target := by
-    funext label
-    change MachineControl.statement id states
-      (MachineControl.statement id states.symm (target label)) = target label
-    exact controlStatementInverse states.symm _
-  have simulation : ∀ a b, TM2.step source a = some b →
-      TM2.step target (MachineControl.configuration id states a) =
-        some (MachineControl.configuration id states b) := by
-    intro a b hab
-    have h := MachineControl.step_simulation (Equiv.refl Λ) states source a
-    rw [roundtrip, hab] at h
-    exact h
-  exact liftSuccessfulTrace (TM2.step source) (TM2.step target)
-    (MachineControl.configuration id states) simulation n start finish run
-
 theorem controlDrainTrace {K Λ σ τ : Type} [DecidableEq K]
     (states : (σ × Option Bool) ≃ τ) (source : K) (again : Λ) (exit : Option Λ)
     (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ τ)
@@ -66,34 +35,11 @@ theorem controlDrainTrace {K Λ σ τ : Type} [DecidableEq K]
   have atRaw : raw again = MachineDrain.drain source again exit := by
     change MachineControl.statement id states.symm (target again) = _
     rw [code]
-    exact controlStatementInverse states _
+    exact MachineControl.statement_symm_roundtrip states _
   have run := MachineDrain.drainTrace source again exit raw atRaw base (base source) ambient register
   simp only [Function.update_eq_self] at run
   simpa only [MachineControl.configuration, Option.map_some, id_eq, Option.map_id] using
-    controlTrace states target ((base source).length + 1) _ _ run
-
-theorem controlTransferTrace {K Λ σ τ : Type} [DecidableEq K]
-    (states : (σ × Option Bool) ≃ τ) (source destination : K)
-    (distinct : source ≠ destination) (again : Λ) (exit : Option Λ)
-    (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ τ)
-    (code : target again = MachineControl.statement id states
-      (Reduction.MachineTransfer.loopAt source destination id false again exit))
-    (base : K → List Bool) (ambient : σ) (register : Option Bool) :
-    (advance (TM2.step target))^[(base source).length + 1]
-      (some ⟨some again, states (ambient, register), base⟩) =
-      some ⟨exit, states (ambient, none),
-        Reduction.MachineTransfer.tapesAt source destination base []
-          ((base source).reverse ++ base destination)⟩ := by
-  let raw := MachineControl.program (Equiv.refl Λ) states.symm target
-  have atRaw : raw again = Reduction.MachineTransfer.loopAt source destination id false again exit := by
-    change MachineControl.statement id states.symm (target again) = _
-    rw [code]
-    exact controlStatementInverse states _
-  have run := Reduction.MachineTransfer.transferAt_fromTapes source destination distinct id false
-    again exit raw atRaw base ambient register
-  unfold Reduction.MachineTransfer.nextAt at run
-  simpa only [MachineControl.configuration, Option.map_some, id_eq, Option.map_id,
-    List.map_id] using controlTrace states target ((base source).length + 1) _ _ run
+    MachineControl.pulledTrace states target ((base source).length + 1) _ _ run
 
 section TransferVariables
 
@@ -167,10 +113,10 @@ theorem transferBoolTrace (positive : 0 < d) (H : Table (cloudSize d) d)
         (Reduction.MachineTransfer.loopAt source destination id false
           (.inr again) (some (.inr next))) := by
     rw [boolView_outer, code]
-  have h := controlTransferTrace (registerStates ρ d) source destination distinct
+  have h := MachineControl.transferTrace source destination (registerStates ρ d) distinct id false
     (.inr again) (some (.inr next)) (boolView positive H growth) atLoop base
     ((registerStates ρ d).symm state).1 ((registerStates ρ d).symm state).2
-  simpa only [Prod.mk.eta, Equiv.apply_symm_apply, registerStates_reset] using h
+  simpa only [Prod.mk.eta, Equiv.apply_symm_apply, registerStates_reset, List.map_id] using h
 
 /-- Only these four tape words change during installation. -/
 def installedTapes (base : Tape → List Bool) (newWord : List Bool) : Tape → List Bool :=
@@ -334,27 +280,6 @@ def affineResultTapes (d : Nat) (phase : AffinePhase)
     (boolWord (affineDestination phase)
       (encodeWord (affineCoefficient d phase * n) ++ toBoolTapes base (affineDestination phase)))
 
-theorem affineResultTapes_other (d : Nat) (phase : AffinePhase)
-    (base : (tape : Tape) → List (Alphabet tape)) (n : Nat) (tape : Tape)
-    (different : tape ≠ affineDestination phase) :
-    affineResultTapes d phase base n tape = base tape := by
-  simp [affineResultTapes, different]
-
-theorem affineResultTapes_source (d : Nat) (phase : AffinePhase)
-    (base : (tape : Tape) → List (Alphabet tape)) (n : Nat) :
-    affineResultTapes d phase base n (affineSource phase) = base (affineSource phase) :=
-  affineResultTapes_other d phase base n _ (affine_source_ne_destination phase)
-
-theorem affineResultTapes_scratch (d : Nat) (phase : AffinePhase)
-    (base : (tape : Tape) → List (Alphabet tape)) (n : Nat) :
-    affineResultTapes d phase base n (.inr .unaryScratch) = base (.inr .unaryScratch) :=
-  affineResultTapes_other d phase base n _ (affine_scratch_ne_destination phase)
-
-theorem affineResultTapes_destination (d : Nat) (phase : AffinePhase)
-    (base : (tape : Tape) → List (Alphabet tape)) (n : Nat) :
-    toBoolTapes (affineResultTapes d phase base n) (affineDestination phase) =
-      encodeWord (affineCoefficient d phase * n) ++ toBoolTapes base (affineDestination phase) := by
-  simp [affineResultTapes, toBoolTapes]
 
 variable {ρ : Type} [Fintype ρ] {d : Nat}
 
@@ -378,7 +303,7 @@ theorem affinePhaseBoolTrace (positive : 0 < d) (H : Table (cloudSize d) d)
     change MachineControl.statement id states.symm
       (boolView positive H growth (.inr (.affine phase .seed))) = _
     rw [boolView_outer]
-    exact controlStatementInverse states _
+    exact MachineControl.statement_symm_roundtrip states _
   have atScan : sourceProgram (.inr (.affine phase .scan)) =
       MachineUnaryAffineAt.scan (affineSource phase) (.inr .unaryScratch)
         (affineDestination phase) (affineCoefficient d phase)
@@ -386,14 +311,14 @@ theorem affinePhaseBoolTrace (positive : 0 < d) (H : Table (cloudSize d) d)
     change MachineControl.statement id states.symm
       (boolView positive H growth (.inr (.affine phase .scan))) = _
     rw [boolView_outer]
-    exact controlStatementInverse states _
+    exact MachineControl.statement_symm_roundtrip states _
   have atRestore : sourceProgram (.inr (.affine phase .restore)) =
       Reduction.MachineTransfer.loopAt (.inr .unaryScratch) (affineSource phase) id false
         (.inr (.affine phase .restore)) (some (affineExit d phase)) := by
     change MachineControl.statement id states.symm
       (boolView positive H growth (.inr (.affine phase .restore))) = _
     rw [boolView_outer]
-    exact controlStatementInverse states _
+    exact MachineControl.statement_symm_roundtrip states _
   have raw := MachineUnaryAffineAt.seededAffineTrace
     (affineSource phase) (.inr .unaryScratch) (affineDestination phase)
     (affine_source_ne_scratch phase) (affine_source_ne_destination phase)
@@ -401,7 +326,7 @@ theorem affinePhaseBoolTrace (positive : 0 < d) (H : Table (cloudSize d) d)
     (.inr (.affine phase .seed)) (.inr (.affine phase .scan)) (.inr (.affine phase .restore))
     (some (affineExit d phase)) sourceProgram atSeed atScan atRestore base n suffix
     sourceWord scratchEmpty (states.symm state).1 (states.symm state).2
-  have run := controlTrace states target (2 * (n + 1) + 1) _ _ raw
+  have run := MachineControl.pulledTrace states target (2 * (n + 1) + 1) _ _ raw
   simpa only [states, target, MachineControl.configuration, Option.map_some, id_eq, Prod.mk.eta,
     Equiv.apply_symm_apply, Nat.add_zero, registerStates_reset] using run
 
@@ -867,31 +792,6 @@ theorem afterRow_last_boundaryStep (positive : 0 < d) (H : Table (cloudSize d) d
       (some ⟨some (.inr .vertexGuard), resetPositionState positive state, tapes⟩ :
         Option (TM2.Cfg Alphabet (Label d) (State ρ d))))
     (boundaryTapes_increment_vertex vertex remaining oldTable output countSuffix result))
-
-/-- One reversal step moves an actual symbol and preserves the finite position. -/
-theorem reverseOutput_consStep (positive : 0 < d) (H : Table (cloudSize d) d)
-    (base : ∀ tape, List (Alphabet tape)) (state : State ρ d)
-    (symbol : Bool) (word : List Bool) (source : base (.inl .output) = symbol :: word) :
-    TM2.step (program positive H) ⟨some (.inr .reverseOutput), state, base⟩ =
-      some ⟨some (.inr .reverseOutput), ((state.1.1, some symbol), state.2),
-        Function.update (Function.update base (.inl .output) word)
-          (.inr .result) (symbol :: base (.inr .result))⟩ := by
-  change some (TM2.stepAux (program positive H (.inr .reverseOutput)) state base) = _
-  rw [program_outer]
-  simp [outerStatement, MachineControl.statement, Reduction.MachineTransfer.loopAt,
-    Reduction.MachineTransfer.exitAt, TM2.stepAux, guardStates, source]
-
-theorem reverseOutput_nilStep (positive : 0 < d) (H : Table (cloudSize d) d)
-    (base : ∀ tape, List (Alphabet tape)) (state : State ρ d)
-    (source : base (.inl .output) = []) :
-    TM2.step (program positive H) ⟨some (.inr .reverseOutput), state, base⟩ =
-      some ⟨some (.inr .done), clearRegister state, base⟩ := by
-  have same : Function.update base (.inl .output) [] = base := by
-    simpa only [source] using Function.update_eq_self (.inl .output) base
-  change some (TM2.stepAux (program positive H (.inr .reverseOutput)) state base) = _
-  rw [program_outer]
-  simp [outerStatement, MachineControl.statement, Reduction.MachineTransfer.loopAt,
-    Reduction.MachineTransfer.exitAt, TM2.stepAux, guardStates, clearRegister, source, same]
 
 theorem doneStep (positive : 0 < d) (H : Table (cloudSize d) d)
     (base : ∀ tape, List (Alphabet tape)) (state : State ρ d) :

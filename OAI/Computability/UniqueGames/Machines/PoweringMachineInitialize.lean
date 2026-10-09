@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMachineRelationLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMasterState
@@ -46,10 +48,6 @@ theorem commonPlacement_injective (max : Nat) : Function.Injective (commonPlacem
       .inr (.inl (PoweringMachineTapes.scratch max)) := by
   simp [commonPlacement, PoweringMachineTapes.scratch, PoweringMachineTapes.start]
 
-@[simp] theorem commonPlacement_rowOutput (max : Nat) :
-    commonPlacement max (PoweringMachineTapes.rowOutput max) =
-      .inr (.inl (PoweringMachineTapes.rowOutput max)) := by
-  simp [commonPlacement, PoweringMachineTapes.rowOutput, PoweringMachineTapes.start]
 
 theorem commonPlacement_ne_finalOutput (max : Nat) (tape : PoweringMachineTapes.Tape max) :
     commonPlacement max tape ≠ finalOutput max := by
@@ -62,149 +60,41 @@ theorem commonPlacement_ne_header (max : Nat) (tape : PoweringMachineTapes.Tape 
   by_cases h : tape = PoweringMachineTapes.start max <;>
     simp [commonPlacement, h, Ne.symm hne]
 
-/-- Header writers use the common work tapes but emit on the final output.
-The relation producer continues to use `commonPlacement rowOutput`. -/
-def headerPlacement (max : Nat) (tape : PoweringMachineTapes.Tape max) : GlobalTape max :=
-  if tape = PoweringMachineTapes.rowOutput max then finalOutput max
-  else commonPlacement max tape
-
-theorem headerPlacement_injective (max : Nat) : Function.Injective (headerPlacement max) := by
-  intro a b h
-  by_cases ha : a = PoweringMachineTapes.rowOutput max
-  · subst a
-    by_cases hb : b = PoweringMachineTapes.rowOutput max
-    · exact hb.symm
-    · simp only [headerPlacement, ite_eq_right hb] at h
-      exact False.elim (commonPlacement_ne_finalOutput max b h.symm)
-  · by_cases hb : b = PoweringMachineTapes.rowOutput max
-    · subst b
-      simp only [headerPlacement, ite_eq_right ha] at h
-      exact False.elim (commonPlacement_ne_finalOutput max a h)
-    · simp only [headerPlacement, ite_eq_right ha, ite_eq_right hb] at h
-      exact commonPlacement_injective max h
-
-@[simp] theorem headerPlacement_rowOutput (max : Nat) :
-    headerPlacement max (PoweringMachineTapes.rowOutput max) = finalOutput max := by
-  simp [headerPlacement]
-
-theorem headerPlacement_eq_common (max : Nat) (tape : PoweringMachineTapes.Tape max)
-    (hne : tape ≠ PoweringMachineTapes.rowOutput max) :
-    headerPlacement max tape = commonPlacement max tape := by simp [headerPlacement, hne]
-
-theorem headerPlacement_ne_data (max : Nat) (tape : PoweringMachineTapes.Tape max) :
-    headerPlacement max tape ≠ commonPlacement max (PoweringMachineTapes.rowOutput max) := by
-  by_cases h : tape = PoweringMachineTapes.rowOutput max
-  · simp only [headerPlacement, ite_eq_left h]
-    exact Ne.symm (commonPlacement_ne_finalOutput max _)
-  · rw [headerPlacement_eq_common max tape h]
-    exact fun heq => h (commonPlacement_injective max heq)
-
-theorem headerPlacement_ne_header (max : Nat) (tape : PoweringMachineTapes.Tape max)
-    (field : HeaderTape) (hne : field ≠ .counter) :
-    headerPlacement max tape ≠ .inl field := by
-  by_cases h : tape = PoweringMachineTapes.rowOutput max
-  · simp [headerPlacement, h, finalOutput]
-  · rw [headerPlacement_eq_common max tape h]
-    exact commonPlacement_ne_header max tape field hne
-
-/- Alphabet equality transport makes the existing dependent disjoint-tape
-embedding usable with the homogeneous Boolean primitives. These are equality
-transports, not a second implementation of the header machine. -/
-
-private def castTapes {K : Type} {Γ Δ : K → Type} (h : Γ = Δ)
-    (tapes : ∀ k, List (Γ k)) : ∀ k, List (Δ k) := h ▸ tapes
-
-private def castStatement {K Λ σ : Type} {Γ Δ : K → Type} (h : Γ = Δ)
-    (q : TM2.Stmt Γ Λ σ) : TM2.Stmt Δ Λ σ := h ▸ q
-
-private def castConfiguration {K Λ σ : Type} {Γ Δ : K → Type} (h : Γ = Δ)
-    (c : TM2.Cfg Γ Λ σ) : TM2.Cfg Δ Λ σ := h ▸ c
-
-private theorem castTapes_apply {K : Type} {Γ Δ : K → Type} (h : Γ = Δ)
-    (tapes : ∀ k, List (Γ k)) (k : K) :
-    castTapes h tapes k = cast (congrArg (fun alphabet => List (alphabet k)) h) (tapes k) := by
-  cases h
-  rfl
-
-private theorem castConfiguration_mk {K Λ σ : Type} {Γ Δ : K → Type} (h : Γ = Δ)
-    (label : Option Λ) (state : σ) (tapes : ∀ k, List (Γ k)) :
-    castConfiguration h ⟨label, state, tapes⟩ = ⟨label, state, castTapes h tapes⟩ := by
-  cases h
-  rfl
-
-private theorem stepAux_cast {K Λ σ : Type} [DecidableEq K]
-    {Γ Δ : K → Type} (h : Γ = Δ) (q : TM2.Stmt Γ Λ σ)
-    (state : σ) (tapes : ∀ k, List (Γ k)) :
-    TM2.stepAux (castStatement h q) state (castTapes h tapes) =
-      castConfiguration h (TM2.stepAux q state tapes) := by
-  cases h
-  rfl
-
-private theorem boolAlphabet_eq (max : Nat) :
-    MachineEmbedding.Alphabet HeaderAlphabet (fun _ : ExtraTape max => Bool) =
-      (fun _ : GlobalTape max => Bool) := by
-  funext tape
-  cases tape <;> rfl
 
 def mergeTapes {max : Nat} (header : HeaderTape → List Bool)
     (extra : ExtraTape max → List Bool) : GlobalTape max → List Bool
   | .inl k => header k
   | .inr e => extra e
 
-private theorem castTapes_embedding {max : Nat} (header : HeaderTape → List Bool)
-    (extra : ExtraTape max → List Bool) :
-    castTapes (boolAlphabet_eq max) (MachineEmbedding.tapes header extra) =
-      mergeTapes header extra := by
-  funext tape
-  rw [castTapes_apply]
-  cases tape <;> rfl
-
-private def dropUnit (N : Nat) : (Master N × Unit) ≃ Master N where
-  toFun := Prod.fst
-  invFun state := (state, ())
-  left_inv := by rintro ⟨state, ⟨⟩⟩; rfl
-  right_inv := by intro state; rfl
-
-/-- The native checked header statement is embedded and its inert extra
-register removed. All four native header tapes keep their identities. -/
+/-- Place the checked Boolean header program directly on the header tapes,
+without changing its registers or transporting its alphabet. -/
 def headerStatement (max N B : Nat) (label : HeaderLabel) :
     TM2.Stmt (fun _ : GlobalTape max => Bool) Label (Master N) :=
-  MachineStateEquiv.statement (dropUnit N)
-    (castStatement (boolAlphabet_eq max)
-      (MachineEmbedding.statement (Λextra := MachineUnaryAffineAt.Label)
-        (τ := Unit) none (headerProgram (σ := OtherRegisters N) B label)))
+  MachineCloudPadding.Placement.statement Sum.inl Sum.inl none (headerProgram B label)
 
 def headerConfiguration {max N : Nat} (extra : ExtraTape max → List Bool)
     (c : TM2.Cfg HeaderAlphabet HeaderLabel (Master N)) :
     TM2.Cfg (fun _ : GlobalTape max => Bool) Label (Master N) :=
   ⟨c.l.map Sum.inl, c.var, mergeTapes c.stk extra⟩
 
-private theorem headerConfiguration_eq {max N : Nat} (extra : ExtraTape max → List Bool)
-    (c : TM2.Cfg HeaderAlphabet HeaderLabel (Master N)) :
-    headerConfiguration extra c =
-      MachineStateEquiv.configuration (dropUnit N)
-        (castConfiguration (boolAlphabet_eq max)
-          (MachineEmbedding.configuration (Λextra := MachineUnaryAffineAt.Label)
-            none () extra c)) := by
-  cases c with
-  | mk label state tapes =>
-    simp only [MachineEmbedding.configuration, castConfiguration_mk,
-      MachineStateEquiv.configuration, castTapes_embedding, dropUnit,
-      Equiv.coe_fn_mk, headerConfiguration]
-    cases label <;> rfl
-
 theorem stepAux_headerStatement (max N B : Nat) (label : HeaderLabel)
     (state : Master N) (header : HeaderTape → List Bool)
     (extra : ExtraTape max → List Bool) :
     TM2.stepAux (headerStatement max N B label) state (mergeTapes header extra) =
       headerConfiguration extra (TM2.stepAux (headerProgram B label) state header) := by
-  rw [headerStatement, MachineStateEquiv.stepAux_transport_symm]
-  change MachineStateEquiv.configuration (dropUnit N)
-    (TM2.stepAux (castStatement (boolAlphabet_eq max)
-      (MachineEmbedding.statement none (headerProgram B label))) (state, ())
-      (mergeTapes header extra)) = _
-  rw [← castTapes_embedding, stepAux_cast, MachineEmbedding.stepAux_simulation]
-  exact (headerConfiguration_eq extra _).symm
+  let view : GlobalTape max → Option HeaderTape := Sum.elim some (fun _ => none)
+  have tapes_eq (tapes : HeaderTape → List Bool) :
+      MachineCloudPadding.Placement.tapes view tapes (Sum.elim (fun _ => []) extra) =
+        mergeTapes tapes extra := by
+    funext k; cases k <;> rfl
+  have run := MachineCloudPadding.Placement.stepAux_simulation Sum.inl view
+    (fun _ => rfl) (by intro j k h; cases j <;> simp_all [view])
+    (Sum.inl : HeaderLabel → Label) none (Sum.elim (fun _ => []) extra)
+    (headerProgram B label) state header
+  rw [tapes_eq] at run
+  cases h : (TM2.stepAux (headerProgram B label) state header).l <;>
+    simpa only [headerStatement, MachineCloudPadding.Placement.configuration, tapes_eq,
+      headerConfiguration, MachineCloudPadding.Placement.label, h, Option.map] using run
 
 def program (max N B : Nat) : Label →
     TM2.Stmt (fun _ : GlobalTape max => Bool) Label (Master N)

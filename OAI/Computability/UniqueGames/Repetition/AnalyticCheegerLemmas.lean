@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Analysis.Real.Sqrt
 import Mathlib.Analysis.SpecificLimits.Basic
@@ -38,12 +39,6 @@ def gatedMinimum (w f g : ι → ℝ) (gate : ι → Bool) : ℝ :=
 def gatedMaximum (w f g : ι → ℝ) (gate : ι → Bool) : ℝ :=
   ∑ i, if gate i then w i * max ((f i) ^ 2) ((g i) ^ 2) else 0
 
-theorem quadraticMass_nonnegative (w f g : ι → ℝ) (hw : ∀ i, 0 ≤ w i) :
-    0 ≤ quadraticMass w f g := by
-  apply Finset.sum_nonneg
-  intro i _
-  exact div_nonneg (mul_nonneg (hw i) (add_nonneg (sq_nonneg _) (sq_nonneg _)))
-    (by norm_num)
 
 theorem gatedCorrelation_nonnegative (w f g : ι → ℝ) (gate : ι → Bool)
     (hw : ∀ i, 0 ≤ w i) (hf : ∀ i, 0 ≤ f i) (hg : ∀ i, 0 ≤ g i) :
@@ -73,18 +68,6 @@ theorem gatedMinimum_nonnegative (w f g : ι → ℝ) (gate : ι → Bool)
   · exact mul_nonneg (hw i) (le_min (sq_nonneg _) (sq_nonneg _))
   · exact le_rfl
 
-theorem gatedMinimum_le_mass (w f g : ι → ℝ) (gate : ι → Bool)
-    (hw : ∀ i, 0 ≤ w i) : gatedMinimum w f g gate ≤ quadraticMass w f g := by
-  apply Finset.sum_le_sum
-  intro i _
-  split
-  · have hmin : min ((f i) ^ 2) ((g i) ^ 2) ≤ ((f i) ^ 2 + (g i) ^ 2) / 2 := by
-      have h₁ := min_le_left ((f i) ^ 2) ((g i) ^ 2)
-      have h₂ := min_le_right ((f i) ^ 2) ((g i) ^ 2)
-      linarith
-    simpa only [mul_div_assoc] using mul_le_mul_of_nonneg_left hmin (hw i)
-  · exact div_nonneg (mul_nonneg (hw i) (add_nonneg (sq_nonneg _) (sq_nonneg _)))
-      (by norm_num)
 
 theorem gatedMinimum_add_maximum_le (w f g : ι → ℝ) (gate : ι → Bool)
     (hw : ∀ i, 0 ≤ w i) :
@@ -140,19 +123,6 @@ theorem gatedCorrelation_sq_le_min_quadratic (w f g : ι → ℝ) (gate : ι →
   exact (gatedCorrelation_sq_le_min_mul_max w f g gate hw).trans
     (mul_le_mul_of_nonneg_left (by linarith) hmin)
 
-/-- Sharp homogeneous Cheeger form. The expression under the square root
-is nonnegative by the preceding proved inequality. -/
-theorem gatedMinimum_cheeger (w f g : ι → ℝ) (gate : ι → Bool)
-    (hw : ∀ i, 0 ≤ w i) :
-    quadraticMass w f g -
-        Real.sqrt (quadraticMass w f g ^ 2 - gatedCorrelation w f g gate ^ 2) ≤
-      gatedMinimum w f g gate := by
-  have h := gatedCorrelation_sq_le_min_quadratic w f g gate hw
-  have hsq : (quadraticMass w f g - gatedMinimum w f g gate) ^ 2 ≤
-      quadraticMass w f g ^ 2 - gatedCorrelation w f g gate ^ 2 := by
-    nlinarith
-  have hsqrt := Real.le_sqrt_of_sq_le hsq
-  linarith
 
 /-- The near-perfect form suffices for alphabet-independent repetition.
 The total squared mass may be at most one, rather than exactly one. -/
@@ -245,9 +215,6 @@ theorem dsRate_one_div_eight_hundred :
     dsRate (1 / 800) = 1 - (1 : ℝ) / 10240000 := by
   norm_num [dsRate]
 
-theorem dsRate_one_div_fifteen :
-    dsRate (1 / 15) = 1 - (1 : ℝ) / 3600 := by
-  norm_num [dsRate]
 
 /-- The final soundness exponent depends only on `error`, even when the later
 construction chooses its alphabet after this exponent. -/
@@ -256,11 +223,6 @@ theorem exists_final_repetition_count {error : ℝ} (herror : 0 < error) :
   simpa only [dsRate_one_div_eight_hundred] using
     exists_dsRate_pow_le (gap := (1 / 800 : ℝ)) (by norm_num) (by norm_num) herror
 
-/-- The preliminary constant-gap specialization of the same scalar rate. -/
-theorem exists_preliminary_repetition_count {error : ℝ} (herror : 0 < error) :
-    ∃ n : ℕ, 1 ≤ n ∧ (1 - (1 : ℝ) / 3600) ^ n ≤ error := by
-  simpa only [dsRate_one_div_fifteen] using
-    exists_dsRate_pow_le (gap := (1 / 15 : ℝ)) (by norm_num) (by norm_num) herror
 
 end UniqueGamesTheorem.Repetition
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineSubdivisionDynamicRowsLemmas
 import OAI.Computability.UniqueGames.Reduction.GameEncodingSizeLemmas
 
@@ -117,19 +118,6 @@ theorem readWordsTrace (q : Nat) (words : List Nat) (completed : Fin (q + 1))
 def finalTapes (base : Tape → List Bool) (suffix bits : List Bool) : Tape → List Bool :=
   Function.update (tapes base suffix []) .permutation (bits ++ base .permutation)
 
-theorem finalTapes_other (base : Tape → List Bool) (suffix bits : List Bool)
-    (k : Tape) (hi : k ≠ .input) (hr : k ≠ .permutationReverse) (hp : k ≠ .permutation) :
-    finalTapes base suffix bits k = base k := by
-  simp [finalTapes, tapes, hi, hr, hp]
-
-@[simp] theorem finalTapes_input (base : Tape → List Bool) (suffix bits : List Bool) :
-    finalTapes base suffix bits .input = suffix := by simp [finalTapes]
-
-@[simp] theorem finalTapes_reverse (base : Tape → List Bool) (suffix bits : List Bool) :
-    finalTapes base suffix bits .permutationReverse = [] := by simp [finalTapes]
-
-@[simp] theorem finalTapes_permutation (base : Tape → List Bool) (suffix bits : List Bool) :
-    finalTapes base suffix bits .permutation = bits ++ base .permutation := by simp [finalTapes]
 
 /-- Full exact table phase: read q delimited entries and reverse the physical
 saved stack, arriving at the actual row-emission label. -/

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Data.Fintype.Sum
@@ -83,20 +84,6 @@ def extendLabeling (extra : ℕ) (defaultA : A) (labeling : V → A) : V ⊕ Fin
 @[simp] theorem extendLabeling_inr (extra : ℕ) (defaultA : A) (labeling : V → A)
     (w : Fin extra) : extendLabeling extra defaultA labeling (Sum.inr w) = defaultA := rfl
 
-theorem pad_satisfiable (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (extra : ℕ) (defaultA : A) (hG : G.Satisfiable) : (pad G extra).Satisfiable := by
-  obtain ⟨labeling, hlabeling⟩ := hG
-  refine ⟨extendLabeling extra defaultA labeling, ?_⟩
-  rintro ⟨v | w, d⟩
-  · simpa only [edgeSatisfied_inl G htail, extendLabeling_inl] using hlabeling (v, d)
-  · rfl
-
-theorem satisfiable_of_pad (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (extra : ℕ) (hG : (pad G extra).Satisfiable) : G.Satisfiable := by
-  obtain ⟨labeling, hlabeling⟩ := hG
-  refine ⟨fun v => labeling (Sum.inl v), ?_⟩
-  rintro ⟨v, d⟩
-  simpa only [edgeSatisfied_inl G htail] using hlabeling (Sum.inl v, d)
 
 private theorem rejectionCount_eq_sum {U E : Type*} [Fintype E]
     (G : ConstraintGraph U E A) (labeling : U → A) :
@@ -122,25 +109,6 @@ def extraVertices : ℕ := ExpanderFamily.size (Fintype.card V) - Fintype.card V
 
 abbrev Vertex := V ⊕ Fin (extraVertices V)
 
-theorem card_vertex : Fintype.card (Vertex V) = ExpanderFamily.size (Fintype.card V) := by
-  rw [Fintype.card_sum, Fintype.card_fin]
-  exact Nat.add_sub_of_le (ExpanderFamily.le_size _)
-
-theorem le_card_vertex : Fintype.card V ≤ Fintype.card (Vertex V) := by
-  rw [card_vertex]
-  exact ExpanderFamily.le_size _
-
-theorem card_vertex_le [Nonempty V] :
-    Fintype.card (Vertex V) ≤ ExpanderFamily.growth * Fintype.card V := by
-  rw [card_vertex]
-  exact ExpanderFamily.size_le_mul Fintype.card_pos
-
-/-- Exact coordinate bridge to the proved geometric family. -/
-noncomputable def familyVertexEquiv :
-    Vertex V ≃ ExpanderFamily.Vertex (ExpanderFamily.level (Fintype.card V)) :=
-  Fintype.equivOfCardEq (by
-    rw [card_vertex, ExpanderFamily.card_vertex]
-    rfl)
 
 variable {V}
 
@@ -150,19 +118,6 @@ def paddedG (G : ConstraintGraph V (V × D) A) : ConstraintGraph (Vertex V) (Ver
 @[simp] theorem paddedG_tail (G : ConstraintGraph V (V × D) A) :
     (paddedG G).tail = Prod.fst := rfl
 
-theorem paddedG_rejectionCount [Fintype D]
-    (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (labeling : Vertex V → A) :
-    (paddedG G).rejectionCount labeling =
-      G.rejectionCount (fun v => labeling (Sum.inl v)) :=
-  pad_rejectionCount G htail (extraVertices V) labeling
-
-theorem rejectionCount_eq [Fintype D]
-    (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (labeling : Vertex V → A) :
-    (paddedG G).rejectionCount labeling =
-      G.rejectionCount (fun v => labeling (Sum.inl v)) :=
-  paddedG_rejectionCount G htail labeling
 
 def liftLabel (defaultA : A) (labeling : V → A) : Vertex V → A :=
   extendLabeling (extraVertices V) defaultA labeling
@@ -174,25 +129,6 @@ def liftLabel (defaultA : A) (labeling : V → A) : Vertex V → A :=
     (w : Fin (extraVertices V)) :
     liftLabel defaultA labeling (Sum.inr w) = defaultA := rfl
 
-theorem rejectionCount_liftLabel [Fintype D]
-    (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (defaultA : A) (labeling : V → A) :
-    (paddedG G).rejectionCount (liftLabel defaultA labeling) = G.rejectionCount labeling := by
-  simpa only [liftLabel_inl] using
-    paddedG_rejectionCount G htail (liftLabel defaultA labeling)
-
-theorem paddedG_satisfiable (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (defaultA : A) (hG : G.Satisfiable) : (paddedG G).Satisfiable :=
-  pad_satisfiable G htail (extraVertices V) defaultA hG
-
-theorem card_padded_darts [Fintype D] :
-    Fintype.card (Vertex V × D) = ExpanderFamily.size (Fintype.card V) * Fintype.card D := by
-  rw [Fintype.card_prod, card_vertex]
-
-theorem card_padded_darts_le [Fintype D] [Nonempty V] :
-    Fintype.card (Vertex V × D) ≤ ExpanderFamily.growth * Fintype.card (V × D) := by
-  rw [Fintype.card_prod, Fintype.card_prod, ← Nat.mul_assoc]
-  exact Nat.mul_le_mul_right (Fintype.card D) (card_vertex_le V)
 
 end FamilySize
 

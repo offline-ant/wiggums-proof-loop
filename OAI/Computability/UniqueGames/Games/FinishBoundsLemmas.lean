@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.Group.Basic
 import Mathlib.Algebra.Group.Equiv.Defs
@@ -26,52 +27,6 @@ not assume or assert an unproved repetition theorem or hardness result.
 
 namespace UniqueGamesTheorem.Explicit.FinishBounds
 
-theorem exists_reciprocal_tolerance (ε : ℚ) (hε : 0 < ε) (t : Nat) (ht : 0 < t) :
-    ∃ C : Nat, 200 ≤ C ∧ (0 : ℚ) < 1 / C ∧
-      1 / (C : ℚ) ≤ 1 / 200 ∧ 1 / (C : ℚ) ≤ ε / t := by
-  obtain ⟨n, hn⟩ := exists_nat_gt ((t : ℚ) / ε)
-  let C := n + 200
-  have hC : (0 : ℚ) < C := by dsimp [C]; positivity
-  have ht' : (0 : ℚ) < t := by exact_mod_cast ht
-  have hCn : (n : ℚ) ≤ C := by dsimp [C]; exact_mod_cast Nat.le_add_right n 200
-  have hbound : (t : ℚ) / ε < C := lt_of_lt_of_le hn hCn
-  have hbudget : (t : ℚ) ≤ ε * C := by
-    have he := (div_lt_iff₀ hε).mp hbound
-    nlinarith
-  refine ⟨C, by dsimp [C]; omega, one_div_pos.mpr hC, ?_, ?_⟩
-  · apply one_div_le_one_div_of_le (by norm_num : (0 : ℚ) < 200)
-    dsimp [C]
-    exact_mod_cast Nat.le_add_left 200 n
-  · apply (div_le_div_iff₀ hC ht').mpr
-    simpa [mul_comm] using hbudget
-
-theorem subdivision_completeness (vH vB d τ : ℝ)
-    (hH : 1 - d ≤ vH)
-    (hround : |vB - (1 - (1 - vH) / 4)| ≤ τ / 4) :
-    1 - (d + τ) / 4 ≤ vB := by
-  have h := (abs_le.mp hround).1
-  linarith
-
-theorem subdivision_soundness (vH vB τ : ℝ)
-    (hH : vH ≤ 99 / 100) (hτ : τ ≤ 1 / 200)
-    (hround : |vB - (1 - (1 - vH) / 4)| ≤ τ / 4) :
-    vB ≤ 1 - 1 / 800 := by
-  have h := (abs_le.mp hround).2
-  linarith
-
-/-- The full completeness loss after the coordinatewise product labeling. -/
-theorem final_completeness (vB vG d τ ε₀ ε : ℝ) (t : Nat) (ht : 0 < t)
-    (hB : 1 - (d + τ) / 4 ≤ vB)
-    (hG : 1 - (t : ℝ) * (1 - vB) ≤ vG)
-    (hd : d ≤ ε₀ / t) (hτ : τ ≤ ε₀ / t)
-    (hε₀ : 0 ≤ ε₀) (hε : ε₀ ≤ ε) :
-    1 - ε ≤ vG := by
-  have ht' : (0 : ℝ) < t := by exact_mod_cast ht
-  have hd' := (le_div_iff₀ ht').mp hd
-  have hτ' := (le_div_iff₀ ht').mp hτ
-  have hB' : (t : ℝ) * (1 - vB) ≤ t * ((d + τ) / 4) :=
-    mul_le_mul_of_nonneg_left (by linarith) ht'.le
-  nlinarith
 
 end UniqueGamesTheorem.Explicit.FinishBounds
 
@@ -110,8 +65,6 @@ instance satisfiedDecidable {V E A : Type*} [DecidableEq A]
     (G : OccurrenceGame V E A) (labeling : V → A) (e : E) :
     Decidable (G.Satisfied labeling e) := inferInstanceAs (Decidable (_ = _))
 
-def IsTranslation {V E A : Type*} [Add A] (G : OccurrenceGame V E A) : Prop :=
-  ∃ offset : E → A, ∀ e a, G.permutation e a = a + offset e
 
 end OccurrenceGame
 
@@ -125,8 +78,6 @@ instance satisfiedDecidable {L R E A : Type*} [DecidableEq A]
     (G : BipartiteGame L R E A) (a : L → A) (b : R → A) (e : E) :
     Decidable (G.Satisfied a b e) := inferInstanceAs (Decidable (_ = _))
 
-def IsTranslation {L R E A : Type*} [Add A] (G : BipartiteGame L R E A) : Prop :=
-  ∃ offset : E → A, ∀ e a, G.permutation e a = a + offset e
 
 end BipartiteGame
 
@@ -156,16 +107,9 @@ def satisfiedCount (g : OccurrenceGame V E A) (a : V → A) : Nat :=
 
 theorem satisfiedCount_eq_sum_satisfied (g : OccurrenceGame V E A) (a : V → A) :
     satisfiedCount g a = ∑ e, if g.Satisfied a e then 1 else 0 := by
-  classical
-  unfold satisfiedCount
   apply Finset.sum_congr rfl
   intro e _
-  by_cases h : g.Satisfied a e
-  · have h' : g.permutation e (a (g.source e)) = a (g.target e) := Eq.symm h
-    rw [ite_eq_left h', ite_eq_left h]
-  · have h' : ¬ g.permutation e (a (g.source e)) = a (g.target e) :=
-      fun he => h he.symm
-    rw [ite_eq_right h', ite_eq_right h]
+  exact if_congr eq_comm rfl rfl
 
 variable [Fintype V] [Fintype A]
 
@@ -200,16 +144,9 @@ def satisfiedCount (g : BipartiteGame L R E A) (a : L → A) (b : R → A) : Nat
 theorem satisfiedCount_eq_sum_satisfied (g : BipartiteGame L R E A)
     (a : L → A) (b : R → A) :
     satisfiedCount g a b = ∑ e, if g.Satisfied a b e then 1 else 0 := by
-  classical
-  unfold satisfiedCount
   apply Finset.sum_congr rfl
   intro e _
-  by_cases h : g.Satisfied a b e
-  · have h' : g.permutation e (a (g.left e)) = b (g.right e) := Eq.symm h
-    rw [ite_eq_left h', ite_eq_left h]
-  · have h' : ¬ g.permutation e (a (g.left e)) = b (g.right e) :=
-      fun he => h he.symm
-    rw [ite_eq_right h', ite_eq_right h]
+  exact if_congr eq_comm rfl rfl
 
 variable [Fintype L] [Fintype R] [Fintype A]
 
@@ -274,31 +211,6 @@ def game (g : OccurrenceGame V E A) :
   permutation := permutation g
   simple := endpoints_injective g
 
-/-- Reversing the last edge negates its translation offset. -/
-theorem isTranslation [AddGroup A] (g : OccurrenceGame V E A)
-    (hg : g.IsTranslation) : (game g).IsTranslation := by
-  obtain ⟨c, hc⟩ := hg
-  refine ⟨fun ei => if ei.2 = 3 then -(c ei.1) else 0, ?_⟩
-  intro ei a
-  by_cases hi : ei.2 = 3
-  · simp only [game, permutation, hi, ite_eq_left]
-    apply (g.permutation ei.1).injective
-    rw [(g.permutation ei.1).apply_symm_apply, hc]
-    simp
-  · simp [game, permutation, hi]
-
-/-- In a binary additive alphabet the inverse offset is the original offset. -/
-theorem binary_translation_offsets [AddGroup A]
-    (hbinary : ∀ a : A, a + a = 0) (g : OccurrenceGame V E A)
-    (c : E → A) (hc : ∀ e a, g.permutation e a = a + c e) :
-    ∀ ei a, (game g).permutation ei a =
-      a + (if ei.2 = 3 then c ei.1 else 0) := by
-  intro ei a
-  by_cases hi : ei.2 = 3
-  · simp only [game, permutation, hi, ite_eq_left]
-    apply (g.permutation ei.1).injective
-    rw [(g.permutation ei.1).apply_symm_apply, hc, add_assoc, hbinary, add_zero]
-  · simp [game, permutation, hi]
 
 /-- Restrict any output labeling to the original vertices. -/
 def restrict (a : Left V E → A) : V → A := fun v => a (Sum.inl v)
@@ -312,12 +224,6 @@ def extendRight (g : OccurrenceGame V E A) (a : V → A) : Right E → A :=
 @[simp] theorem restrict_extendLeft (g : OccurrenceGame V E A) (a : V → A) :
     restrict (extendLeft g a) = a := rfl
 
-/-- All four equations along the path force the original permutation equation. -/
-theorem four_satisfied_implies_original (ρ : Equiv.Perm A) (u p q r v : A)
-    (h₀ : u = p) (h₁ : q = p) (h₂ : q = r) (h₃ : ρ.symm v = r) :
-    ρ u = v := by
-  have h : u = r := h₀.trans (h₁.symm.trans h₂)
-  rw [h, ← h₃, ρ.apply_symm_apply]
 
 variable [DecidableEq A]
 
@@ -335,14 +241,9 @@ theorem local_count_extend (ρ : Equiv.Perm A) (u v : A) :
     (if u = u then 1 else 0) + (if u = u then 1 else 0) +
       (if u = u then 1 else 0) + (if ρ.symm v = u then 1 else 0) =
         3 + (if ρ u = v then 1 else 0 : Nat) := by
-  by_cases h : ρ u = v
-  · have h' : ρ.symm v = u := by rw [← h, ρ.symm_apply_apply]
-    simp [h, h']
-  · have h' : ρ.symm v ≠ u := by
-      intro he
-      apply h
-      rw [← he, ρ.apply_symm_apply]
-    simp [h, h']
+  simp only
+  exact congrArg (fun n : ℕ => 3 + n)
+    (if_congr (ρ.symm_apply_eq.trans eq_comm) rfl rfl)
 
 theorem count_on_occurrence_le (g : OccurrenceGame V E A)
     (a : Left V E → A) (b : Right E → A) (e : E) :
@@ -390,12 +291,6 @@ theorem satisfiedCount_extend (g : OccurrenceGame V E A) (a : V → A) :
 @[simp] theorem edge_count : Fintype.card (Edge E) = 4 * Fintype.card E := by
   simp [Edge, Nat.mul_comm]
 
-@[simp] theorem left_count [Fintype V] :
-    Fintype.card (Left V E) = Fintype.card V + Fintype.card E := by
-  simp [Left]
-
-@[simp] theorem right_count : Fintype.card (Right E) = 2 * Fintype.card E := by
-  simp [Right, Nat.mul_comm]
 
 variable [Fintype V] [Fintype A] [Nonempty A]
 

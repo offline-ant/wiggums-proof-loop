@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.TakeDrop
 import OAI.Computability.UniqueGames.Machines.MachineClone100TableLemmas
 
@@ -180,11 +181,6 @@ theorem tableTrace (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ 
   rw [tableOutput_words triples base a b c rhs h0 h1 h2 h3] at h
   simpa only [rowSteps, h0, h1, h2, h3, encodeWord_length] using h
 
-theorem tableTapes_other (triples : List (Nat × Nat × Nat)) (base : Tape → List Bool)
-    (tape : Tape) (different : tape ≠ .reversed) :
-    Function.update base .reversed
-      ((triples.flatMap (fun t => rowOutput t base)).reverse ++ base .reversed) tape =
-      base tape := by simp [different]
 
 end UniqueGamesTheorem.Explicit.MachineClone100Triples
 

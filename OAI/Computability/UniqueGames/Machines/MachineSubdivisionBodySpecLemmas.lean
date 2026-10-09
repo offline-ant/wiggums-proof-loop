@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.CharP.Two
 import Mathlib.Tactic.DeriveFintype
 import OAI.Computability.UniqueGames.Games.SubdivisionEncoding
@@ -53,16 +54,6 @@ theorem result_input {q : Nat} (base : Tape → List Bool) (u v : Nat)
   rw [bodyResult_eq base u v table suffix ready]
   rfl
 
-theorem result_locals {q : Nat} (base : Tape → List Bool) (u v : Nat)
-    (table : Target.PermutationTable q) (suffix : List Bool)
-    (ready : Ready base u v table suffix) :
-    bodyResult base u v table suffix .u = [] ∧
-    bodyResult base u v table suffix .v = [] ∧
-    bodyResult base u v table suffix .permutation = [] ∧
-    bodyResult base u v table suffix .permutationReverse = [] ∧
-    bodyResult base u v table suffix .copyScratch = [] := by
-  rw [bodyResult_eq base u v table suffix ready]
-  simp [resultTapes, ready.scratchEmpty]
 
 theorem result_accumulator {q : Nat} (base : Tape → List Bool) (u v : Nat)
     (table : Target.PermutationTable q) (suffix : List Bool)
@@ -552,20 +543,6 @@ def computableInPolyTime (q : Nat) :
     erw [List.map_id, List.map_id]
     exact fullRunInTime H.val H.property
 
-def familyComputableInPolyTime {α : Type} {q : Nat} (f : α → Instance q)
-    (involutive : ∀ a, Involutive (f a)) :
-    TM2ComputableInPolyTime (fun a => gameBits (f a)) gameBits
-      (fun a => SubdivisionTarget.subdivide (f a)) where
-  tm := machine q
-  inputAlphabet := Equiv.refl Bool
-  outputAlphabet := Equiv.refl Bool
-  time := timePolynomial q
-  outputsFun a := by
-    change TM2OutputsInTime (machine q) ((gameBits (f a)).map id)
-      (some ((gameBits (SubdivisionTarget.subdivide (f a))).map id))
-      ((timePolynomial q).eval (gameBits (f a)).length)
-    erw [List.map_id, List.map_id]
-    exact fullRunInTime (f a) (involutive a)
 
 theorem workAlphabetFinite (q : Nat) (tape : (computableInPolyTime q).tm.K) :
     Finite ((computableInPolyTime q).tm.Γ tape) := by
@@ -639,33 +616,11 @@ inductive Tape
   | affineScratch | copyScratch | accumulator | output
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.input, .vertices, .alphabet, .occurrences,
-  .newOccurrences, .affineScratch, .copyScratch, .accumulator, .output]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .vertices, .alphabet, .occurrences,
+  .newOccurrences, .affineScratch, .copyScratch, .accumulator, .output}
+  complete x := by cases x <;> simp
 
-abbrev State := MachineFieldTemplate.State Unit
-
-def initialState : State := (((), ()), none)
-
-def headerField : Fin 3 → Tape
-  | 0 => .vertices
-  | 1 => .alphabet
-  | 2 => .occurrences
-
-def emitField : Fin 4 → Tape
-  | 0 => .vertices
-  | 1 => .alphabet
-  | 2 => .newOccurrences
-  | 3 => .input
 
 def tokens (C : Nat) : List (MachineFieldTemplate.Token 4) :=
   [.copy 0, .copy 1, .copy 2] ++ List.replicate C (.copy 3)
@@ -683,45 +638,6 @@ inductive Label (C : Nat)
   | finish (label : SourceRuntimeFinish.Label clearKeys)
   deriving DecidableEq, Fintype
 
-def headerNext {C : Nat} (i : Fin 3) : Label C :=
-  if h : i.val + 1 < 3 then .headerStart ⟨i.val + 1, h⟩ else .scale 0
-
-def emitEntry (C : Nat) : Label C :=
-  .emit (MachineFieldTemplate.startAt (tokens C).length 0)
-
-def program (C : Nat) : Label C → TM2.Stmt (fun _ : Tape => Bool) (Label C) State
-  | .headerStart i => SourceMachine.fieldStart (headerField i) (.headerRead i)
-  | .headerRead i => SourceMachine.fieldLoop .input (headerField i)
-      (.headerRead i) (some (headerNext i))
-  | .scale 0 => MachineUnaryAffineAt.seed .newOccurrences 0 (.scale 1)
-  | .scale 1 => MachineUnaryAffineAt.scan .occurrences .affineScratch
-      .newOccurrences C (.scale 1) (.scale 2)
-  | .scale 2 => MachineTransfer.loopAt .affineScratch .occurrences id false
-      (.scale 2) (some (emitEntry C))
-  | .emit label => MachineFieldTemplate.instruction (tokens C) emitField
-      .copyScratch .accumulator Label.emit (some .finishStart) label
-  | .finishStart => .load (fun _ => initialState)
-      (MachineTransfer.exitAt .output (SourceRuntimeFinish.entry clearKeys Label.finish))
-  | .finish label => SourceRuntimeFinish.statement clearKeys .accumulator .output
-      ((), ()) Label.finish none label
-
-def machine (C : Nat) : FinTM2 where
-  K := Tape
-  k₀ := .input
-  k₁ := .output
-  Γ _ := Bool
-  Λ := Label C
-  main := .headerStart 0
-  σ := State
-  initialState := initialState
-  m := program C
-
-theorem covers (k : Tape) (ha : k ≠ .accumulator) (ho : k ≠ .output) :
-    k ∈ clearKeys := by
-  cases k <;> simp_all [clearKeys]
-
-theorem accumulator_not_mem_clearKeys : Tape.accumulator ∉ clearKeys := by decide
-theorem output_not_mem_clearKeys : Tape.output ∉ clearKeys := by decide
 
 end UniqueGamesTheorem.Explicit.MachineUniformProgram
 
@@ -734,93 +650,12 @@ open UniqueGamesTheorem.Foundations UniqueGamesTheorem.Foundations.Complexity
 open UniqueGamesTheorem.Foundations.Hastad
 open MachineUniformProgram
 
-def inputTapes (bits : List Bool) : Tape → List Bool :=
-  fun k => if k = .input then bits else []
-
-def afterVertices (n : Nat) (rest : List Bool) : Tape → List Bool :=
-  fun k => if k = .input then rest else if k = .vertices then encodeWord n else []
-
-def afterAlphabet (n q : Nat) (rest : List Bool) : Tape → List Bool :=
-  fun k => if k = .input then rest else if k = .vertices then encodeWord n
-    else if k = .alphabet then encodeWord q else []
 
 def resultTapes (n q Q : Nat) (body : List Bool) : Tape → List Bool :=
   fun k => if k = .input then body else if k = .vertices then encodeWord n
     else if k = .alphabet then encodeWord q
     else if k = .occurrences then encodeWord Q else []
 
-theorem initList_eq (C : Nat) (bits : List Bool) :
-    initList (machine C) bits =
-      ⟨some (.headerStart 0), initialState, inputTapes bits⟩ := by
-  unfold initList
-  congr 1
-
-theorem first_result (n : Nat) (rest : List Bool) :
-    SourceMachine.fieldTapes Tape.input .vertices
-      (inputTapes (encodeWord n ++ rest)) rest
-      (encodeWord n ++ inputTapes (encodeWord n ++ rest) .vertices) =
-      afterVertices n rest := by
-  funext k
-  cases k <;> simp [SourceMachine.fieldTapes, inputTapes, afterVertices]
-
-theorem second_result (n q : Nat) (rest : List Bool) :
-    SourceMachine.fieldTapes Tape.input .alphabet
-      (afterVertices n (encodeWord q ++ rest)) rest
-      (encodeWord q ++ afterVertices n (encodeWord q ++ rest) .alphabet) =
-      afterAlphabet n q rest := by
-  funext k
-  cases k <;> simp [SourceMachine.fieldTapes, afterVertices, afterAlphabet]
-
-theorem third_result (n q Q : Nat) (body : List Bool) :
-    SourceMachine.fieldTapes Tape.input .occurrences
-      (afterAlphabet n q (encodeWord Q ++ body)) body
-      (encodeWord Q ++ afterAlphabet n q (encodeWord Q ++ body) .occurrences) =
-      resultTapes n q Q body := by
-  funext k
-  cases k <;> simp [SourceMachine.fieldTapes, afterAlphabet, resultTapes]
-
-/-- The input headers are consumed literally; all unread constraint bits retain
-their original order and no tape contains an implicit runtime number. -/
-def headersInTime (C q n Q : Nat) (body : List Bool) :
-    StateTransition.EvalsToInTime (machine C).step
-      (initList (machine C) (encodeWords [n, q, Q] ++ body))
-      (some ⟨some (.scale 0), initialState, resultTapes n q Q body⟩)
-      (n + q + Q + 6) := by
-  have first := SourceMachine.fieldInTime Tape.input .vertices (by decide)
-    (.headerStart 0 : Label C) (.headerRead 0) (some (.headerStart 1))
-    (program C) rfl rfl
-    (inputTapes (encodeWord n ++ (encodeWord q ++ (encodeWord Q ++ body)))) n
-    (encodeWord q ++ (encodeWord Q ++ body)) rfl ((), ()) none
-  rw [first_result] at first
-  have second := SourceMachine.fieldInTime Tape.input .alphabet (by decide)
-    (.headerStart 1 : Label C) (.headerRead 1) (some (.headerStart 2))
-    (program C) rfl rfl (afterVertices n (encodeWord q ++ (encodeWord Q ++ body))) q
-    (encodeWord Q ++ body) rfl ((), ()) none
-  rw [second_result] at second
-  have third := SourceMachine.fieldInTime Tape.input .occurrences (by decide)
-    (.headerStart 2 : Label C) (.headerRead 2) (some (.scale 0))
-    (program C) rfl rfl (afterAlphabet n q (encodeWord Q ++ body)) Q body rfl ((), ()) none
-  rw [third_result] at third
-  have firstSecond := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ first second
-  have whole := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ firstSecond third
-  rw [initList_eq]
-  simpa only [encodeWords, List.nil_append, List.append_assoc, machine, FinTM2.step,
-    FinTM2.Cfg, initialState]
-    using! ({
-      toEvalsTo := whole.toEvalsTo
-      steps_le_m := by
-        have bound := whole.steps_le_m
-        omega } : StateTransition.EvalsToInTime (TM2.step (program C))
-        ⟨some (.headerStart 0), initialState,
-          inputTapes (encodeWord n ++ (encodeWord q ++ (encodeWord Q ++ body)))⟩
-        (some ⟨some (.scale 0), initialState, resultTapes n q Q body⟩)
-        (n + q + Q + 6))
-
-theorem headers_budget (q n Q : Nat) (body : List Bool) :
-    n + q + Q + 6 ≤ (encodeWords [n, q, Q] ++ body).length + 3 := by
-  simp only [List.length_append, encodeWords_length, List.sum_cons, List.sum_nil,
-    List.length_cons, List.length_nil]
-  omega
 
 end UniqueGamesTheorem.Explicit.MachineUniformHeaders
 

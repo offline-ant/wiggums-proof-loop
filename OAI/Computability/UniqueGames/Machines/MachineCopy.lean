@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineTransfer
 
@@ -47,32 +48,24 @@ def forkTapes (source left right : K) (base : K → List β)
     forkTapes source left right base (base source) (base left) (base right) = base := by
   simp [forkTapes]
 
-private theorem update_fork_source (source left right : K)
-    (sourceLeft : source ≠ left) (sourceRight : source ≠ right) (leftRight : left ≠ right)
+/-- Updating a designated tape changes only its corresponding frame component. -/
+theorem update_fork_source (source left right : K)
+    (sourceLeft : source ≠ left) (sourceRight : source ≠ right)
     (base : K → List β) (input leftOutput rightOutput replacement : List β) :
     Function.update (forkTapes source left right base input leftOutput rightOutput)
       source replacement = forkTapes source left right base replacement leftOutput rightOutput := by
-  funext k
-  by_cases hs : k = source
-  · subst k; simp [forkTapes, sourceLeft, sourceRight]
-  · by_cases hl : k = left
-    · subst k; simp [forkTapes, Ne.symm sourceLeft, leftRight]
-    · by_cases hr : k = right
-      · subst k; simp [forkTapes, Ne.symm sourceRight]
-      · simp [forkTapes, hs, hl, hr]
+  simp only [forkTapes]
+  rw [Function.update_comm (Ne.symm sourceRight), Function.update_comm (Ne.symm sourceLeft),
+    Function.update_idem]
 
-private theorem update_fork_left (source left right : K) (leftRight : left ≠ right)
+theorem update_fork_left (source left right : K) (leftRight : left ≠ right)
     (base : K → List β) (input leftOutput rightOutput replacement : List β) :
     Function.update (forkTapes source left right base input leftOutput rightOutput)
       left replacement = forkTapes source left right base input replacement rightOutput := by
-  funext k
-  by_cases hl : k = left
-  · subst k; simp [forkTapes, leftRight]
-  · by_cases hr : k = right
-    · subst k; simp [forkTapes, Ne.symm leftRight]
-    · simp [forkTapes, hl, hr]
+  simp only [forkTapes]
+  rw [Function.update_comm (Ne.symm leftRight), Function.update_idem]
 
-private theorem update_fork_right (source left right : K)
+theorem update_fork_right (source left right : K)
     (base : K → List β) (input leftOutput rightOutput replacement : List β) :
     Function.update (forkTapes source left right base input leftOutput rightOutput)
       right replacement = forkTapes source left right base input leftOutput replacement := by
@@ -140,25 +133,6 @@ theorem forkTrace (source left right : K)
       program atLoop base head input leftOutput rightOutput ambient register, ih]
     simp only [List.reverse_cons, List.append_assoc, List.singleton_append]
 
-def forkInTime (source left right : K)
-    (sourceLeft : source ≠ left) (sourceRight : source ≠ right) (leftRight : left ≠ right)
-    (fallback : β) (loopLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K) β) Λ (σ × Option β))
-    (atLoop : program loopLabel = forkLoop source left right fallback loopLabel exit)
-    (base : K → List β) (ambient : σ) (register : Option β) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some loopLabel, (ambient, register), base⟩
-      (some ⟨exit, (ambient, none), forkTapes source left right base []
-        ((base source).reverse ++ base left) ((base source).reverse ++ base right)⟩)
-      ((base source).length + 1) where
-  steps := (base source).length + 1
-  evals_in_steps := by
-    change (MachineComposition.advance (TM2.step program))^[(base source).length + 1]
-      (some ⟨some loopLabel, (ambient, register), base⟩) = _
-    simpa only [forkTapes_self] using
-      forkTrace source left right sourceLeft sourceRight leftRight fallback loopLabel exit
-        program atLoop base (base source) (base left) (base right) ambient register
-  steps_le_m := Nat.le_refl _
 
 def drainedTapes (source scratch : K) (base : K → List β) : K → List β :=
   Reduction.MachineTransfer.tapesAt source scratch base [] (base source).reverse

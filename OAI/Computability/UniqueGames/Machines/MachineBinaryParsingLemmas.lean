@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryFormulaLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryNameMachine
 import OAI.Computability.UniqueGames.Model
@@ -18,10 +19,7 @@ namespace UniqueGamesTheorem.BinaryParsing
 
 open BinaryEncoding BinaryFormula
 
-theorem frame_eq (bits : List Bool) : BinaryNameMachine.frame bits = frame bits := by
-  induction bits with
-  | nil => rfl
-  | cons bit bits ih => simp [BinaryNameMachine.frame, frame, ih]
+theorem frame_eq (bits : List Bool) : BinaryNameMachine.frame bits = frame bits := rfl
 
 theorem canonical_cons_cons (a b : Bool) (bits : List Bool) :
     BinaryNameMachine.canonical (a :: b :: bits) = BinaryNameMachine.canonical (b :: bits) := rfl
@@ -73,30 +71,17 @@ theorem parseFrame_sound (input digits rest : List Bool)
       · simp only [parseFrame, Option.some.injEq, Prod.mk.injEq] at parsed
         rcases parsed with ⟨rfl, rfl⟩
         rfl
-      · cases h : parseFrame input with
-        | none => simp [parseFrame, h] at parsed
-        | some pair =>
-            rcases pair with ⟨ds, tail⟩
-            have hs := ih ds tail h
-            simp [parseFrame, h] at parsed
-            rcases parsed with ⟨rfl, rfl⟩
-            simp [frame, hs]
+      · simp only [parseFrame, Option.bind_eq_bind, Option.bind_eq_some_iff,
+          Prod.exists, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at parsed
+        obtain ⟨ds, tail, h, rfl, rfl⟩ := parsed
+        simp [frame, ih ds tail h]
 
 theorem parseName_sound (input : List Bool) (name : Nat) (rest : List Bool)
     (parsed : parseName input = some (name, rest)) : input = nameBits name ++ rest := by
-  cases h : parseFrame input with
-  | none => simp [parseName, h] at parsed
-  | some pair =>
-      rcases pair with ⟨digits, tail⟩
-      by_cases canonical : digits = (bitsValue digits).bits
-      · simp only [parseName, h, Option.bind_eq_bind, Option.bind_some] at parsed
-        rw [ite_eq_left canonical] at parsed
-        simp only [Option.some.injEq, Prod.mk.injEq] at parsed
-        rcases parsed with ⟨rfl, rfl⟩
-        have hs := parseFrame_sound input digits tail h
-        exact hs.trans (congrArg (fun ds => frame ds ++ tail) canonical)
-      · simp only [parseName, h, Option.bind_eq_bind, Option.bind_some, ite_eq_right canonical] at parsed
-        cases parsed
+  simp only [parseName, Option.bind_eq_bind, Option.bind_eq_some_iff,
+    Prod.exists, Option.ite_some_none_eq_some, Prod.mk.injEq] at parsed
+  obtain ⟨digits, tail, framed, canonical, rfl, rfl⟩ := parsed
+  simpa only [nameBits, ← canonical] using parseFrame_sound input digits tail framed
 
 theorem parseLiteral_sound (input : List Bool) (literal : Literal) (rest : List Bool)
     (parsed : parseLiteral input = some (literal, rest)) :
@@ -104,38 +89,19 @@ theorem parseLiteral_sound (input : List Bool) (literal : Literal) (rest : List 
   cases input with
   | nil => simp [parseLiteral] at parsed
   | cons sign input =>
-      cases h : parseName input with
-      | none => simp [parseLiteral, h] at parsed
-      | some pair =>
-          rcases pair with ⟨name, tail⟩
-          have hs := parseName_sound input name tail h
-          simp [parseLiteral, h] at parsed
-          rcases parsed with ⟨rfl, rfl⟩
-          simp [literalBits, hs]
+      simp only [parseLiteral, Option.bind_eq_bind, Option.bind_eq_some_iff,
+        Prod.exists, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at parsed
+      obtain ⟨name, tail, named, rfl, rfl⟩ := parsed
+      simp [literalBits, parseName_sound input name tail named]
 
 theorem parseClause_sound (input : List Bool) (clause : Clause) (rest : List Bool)
     (parsed : parseClause input = some (clause, rest)) : input = clauseBits clause ++ rest := by
-  cases ha : parseLiteral input with
-  | none => simp [parseClause, ha] at parsed
-  | some first =>
-      rcases first with ⟨a, afterA⟩
-      cases hb : parseLiteral afterA with
-      | none => simp [parseClause, ha, hb] at parsed
-      | some second =>
-          rcases second with ⟨b, afterB⟩
-          cases hc : parseLiteral afterB with
-          | none => simp [parseClause, ha, hb, hc] at parsed
-          | some third =>
-              rcases third with ⟨c, afterC⟩
-              have hA := parseLiteral_sound input a afterA ha
-              have hB := parseLiteral_sound afterA b afterB hb
-              have hC := parseLiteral_sound afterB c afterC hc
-              have pairEq : (#v[a, b, c], afterC) = (clause, rest) := by
-                apply Option.some.inj
-                simpa only [parseClause, ha, hb, hc, Option.bind_eq_bind,
-                  Option.bind_some, Option.pure_def] using parsed
-              rcases Prod.mk.inj pairEq with ⟨rfl, rfl⟩
-              simp [clauseBits, hA, hB, hC, List.append_assoc]
+  simp only [parseClause, Option.bind_eq_bind, Option.bind_eq_some_iff,
+    Prod.exists, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at parsed
+  obtain ⟨a, afterA, ha, b, afterB, hb, c, afterC, hc, rfl, rfl⟩ := parsed
+  simp [clauseBits, parseLiteral_sound input a afterA ha,
+    parseLiteral_sound afterA b afterB hb, parseLiteral_sound afterB c afterC hc,
+    List.append_assoc]
 
 theorem parseClauses_sound (fuel : Nat) (input : List Bool)
     (clauses : List Clause) (rest : List Bool)
@@ -151,49 +117,20 @@ theorem parseClauses_sound (fuel : Nat) (input : List Bool)
           · simp only [parseClauses, Option.some.injEq, Prod.mk.injEq] at parsed
             rcases parsed with ⟨rfl, rfl⟩
             rfl
-          · cases hc : parseClause input with
-            | none => simp [parseClauses, hc] at parsed
-            | some first =>
-                rcases first with ⟨clause, afterClause⟩
-                cases hs : parseClauses fuel afterClause with
-                | none => simp [parseClauses, hc, hs] at parsed
-                | some remaining =>
-                    rcases remaining with ⟨cs, tail⟩
-                    have hC := parseClause_sound input clause afterClause hc
-                    have hS := ih afterClause cs tail hs
-                    simp [parseClauses, hc, hs] at parsed
-                    rcases parsed with ⟨rfl, rfl⟩
-                    simp [clausesBits, hC, hS, List.append_assoc]
+          · simp only [parseClauses, Option.bind_eq_bind, Option.bind_eq_some_iff,
+              Prod.exists, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at parsed
+            obtain ⟨clause, afterClause, hc, cs, tail, hs, rfl, rfl⟩ := parsed
+            simp [clausesBits, parseClause_sound input clause afterClause hc,
+              ih afterClause cs tail hs, List.append_assoc]
 
 theorem decodeFormula_sound (input : List Bool) (formula : Formula)
     (parsed : decodeFormula input = some formula) : input = formulaBits formula := by
-  cases h : parseClauses (input.length + 1) input with
-  | none => simp [decodeFormula, h] at parsed
-  | some pair =>
-      rcases pair with ⟨clauses, rest⟩
-      by_cases empty : rest = []
-      · subst rest
-        simp [decodeFormula, h] at parsed
-        subst formula
-        simpa only [formulaBits, List.append_nil] using
-          parseClauses_sound (input.length + 1) input clauses [] h
-      · simp [decodeFormula, h, empty] at parsed
+  simp only [decodeFormula, Option.bind_eq_bind, Option.bind_eq_some_iff,
+    Prod.exists, Option.ite_some_none_eq_some] at parsed
+  obtain ⟨clauses, rest, h, rfl, rfl⟩ := parsed
+  simpa only [formulaBits, List.append_nil] using
+    parseClauses_sound (input.length + 1) input clauses [] h
 
-theorem decodeFormula_eq_some_iff (input : List Bool) (formula : Formula) :
-    decodeFormula input = some formula ↔ input = formulaBits formula :=
-  ⟨decodeFormula_sound input formula, fun h => h ▸ decodeFormula_encoded formula⟩
-
-/-- Exact agreement of the finite-state name scanner with a canonical encoded
-name, including the untouched suffix and the actual binary payload stack. -/
-theorem scanSpec_nameBits (name : Nat) (suffix output : List Bool) :
-    BinaryNameMachine.scanSpec (nameBits name ++ suffix) output none =
-      ⟨true, suffix, name.bits.reverse ++ output⟩ := by
-  unfold nameBits
-  rw [← frame_eq, BinaryNameMachine.scanSpec_frame]
-  have h := canonical_nat_bits name
-  simpa only [BinaryNameMachine.canonical] using
-    congrArg (fun accepted =>
-      (⟨accepted, suffix, name.bits.reverse ++ output⟩ : BinaryNameMachine.Result)) h
 
 end UniqueGamesTheorem.BinaryParsing
 
@@ -225,11 +162,6 @@ theorem rejectBinary_unsatisfiable : ¬rejectBinary.Satisfiable := by
   cases h : assignment 0 <;>
     simp [BinaryFormula.Clause.eval, BinaryFormula.Literal.eval, h] at positive negative
 
-def rejectFormula : Target.Formula := BinaryOccurrenceRename.renamed rejectBinary
-
-theorem reject_unsatisfiable : ¬rejectFormula.Satisfiable := by
-  simpa only [rejectFormula, BinaryOccurrenceRename.renamed_satisfiable_iff] using
-    rejectBinary_unsatisfiable
 
 def totalParsed (input : List Bool) : BinaryFormula.Formula :=
   (BinaryEncoding.decodeFormula input).getD rejectBinary
@@ -248,30 +180,6 @@ theorem totalRename_satisfiable_iff (input : List Bool) :
   exact (BinaryOccurrenceRename.renamed_satisfiable_iff (totalParsed input)).trans
     (totalParsed_satisfiable_iff input)
 
-theorem totalRename_encoded (formula : BinaryFormula.Formula) :
-    totalRename (BinaryEncoding.formulaBits formula) = BinaryOccurrenceRename.renamed formula := by
-  simp [totalRename, totalParsed]
-
-theorem language_encoded (formula : BinaryFormula.Formula) :
-    language (BinaryEncoding.formulaBits formula) ↔ formula.Satisfiable := by
-  simp [language]
-
-theorem reject_bits_length : (Complexity.formulaBits rejectFormula).length = 25 := by decide
-
-theorem totalRename_output_length (input : List Bool) :
-    (Complexity.formulaBits (totalRename input)).length ≤
-      9 * input.length * input.length + 10 * input.length + 25 := by
-  cases parsed : BinaryEncoding.decodeFormula input with
-  | none =>
-      have output : totalRename input = rejectFormula := by simp [totalRename, totalParsed, parsed, rejectFormula]
-      rw [output, reject_bits_length]
-      omega
-  | some formula =>
-      have correct := BinaryParsing.decodeFormula_sound input formula parsed
-      have bound := BinaryOccurrenceRename.renamed_encoding_bound_bits formula
-      simp only [totalRename, totalParsed, parsed, Option.getD_some]
-      rw [correct]
-      omega
 
 end UniqueGamesTheorem.BinaryLanguage
 

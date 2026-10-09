@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Research.R22PcpPreprocessing
 import OAI.Computability.UniqueGames.PCP.AlphabetReductionLemmas
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.ExpanderTables
@@ -75,20 +77,6 @@ theorem rotation_materialize_image {n d : Nat} {D : Type*}
       G.accepts (x.1, ports.symm x.2) a b := by
   exact PortTables.accepts_ofPortGraph _ _ _ x a b
 
-private theorem constraintGraph_ext {V E A : Type*} {G H : ConstraintGraph V E A}
-    (hreverse : ∀ e, G.reverse e = H.reverse e)
-    (htail : ∀ e, G.tail e = H.tail e)
-    (haccepts : ∀ e a b, G.accepts e a b = H.accepts e a b) : G = H := by
-  rcases G with ⟨r, hi, t, p, hp⟩
-  rcases H with ⟨r', hi', t', p', hp'⟩
-  have hr : r = r' := Equiv.ext hreverse
-  cases hr
-  have ht : t = t' := funext htail
-  cases ht
-  have ha : p = p' := funext fun e => funext fun a => funext fun b => haccepts e a b
-  cases ha
-  rfl
-
 theorem baseGraph_materialize {n d : Nat} {D : Type*}
     (G : ConstraintGraph (Fin n) (Fin n × D) PortTables.Label)
     (ports : D ≃ Fin d) (htail : G.tail = Prod.fst) :
@@ -98,10 +86,10 @@ theorem baseGraph_materialize {n d : Nat} {D : Type*}
   · intro x
     rw [PortTables.baseGraph_reverse, rotation_materialize]
     rfl
-  · intro x
+  · funext x
     change x.1 = G.tail (x.1, ports.symm x.2)
     rw [htail]
-  · intro x a b
+  · funext x a b
     rw [PortTables.baseGraph_accepts, accepts_materialize]
     rfl
 

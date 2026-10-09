@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineTupleOdometer
 import OAI.Computability.UniqueGames.PCP.SourceLoopInitLemmas
 import OAI.Computability.UniqueGames.PCP.SourceRuntimeSpace
@@ -26,16 +27,14 @@ noncomputable def run_actual (T : NoiseTables.Table s d)
     (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base)
     (oldRhs : Fin k → Bool)
     (hB : base (headerTape k s d noiseCount .baseValue) =
-      encodeWord (CanonicalAddress.base F.variables F.equations.length s d))
-    (hC : base (headerTape k s d noiseCount .capacity) =
-      encodeWord (AddressGame.bodyCapacity (source F) k s d)) :
+      encodeWord (CanonicalAddress.base F.variables F.equations.length s d)) :
     StateTransition.EvalsToInTime (TM2.step P)
       ⟨some (labels (main (AddressOutcomeSpecs.rows k T))), (((oldRhs, ()), ()), none), base⟩
       (some ⟨exit, initialState k, MachineAddressEdge.appended (Slots k s d noiseCount)
         base (AddressOutcomeSpecs.tupleBits (source F) k T tuple)⟩)
       ((AddressTupleBudget.timePolynomial k T).eval (SourceEncoding.inputBits F).length) := by
   have actual := AddressTupleBody.run_actual T labels exit P atLabels F tuple base
-    ready clean oldRhs hB hC
+    ready clean oldRhs hB
   exact {
     steps := actual.steps
     evals_in_steps := actual.evals_in_steps
@@ -43,32 +42,8 @@ noncomputable def run_actual (T : NoiseTables.Table s d)
       (AddressTupleBudget.budget_le_timePolynomial F tuple T base ready clean)
   }
 
-/-- The explicit iterated transition trace and its uniform bound, for callers
-that compose traces directly instead of runtime-witness structures. -/
-theorem trace_actual (T : NoiseTables.Table s d)
-    (labels : AddressTupleBody.Label k s d noiseCount (AddressOutcomeSpecs.rows k T) → Λ)
-    (exit : Option Λ)
-    (P : Λ → TM2.Stmt (fun _ : AddressTupleBody.Arena k s d noiseCount => Bool) Λ (BodyState k))
-    (atLabels : ∀ l, P (labels l) = instruction (AddressOutcomeSpecs.rows k T) labels exit l)
-    (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (base : AddressTupleBody.Arena k s d noiseCount → List Bool) (ready : Ready F tuple base)
-    (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base)
-    (oldRhs : Fin k → Bool)
-    (hB : base (headerTape k s d noiseCount .baseValue) =
-      encodeWord (CanonicalAddress.base F.variables F.equations.length s d))
-    (hC : base (headerTape k s d noiseCount .capacity) =
-      encodeWord (AddressGame.bodyCapacity (source F) k s d)) :
-    ∃ steps ≤ (AddressTupleBudget.timePolynomial k T).eval (SourceEncoding.inputBits F).length,
-      (MachineComposition.advance (TM2.step P))^[steps]
-        (some ⟨some (labels (main (AddressOutcomeSpecs.rows k T))),
-          (((oldRhs, ()), ()), none), base⟩) =
-        some ⟨exit, initialState k, MachineAddressEdge.appended (Slots k s d noiseCount)
-          base (AddressOutcomeSpecs.tupleBits (source F) k T tuple)⟩ := by
-  have actual := run_actual T labels exit P atLabels F tuple base ready clean oldRhs hB hC
-  exact ⟨actual.steps, actual.steps_le_m, actual.evals_in_steps⟩
 
 end UniqueGamesTheorem.Integration.AddressTuplePolynomial
-
 
 
 namespace UniqueGamesTheorem.Reduction.AddressMachineProgram
@@ -108,9 +83,6 @@ def clearKeys : List (Tape k T) := by
 theorem clearKeys_covers (tape : Tape k T) (ha : tape ≠ accumulator k T)
     (ho : tape ≠ output k T) : tape ∈ clearKeys k T := (mem_clearKeys k T tape).2 ⟨ha,ho⟩
 
-theorem clearKeys_nodup : (clearKeys k T).Nodup := by
-  unfold clearKeys
-  exact Finset.nodup_toList _
 
 abbrev HeaderLabel := MachineAddressHeaders.Label k s d T.vectors.length
 abbrev BodyLabel := Integration.AddressTupleBody.Label k s d T.vectors.length
@@ -237,9 +209,6 @@ def machine : FinTM2 where
 @[simp] theorem machine_input : (machine k T).k₀ = (MachineSourceTuple.Tape.source : Tape k T) := rfl
 @[simp] theorem machine_output : (machine k T).k₁ = output k T := rfl
 
-/-- Identity alphabet encodings at both ends of the concrete machine. -/
-def inputAlphabet : (machine k T).Γ (machine k T).k₀ ≃ Bool := Equiv.refl Bool
-def outputAlphabet : (machine k T).Γ (machine k T).k₁ ≃ Bool := Equiv.refl Bool
 
 def inputTapes (bits : List Bool) : Tape k T → List Bool :=
   Function.update (fun _ => []) .source bits
@@ -253,11 +222,6 @@ def outputTapes (bits : List Bool) : Tape k T → List Bool :=
 @[simp] theorem inputTapes_other (bits : List Bool) (tape : Tape k T) (h : tape ≠ .source) :
     inputTapes k T bits tape = [] := by simp [inputTapes,h]
 
-@[simp] theorem outputTapes_output (bits : List Bool) : outputTapes k T bits (output k T) = bits := by
-  simp [outputTapes, SourceRuntimeFinish.canonicalTapes]
-
-@[simp] theorem outputTapes_other (bits : List Bool) (tape : Tape k T) (h : tape ≠ output k T) :
-    outputTapes k T bits tape = [] := by simp [outputTapes,SourceRuntimeFinish.canonicalTapes,h]
 
 theorem initList_eq (bits : List Bool) : initList (machine k T) bits =
     ⟨some (start k T),AddressMachineSpace.initialState k,inputTapes k T bits⟩ := by
@@ -285,7 +249,6 @@ theorem haltList_eq (bits : List Bool) : haltList (machine k T) bits =
 
 end
 end UniqueGamesTheorem.Reduction.AddressMachineProgram
-
 
 
 /-!

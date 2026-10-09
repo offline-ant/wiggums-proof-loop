@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.ValueLemmas
 import OAI.Computability.UniqueGames.Soundness.ConditionalLocality
 import OAI.Computability.UniqueGames.Soundness.ConditionalReindex
@@ -83,29 +84,6 @@ def actualLocalSimulation
       _ _ answerA answerB haccept (enumerate i).val hsingle (qb i) hname
     simpa only [localFirstFromH_question_inside, Equiv.symm_apply_apply] using h
 
-theorem actual_conditioned_strategy_success_le_repeated_value
-    {P R O N : Type} [Fintype P] [DecidableEq P] [Fintype R] [DecidableEq R]
-    [Fintype O] [DecidableEq O] [Fintype N] [DecidableEq N]
-    (J : Finset P) (g : Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (reference : RawObservationFibre J g.name gamma observed)
-    (mu : FiniteDistribution (O × N))
-    (enumerate : Fin (zeroSet J gamma).card ≃ PositionInside (zeroSet J gamma))
-    (strategy : IncidenceExtraction.Strategies
-      (ZeroInformation.FirstInput P R O) (ZeroInformation.SecondInput P R O N)
-      (ActualProjection.FirstAnswer P) (ActualProjection.SecondAnswer P)) :
-    (Simulation.reconstructedGame
-      ((incidenceGame g mu).repetition (zeroSet J gamma).card)
-      (ActualProjection.predicateGame (R := R) g (membershipBool J))
-      (actualLocalSimulation J g gamma observed reference mu enumerate)).success
-        (Simulation.strategyPair strategy) ≤
-      ((incidenceGame g mu).repetition (zeroSet J gamma).card).value := by
-  exact (Simulation.reconstructedGame_success_le
-    ((incidenceGame g mu).repetition (zeroSet J gamma).card)
-    (ActualProjection.predicateGame (R := R) g (membershipBool J))
-    (actualLocalSimulation J g gamma observed reference mu enumerate) strategy).trans
-      (((incidenceGame g mu).repetition (zeroSet J gamma).card).success_le_value _)
 
 end
 end UniqueGamesTheorem.Soundness.ConditionalSimulation
@@ -124,19 +102,6 @@ open ConditionalIncidences ConditionalSimulation IncidenceExtraction RepeatedGam
 noncomputable section
 attribute [local instance] Classical.propDecidable
 
-theorem uniform_probability_decide {Ω : Type} [Fintype Ω] [Nonempty Ω]
-    (event : Ω → Prop) [DecidablePred event] :
-    (FiniteDistribution.uniform Ω).probability (fun x => decide (event x)) =
-      (∑ x, if event x then (1 : ℝ) else 0) / (Fintype.card Ω : ℝ) := by
-  classical
-  calc
-    _ = (FiniteDistribution.uniform Ω).expectation
-        (fun x => if event x then (1 : ℝ) else 0) := by
-      unfold FiniteDistribution.probability FiniteDistribution.expectation
-      apply Finset.sum_congr rfl
-      intro x _
-      by_cases hx : event x <;> simp [hx]
-    _ = _ := FiniteDistribution.expectation_uniform _
 
 variable {P R O N : Type}
   [Fintype P] [DecidableEq P] [Fintype R] [DecidableEq R]
@@ -152,15 +117,6 @@ def actualWin (J : Finset P) (g : Incidence O N)
   strategy.wins (ActualProjection.predicateGame (R := R) g (membershipBool J))
     (actualFirst J gamma draw) (actualSecond J g.name gamma draw)
 
-def conditionedWinProbability (J : Finset P) (g : Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (reference : RawObservationFibre J g.name gamma observed)
-    (strategy : OuterStrategy (P := P) (R := R) (O := O) (N := N)) : ℝ := by
-  classical
-  letI : Nonempty (RawObservationFibre J g.name gamma observed) := ⟨reference⟩
-  exact (FiniteDistribution.uniform (RawObservationFibre J g.name gamma observed)).probability
-    (fun sample => decide (actualWin J g gamma strategy sample.val.2))
 
 def reconstructedEvent (J : Finset P) (g : Incidence O N)
     (gamma : RawCoefficients J (ZeroInformation.Bits R))
@@ -190,83 +146,6 @@ theorem actualWin_iff_reconstructedEvent (J : Finset P) (g : Incidence O N)
   rw [localFirstFromH_correct J g.name gamma observed distinct reference sample,
     localSecondFromH_correct J g.name gamma observed reference sample]
 
-omit [Fintype N] in
-theorem conditionedWinProbability_eq_fresh (J : Finset P) (g : Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (reference : RawObservationFibre J g.name gamma observed)
-    (e : Fin (zeroSet J gamma).card ≃ PositionInside (zeroSet J gamma))
-    (strategy : OuterStrategy (P := P) (R := R) (O := O) (N := N))
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    conditionedWinProbability J g gamma observed reference strategy =
-      (∑ fresh : Fin (zeroSet J gamma).card → O × Fin 3,
-        if reconstructedEvent J g gamma observed reference e strategy
-          (fun i => incidence g.name (fresh i)) then (1:ℝ) else 0) /
-          Fintype.card (Fin (zeroSet J gamma).card → O × Fin 3) := by
-  classical
-  let : Nonempty (RawObservationFibre J g.name gamma observed) := ⟨reference⟩
-  have hpos : 0 < Fintype.card (RawObservationFibre J g.name gamma observed) := Fintype.card_pos
-  unfold conditionedWinProbability
-  rw [uniform_probability_decide]
-  have hraw := raw_conditional_event_reindex_real J g.name gamma observed hpos
-    (zeroSet J gamma).card e (reconstructedEvent J g gamma observed reference e strategy)
-  simpa only [← actualWin_iff_reconstructedEvent J g gamma observed reference e strategy distinct]
-    using hraw
-
-def incidenceLaw [Nonempty O] (g : Incidence O N) : FiniteDistribution (O × N) :=
-  (FiniteDistribution.uniform (O × Fin 3)).pushforward (incidence g.name)
-
-theorem reconstructed_success_eq_fresh_average [Nonempty O]
-    (J : Finset P) (g : Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (reference : RawObservationFibre J g.name gamma observed)
-    (e : Fin (zeroSet J gamma).card ≃ PositionInside (zeroSet J gamma))
-    (strategy : OuterStrategy (P := P) (R := R) (O := O) (N := N)) :
-    (Simulation.reconstructedGame
-      ((incidenceGame g (incidenceLaw g)).repetition (zeroSet J gamma).card)
-      (ActualProjection.predicateGame (R := R) g (membershipBool J))
-      (actualLocalSimulation J g gamma observed reference (incidenceLaw g) e)).success
-        (Simulation.strategyPair strategy) =
-      (∑ fresh : Fin (zeroSet J gamma).card → O × Fin 3,
-        if reconstructedEvent J g gamma observed reference e strategy
-          (fun i => incidence g.name (fresh i)) then (1:ℝ) else 0) /
-          Fintype.card (Fin (zeroSet J gamma).card → O × Fin 3) := by
-  classical
-  let G := (incidenceGame g (incidenceLaw g)).repetition (zeroSet J gamma).card
-  let outer := ActualProjection.predicateGame (R := R) g (membershipBool J)
-  let r := actualLocalSimulation J g gamma observed reference (incidenceLaw g) e
-  change (G.questions.pushforward (fun q => (r.questionA q.1, r.questionB q.2))).probability
-    (fun q => decide (strategy.wins outer q.1 q.2)) = _
-  rw [FiniteDistribution.probability_pushforward]
-  change (((incidenceLaw g).iid (zeroSet J gamma).card).transport
-    (Foundations.Games.Game.tupleQuestionEquiv (zeroSet J gamma).card)).probability
-      (fun q => decide (strategy.wins outer (r.questionA q.1) (r.questionB q.2))) = _
-  rw [FiniteDistribution.probability_transport]
-  unfold incidenceLaw
-  rw [FiniteDistribution.iid_pushforward, FiniteDistribution.iid_uniform,
-    FiniteDistribution.probability_pushforward]
-  change (FiniteDistribution.uniform (Fin (zeroSet J gamma).card → O × Fin 3)).probability
-    (fun fresh => decide (reconstructedEvent J g gamma observed reference e strategy
-      (fun i => incidence g.name (fresh i)))) = _
-  exact uniform_probability_decide _
-
-/-- The actual finite observation-fibre probability is bounded by the genuine
-    repeated incidence-game value. The sampling identity is proved internally. -/
-theorem conditioned_probability_le_repeated_value [Nonempty O]
-    (J : Finset P) (g : Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (reference : RawObservationFibre J g.name gamma observed)
-    (e : Fin (zeroSet J gamma).card ≃ PositionInside (zeroSet J gamma))
-    (strategy : OuterStrategy (P := P) (R := R) (O := O) (N := N))
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    conditionedWinProbability J g gamma observed reference strategy ≤
-      ((incidenceGame g (incidenceLaw g)).repetition (zeroSet J gamma).card).value := by
-  rw [conditionedWinProbability_eq_fresh J g gamma observed reference e strategy distinct,
-    ← reconstructed_success_eq_fresh_average J g gamma observed reference e strategy]
-  exact actual_conditioned_strategy_success_le_repeated_value
-    J g gamma observed reference (incidenceLaw g) e strategy
 
 end
 end UniqueGamesTheorem.Soundness.ConditionalGameLaw

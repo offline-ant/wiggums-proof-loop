@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.ExpanderRowControlLemmas
 import OAI.Computability.UniqueGames.PCP.PreprocessingLazyWords
 
@@ -32,41 +33,19 @@ def expanderRow (d : Nat) (H : ExpanderTables.Table n e) (v : Fin n) (p : Fin e)
   ⟨v, rowIndex n (d + e) ((ExpanderTables.lookup H (v, p)).1,
     overlayPorts d e (.inr (ExpanderTables.lookup H (v, p)).2)), trueRelation⟩
 
-private theorem relation_ext {r s : RelationTable}
-    (h : ∀ a b, relationAt r a b = relationAt s a b) : r = s := by
-  apply Vector.ext
-  intro i hi
-  simpa only [relationAt, Prod.eta, Equiv.apply_symm_apply, Fin.getElem_fin] using
-    h (relationIndex.symm ⟨i, hi⟩).1 (relationIndex.symm ⟨i, hi⟩).2
-
 theorem row_overlay_old (G : PortTables.Table n d) (H : ExpanderTables.Table n e)
     (v : Fin n) (p : Fin d) :
     row (overlay G H) v (overlayPorts d e (.inl p)) = oldRow G e v p := by
-  have hr : (overlay G H).reverseIndex[rowIndex n (d + e) (v, overlayPorts d e (.inl p))] =
-      rowIndex n (d + e) ((rotation G (v, p)).1,
-        overlayPorts d e (.inl (rotation G (v, p)).2)) := by
-    rw [← rowIndex_rotation, overlay_rotation_old]
-  have hp : (overlay G H).relations[rowIndex n (d + e) (v, overlayPorts d e (.inl p))] =
-      G.relations[rowIndex n d (v, p)] := by
-    apply relation_ext
-    exact overlay_accepts_old G H v p
-  exact congrArg₂ (DartRow.mk v) hr hp
+  exact PortTables.row_eq _ _ _ _ _ (overlay_rotation_old G H v p)
+    (overlay_accepts_old G H v p)
 
 theorem row_overlay_expander (G : PortTables.Table n d) (H : ExpanderTables.Table n e)
     (v : Fin n) (p : Fin e) :
     row (overlay G H) v (overlayPorts d e (.inr p)) = expanderRow d H v p := by
-  have hr : (overlay G H).reverseIndex[rowIndex n (d + e) (v, overlayPorts d e (.inr p))] =
-      rowIndex n (d + e) ((ExpanderTables.lookup H (v, p)).1,
-        overlayPorts d e (.inr (ExpanderTables.lookup H (v, p)).2)) := by
-    rw [← rowIndex_rotation, overlay_rotation_expander]
-  have hp : (overlay G H).relations[rowIndex n (d + e) (v, overlayPorts d e (.inr p))] =
-      trueRelation := by
-    apply relation_ext
-    intro a b
-    simpa only [PortTables.accepts, relationAt, trueRelation,
-      PreprocessingLazyWords.trueRelation, Fin.getElem_fin, Vector.getElem_replicate] using
-      overlay_accepts_expander G H v p a b
-  exact congrArg₂ (DartRow.mk v) hr hp
+  apply PortTables.row_eq _ _ _ _ _ (overlay_rotation_expander G H v p)
+  intro a b
+  simpa only [trueRelation, PreprocessingLazyWords.trueRelation, relationAt,
+    Fin.getElem_fin, Vector.getElem_replicate] using overlay_accepts_expander G H v p a b
 
 theorem oldRow_reverse_val (G : PortTables.Table n d) (v : Fin n) (p : Fin d) :
     (oldRow G e v p).reverseIndex.val = oldReverseMap d e (row G v p).reverseIndex.val := by
@@ -111,9 +90,6 @@ def vertexRows (G : PortTables.Table n d) (H : ExpanderTables.Table n e) (v : Fi
     List (DartRow n (n * (d + e))) :=
   List.ofFn (oldRow G e v) ++ List.ofFn (expanderRow d H v)
 
-theorem vertexRows_length (G : PortTables.Table n d) (H : ExpanderTables.Table n e) (v : Fin n) :
-    (vertexRows G H v).length = d + e := by
-  simp only [vertexRows, List.length_append, List.length_ofFn]
 
 theorem flatRows_overlay (G : PortTables.Table n d) (H : ExpanderTables.Table n e) :
     (flatRows (overlay G H)).toList = (List.ofFn (vertexRows G H)).flatten := by
@@ -125,28 +101,6 @@ theorem flatRows_overlay (G : PortTables.Table n d) (H : ExpanderTables.Table n 
   simp only [row_overlay_old, row_overlay_expander]
   rfl
 
-theorem vertexRows_words (G : PortTables.Table n d) (H : ExpanderTables.Table n e) (v : Fin n) :
-    (vertexRows G H v).flatMap rowWords =
-      (List.ofFn fun p : Fin d =>
-        [v.val, oldReverseMap d e (row G v p).reverseIndex.val] ++
-          relationWords (row G v p).relation).flatten ++
-      (List.ofFn fun p : Fin e =>
-        [v.val, expanderReverseMap d e
-          (ExpanderTables.reverseIndex H (ExpanderTables.rowIndex n e (v, p))).val] ++
-          List.replicate 4096 1).flatten := by
-  have ho : rowWords ∘ oldRow G e v = fun p : Fin d =>
-      [v.val, oldReverseMap d e (row G v p).reverseIndex.val] ++
-        relationWords (row G v p).relation := by
-    funext p
-    exact oldRow_words G v p
-  have he : rowWords ∘ expanderRow d H v = fun p : Fin e =>
-      [v.val, expanderReverseMap d e
-        (ExpanderTables.reverseIndex H (ExpanderTables.rowIndex n e (v, p))).val] ++
-        List.replicate 4096 1 := by
-    funext p
-    exact expanderRow_words H v p
-  simp only [vertexRows, List.flatMap_def, List.map_append, List.map_ofFn, List.flatten_append]
-  rw [ho, he]
 
 theorem tableWords_overlay (G : PortTables.Table n d) (H : ExpanderTables.Table n e) :
     PortTables.tableWords (overlay G H) =

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Module.Pi
@@ -66,121 +67,16 @@ noncomputable def logicalShift (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
 
 theorem logicalShift_injective (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
     (hlam : Function.Surjective lam) : Function.Injective (logicalShift R lam hlam) := by
-  intro a b hab
-  obtain ⟨h, rfl⟩ := hlam a
-  obtain ⟨k, rfl⟩ := hlam b
-  rw [logicalShift_lambda, logicalShift_lambda] at hab
-  have hz : projection R lam ((h - k : R) : P) = 0 := by
-    change projection R lam ((h : P) - (k : P)) = 0
-    rw [map_sub, hab, sub_self]
-  have := (projection_eq_zero R lam (h - k)).mp hz
-  exact sub_eq_zero.mp (by simpa only [map_sub] using this)
+  apply Function.Injective.comp ?_ (lam.quotKerEquivOfSurjective hlam).symm.injective
+  apply (LinearMap.ker_eq_bot (f := quotientShift R lam)).mp
+  apply Submodule.ker_liftQ_eq_bot
+  intro h hh
+  exact (projection_eq_zero R lam h).mp hh
 
 /-- Equivariance under every allowed shift; no linearity of `C` is assumed. -/
 def Equivariant (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B) (C : P → B) : Prop :=
   ∀ (u : P) (h : R), C (u + (h : P)) = C u + lam h
 
-/-- An output difference is unchanged by every logical shift. -/
-theorem difference_shift (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (C : P → B) (hC : Equivariant R lam C) (u a : P) (h : R) :
-    C (u + (h : P) + a) - C (u + (h : P)) = C (u + a) - C u := by
-  have he : u + (h : P) + a = (u + a) + (h : P) := by
-    simp only [add_assoc, add_comm (h : P) a]
-  rw [he, hC, hC, add_sub_add_right_eq_sub]
-
-/-- Translating by a logical shift bijects output fibers even after conditioning
-on an arbitrary shift-invariant event. -/
-def conditionedShiftEquiv (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (C : P → B) (hC : Equivariant R lam C) (D : P → Prop)
-    (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u) (b : B) (h : R) :
-    {u : P // C u = b ∧ D u} ≃ {u : P // C u = b + lam h ∧ D u} where
-  toFun u := ⟨u.val + (h : P), by
-    exact ⟨(hC u.val h).trans (congrArg (fun x => x + lam h) u.property.1),
-      (hD u.val h).mpr u.property.2⟩⟩
-  invFun u := ⟨u.val + ((-h : R) : P), by
-    constructor
-    · rw [hC u.val (-h), u.property.1, map_neg, add_neg_cancel_right]
-    · exact (hD u.val (-h)).mpr u.property.2⟩
-  left_inv u := Subtype.ext (by simp)
-  right_inv u := Subtype.ext (by simp)
-
-/-- Surjectivity makes all output fibers equally large inside an invariant
-event, without assuming that this event has positive probability. -/
-noncomputable def conditionedFiberEquiv (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (D : P → Prop) (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u)
-    (b c : B) : {u : P // C u = b ∧ D u} ≃ {u : P // C u = c ∧ D u} := by
-  classical
-  let h : R := Classical.choose (hlam (c - b))
-  have hh : lam h = c - b := Classical.choose_spec (hlam (c - b))
-  have he : b + lam h = c := by rw [hh, add_comm, sub_add_cancel]
-  simpa only [he] using conditionedShiftEquiv R lam C hC D hD b h
-
-theorem conditioned_fiber_card (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (D : P → Prop) (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u)
-    (b c : B) :
-    Nat.card {u : P // C u = b ∧ D u} = Nat.card {u : P // C u = c ∧ D u} :=
-  Nat.card_congr (conditionedFiberEquiv R lam hlam C hC D hD b c)
-
-theorem output_fiber_card (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (b c : B) : Nat.card {u : P // C u = b} = Nat.card {u : P // C u = c} := by
-  simpa only [and_true] using conditioned_fiber_card R lam hlam C hC
-    (fun _ => True) (fun _ _ => Iff.rfl) b c
-
-/-- Fixing the additive perturbation and the observed difference leaves the
-initial output uniform: the joint fibers have equal cardinality for all outputs. -/
-theorem difference_fiber_card (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (a : P) (d b c : B) :
-    Nat.card {u : P // C u = b ∧ C (u + a) - C u = d} =
-      Nat.card {u : P // C u = c ∧ C (u + a) - C u = d} := by
-  apply conditioned_fiber_card R lam hlam C hC
-  intro u h
-  rw [difference_shift R lam C hC]
-
-/-- Splitting an invariant event into its output fibers. -/
-def conditionedSigmaEquiv (C : P → B) (D : P → Prop) :
-    {u : P // D u} ≃ Σ b : B, {u : P // C u = b ∧ D u} where
-  toFun u := ⟨C u.val, ⟨u.val, rfl, u.property⟩⟩
-  invFun u := ⟨u.2.val, u.2.property.2⟩
-  left_inv _ := rfl
-  right_inv := by rintro ⟨b, u, hu, hD⟩; cases hu; rfl
-
-/-- An invariant event factors as an independent logical output and one fiber. -/
-noncomputable def conditionedProductEquiv (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (D : P → Prop) (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u) (b : B) :
-    {u : P // D u} ≃ B × {u : P // C u = b ∧ D u} :=
-  ((conditionedSigmaEquiv C D).trans
-    (Equiv.sigmaCongrRight (fun c => conditionedFiberEquiv R lam hlam C hC D hD c b))).trans
-    (Equiv.sigmaEquivProd _ _)
-
-@[simp] theorem conditionedProductEquiv_fst (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (D : P → Prop) (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u) (b : B)
-    (u : {u : P // D u}) :
-    (conditionedProductEquiv R lam hlam C hC D hD b u).1 = C u.val := rfl
-
-/-- Exact counting factorization underlying the conditional uniform law. -/
-theorem conditioned_card_factorization [Finite P] [Finite B]
-    (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (D : P → Prop) (hD : ∀ (u : P) (h : R), D (u + (h : P)) ↔ D u) (b : B) :
-    Nat.card {u : P // D u} = Nat.card B * Nat.card {u : P // C u = b ∧ D u} := by
-  rw [← Nat.card_prod]
-  exact Nat.card_congr (conditionedProductEquiv R lam hlam C hC D hD b)
-
-theorem difference_card_factorization [Finite P] [Finite B]
-    (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (C : P → B) (hC : Equivariant R lam C)
-    (a : P) (d b : B) :
-    Nat.card {u : P // C (u + a) - C u = d} =
-      Nat.card B * Nat.card {u : P // C u = b ∧ C (u + a) - C u = d} := by
-  apply conditioned_card_factorization R lam hlam C hC
-  intro u h
-  rw [difference_shift R lam C hC]
 
 theorem output_constant_on_fibers (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
     (C : P → B) (hC : Equivariant R lam C) (x y : P)
@@ -215,128 +111,17 @@ theorem change_iff (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
       output R lam C hC (projection R lam u)) ↔ C (u + a) ≠ C u := by
   rw [← map_add, output_projection, output_projection]
 
-/-- Pulling a quotient character back recovers its prescribed logical value. -/
-theorem character_pullback_shift (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (hlam : Function.Surjective lam) (g : Space R lam →ₗ[𝕜] 𝕜) (h : R) :
-    (g.comp (projection R lam)) (h : P) =
-      (g.comp (logicalShift R lam hlam)) (lam h) := by
-  simp only [LinearMap.comp_apply, logicalShift_lambda]
-
-/-- Pullback preserves the detection event of an already selected family of
-quotient characters, including a section of the logical restriction map. -/
-theorem detection_iff {I : Type*} (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B)
-    (family : I → Space R lam →ₗ[𝕜] 𝕜) (a : P) :
-    (∃ i, family i (projection R lam a) ≠ 0) ↔
-      ∃ i, (family i).comp (projection R lam) a ≠ 0 := Iff.rfl
-
-/-- Translation by the logical kernel parametrizes a quotient fiber. -/
-def fiberMap (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B) (a : P) :
-    shiftKernel R lam → {u : P // projection R lam u = projection R lam a} :=
-  fun h => ⟨a + (h : P), by
-    have hh : projection R lam (h : P) = 0 :=
-      (Submodule.Quotient.mk_eq_zero _).mpr h.property
-    rw [map_add, hh, add_zero]⟩
-
-theorem fiberMap_bijective (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B) (a : P) :
-    Function.Bijective (fiberMap R lam a) := by
-  constructor
-  · intro h k he
-    apply Subtype.ext
-    exact add_left_cancel (congrArg Subtype.val he)
-  · intro u
-    have hm : u.val - a ∈ shiftKernel R lam :=
-      (Submodule.Quotient.eq _).mp u.property
-    refine ⟨⟨u.val - a, hm⟩, Subtype.ext ?_⟩
-    change a + (u.val - a) = u.val
-    rw [add_comm, sub_add_cancel]
 
 /-- Every fiber has the same cardinality, justifying uniform-input pushforward. -/
 theorem fiber_card (R : Submodule 𝕜 P) (lam : R →ₗ[𝕜] B) (x : Space R lam) :
     Nat.card {u : P // projection R lam u = x} = Nat.card (shiftKernel R lam) := by
-  obtain ⟨a, rfl⟩ := projection_surjective R lam x
-  exact (Nat.card_congr (Equiv.ofBijective _ (fiberMap_bijective R lam a))).symm
+  have h := Nat.card_congr (AddMonoidHom.fiberEquivKerOfSurjective
+    (f := (projection R lam).toAddMonoidHom) (projection_surjective R lam) x)
+  change Nat.card {u : P // projection R lam u = x} =
+    Nat.card (LinearMap.ker (projection R lam)) at h
+  simpa only [projection, Submodule.ker_mkQ] using h
 
 end UniqueGamesTheorem.Gadget.Quotient
-
-/-!
-# Conditional uniformity by translation averaging
-
-For uniform finite input, an equivariant output is uniform even conditional on
-any shift-invariant observable.  The observable need not have a finite range.
-The proof averages translations directly and therefore never divides by a
-conditioning probability.  In particular it applies to the output difference
-at a fixed perturbation, and to an independent finite noise choice.
--/
-
-namespace UniqueGamesTheorem.Gadget.ConditionalOutput
-
-open scoped BigOperators
-
-variable {k P B Z M : Type*} [Ring k]
-variable [AddCommGroup P] [Module k P] [Fintype P]
-variable [AddCommGroup B] [Module k B] [Fintype B]
-variable [AddCommMonoid M] [Module ℚ≥0 M]
-
-omit [Fintype B] in
-theorem expect_output_translate (R : Submodule k P) (lam : R →ₗ[k] B)
-    (C : P → B) (hC : Quotient.Equivariant R lam C)
-    (D : P → Z) (hD : ∀ (u : P) (h : R), D (u + (h : P)) = D u)
-    (f : B → Z → M) (h : R) :
-    (𝔼 u, f (C u + lam h) (D u)) = 𝔼 u, f (C u) (D u) := by
-  apply Fintype.expect_equiv (Equiv.addRight (h : P))
-  intro u
-  change f (C u + lam h) (D u) = f (C (u + (h : P))) (D (u + (h : P)))
-  rw [hC u h, hD u h]
-
-/-- Exact replacement of the initial output by an independent uniform symbol,
-jointly with every shift-invariant observable. -/
-theorem expect_uniform_output (R : Submodule k P) (lam : R →ₗ[k] B)
-    (hlam : Function.Surjective lam) (C : P → B)
-    (hC : Quotient.Equivariant R lam C)
-    (D : P → Z) (hD : ∀ (u : P) (h : R), D (u + (h : P)) = D u)
-    (f : B → Z → M) :
-    (𝔼 u, f (C u) (D u)) = 𝔼 u, 𝔼 b : B, f b (D u) := by
-  classical
-  have hs (b : B) :
-      (𝔼 u, f (C u + b) (D u)) = 𝔼 u, f (C u) (D u) := by
-    obtain ⟨h, rfl⟩ := hlam b
-    exact expect_output_translate R lam C hC D hD f h
-  calc
-    (𝔼 u, f (C u) (D u)) = 𝔼 b : B, 𝔼 u, f (C u + b) (D u) := by
-      simp only [hs, Fintype.expect_const]
-    _ = 𝔼 u, 𝔼 b : B, f (C u + b) (D u) :=
-      Finset.expect_comm _ _ _
-    _ = 𝔼 u, 𝔼 b : B, f b (D u) := by
-      apply Finset.expect_congr rfl
-      intro u _
-      apply Fintype.expect_equiv (Equiv.addLeft (C u))
-      intro b
-      rfl
-
-/-- The output difference is a permissible observable, for every fixed
-perturbation, including zero and perturbations never sampled by a noise law. -/
-theorem expect_uniform_output_difference (R : Submodule k P) (lam : R →ₗ[k] B)
-    (hlam : Function.Surjective lam) (C : P → B)
-    (hC : Quotient.Equivariant R lam C) (a : P) (f : B → B → M) :
-    (𝔼 u, f (C u) (C (u + a) - C u)) =
-      𝔼 u, 𝔼 b : B, f b (C (u + a) - C u) := by
-  apply expect_uniform_output R lam hlam C hC
-  intro u h
-  exact Quotient.difference_shift R lam C hC u a h
-
-/-- A finite independent noise choice may be retained in the test function;
-conditioning on its value does not affect conditional output uniformity. -/
-theorem expect_uniform_output_noise {N : Type*} [Fintype N]
-    (R : Submodule k P) (lam : R →ₗ[k] B)
-    (hlam : Function.Surjective lam) (C : P → B)
-    (hC : Quotient.Equivariant R lam C) (noise : N → P) (f : N → B → B → M) :
-    (𝔼 n, 𝔼 u, f n (C u) (C (u + noise n) - C u)) =
-      𝔼 n, 𝔼 u, 𝔼 b : B, f n b (C (u + noise n) - C u) := by
-  apply Finset.expect_congr rfl
-  intro n _
-  exact expect_uniform_output_difference R lam hlam C hC (noise n) (f n)
-
-end UniqueGamesTheorem.Gadget.ConditionalOutput
 
 namespace UniqueGamesTheorem.Gadget
 
@@ -455,10 +240,8 @@ variable [AddCommGroup X] [Module k X]
 
 /-- Linear insertion into one physical input coordinate. -/
 def singleInput (i : I) (P : Type v) [AddCommGroup P] [Module k P] :
-    P →ₗ[k] (I → P) where
-  toFun p := Pi.single i p
-  map_add' a b := by ext j; by_cases h : i = j <;> simp [h]
-  map_smul' c p := by ext j; by_cases h : i = j <;> simp [h]
+    P →ₗ[k] (I → P) :=
+  LinearMap.single (R := k) (φ := fun _ : I => P) i
 
 /-- The logical map of a child, obtained from the common parent first-coordinate
 map and the prescribed logical character. -/
@@ -580,14 +363,6 @@ noncomputable def childSection (s : Stage k B) (S : Submodule k (B →ₗ[k] k))
   Classical.choose (Classical.choose_spec (exists_descendant_lift J hJ Q s S L
     (commonGamma J hJ Q s S L) (commonGamma_spec J hJ Q s S L) i))
 
-omit [Finite B] [FiniteDimensional k B] in
-theorem childSection_rightInverse (s : Stage k B) (S : Submodule k (B →ₗ[k] k))
-    (L : Lift (Stage.next J hJ Q s) S) (i : I)
-    (z : childDomain J hJ Q s S L i) :
-    childCharacter J (commonGamma J hJ Q s S L) i
-      (childSection J hJ Q s S L i z) = z.val :=
-  (Classical.choose_spec (Classical.choose_spec (exists_descendant_lift J hJ Q s S L
-    (commonGamma J hJ Q s S L) (commonGamma_spec J hJ Q s S L) i))).1 z
 
 omit [Finite B] [FiniteDimensional k B] in
 theorem childLift_spec (s : Stage k B) (S : Submodule k (B →ₗ[k] k))

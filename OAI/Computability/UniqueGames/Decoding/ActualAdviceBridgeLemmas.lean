@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.AnswerBridge
 import OAI.Computability.UniqueGames.Decoding.Experiment
 import OAI.Computability.UniqueGames.Decoding.IncidenceGap
@@ -30,13 +31,6 @@ def indexSlot (i : Fin 3) : PartnerProjection.Slot :=
     ConcreteExtraction.slotIndex (indexSlot i) = i := by
   fin_cases i <;> rfl
 
-structure Policies (k : ℕ) (g : IncidenceExtraction.Incidence O N) (D : Type)
-    [AddCommGroup D] [Module F2 D] where
-  first : (J : Finset (Fin k)) → (Fin k → O) →
-    (ActualHomogeneous.E k →ₗ[F2] D) → SourceAnswer k
-  second : (J : Finset (Fin k)) → RawPrivateTable.SupportedV J g.name →
-    (RawPoint J →ₗ[F2] D) → TargetAnswer J
-
 def projection (g : IncidenceExtraction.Incidence O N)
     (J : Finset (Fin k)) (draw : Draw (Fin k) O) :
     ActualHomogeneous.E k →ₗ[F2] RawPoint J :=
@@ -45,18 +39,6 @@ def projection (g : IncidenceExtraction.Incidence O N)
 def displayedQuestion (g : IncidenceExtraction.Incidence O N)
     (J : Finset (Fin k)) (draw : Draw (Fin k) O) : RawPrivateTable.SupportedV J g.name :=
   RawPrivateTable.supported J g.name (fun j => (draw j).1) (fun j => indexSlot (draw j).2)
-
-def agrees (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) (draw : Draw (Fin k) O) : Prop :=
-  projection g J draw
-      (policy.first J (fun j => (draw j).1) (Y.comp (projection g J draw))).val =
-    (policy.second J (displayedQuestion g J draw) Y).val
-
-def strategy (coordinates : D ≃ₗ[F2] (Q → F2))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (J : Finset (Fin k)) : OuterStrategy (P := Fin k) (R := Q) (O := O) (N := N) :=
-  toOuterStrategy J g (rowPointStrategies coordinates J g.rhs (policy.first J)
-    (extendSupportedPolicy J g.name (policy.second J)))
 
 def encodedMapCoefficients (coordinates : D ≃ₗ[F2] (Q → F2))
     (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) :
@@ -72,67 +54,10 @@ theorem sample_question [Fintype Q] [DecidableEq Q]
     membershipBool, displayedQuestion, RawPrivateTable.supported,
     RawPrivateTable.displayed]
 
-/-- Every actual projection-agreement event is accepted after the two separate
-local input/answer conversions. This is pointwise in all sampled maps/questions. -/
-theorem agrees_implies_actualWin [Fintype Q] [DecidableEq Q]
-    (coordinates : D ≃ₗ[F2] (Q → F2))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) (draw : Draw (Fin k) O)
-    (hagree : agrees g policy J Y draw) :
-    actualWin J g (encodedMapCoefficients coordinates J Y)
-      (strategy coordinates g policy J) draw := by
-  let first := policy.first J
-  let second := extendSupportedPolicy J g.name (policy.second J)
-  let gamma := encodedMapCoefficients coordinates J Y
-  let points := rowPointStrategies coordinates J g.rhs first second
-  have repack : (fun j => ((draw j).1,
-      ConcreteExtraction.slotIndex (indexSlot (draw j).2))) = draw := by
-    funext j
-    simp
-  have hfirst := rowPointStrategies_first_actual coordinates J g.rhs first second
-    (fun j => (draw j).1) (fun j => indexSlot (draw j).2) Y
-  rw [repack] at hfirst
-  have hsecond := rowPointStrategies_second_actual coordinates J g.rhs g.name
-    first second draw Y
-  have hquestion := sample_question g J gamma draw
-  have htarget : second (actualSecond J g.name gamma draw).question Y =
-      policy.second J (displayedQuestion g J draw) Y := by
-    rw [hquestion]
-    exact extendSupportedPolicy_apply J g.name (policy.second J) _ Y
-  change (toOuterStrategy J g points).wins
-    (Soundness.RepeatedGameBounds.ActualProjection.predicateGame g
-      (PartnerMapCoordinates.activeOf J))
-      (actualFirst J gamma draw) (actualSecond J g.name gamma draw)
-  apply toOuterStrategy_wins J g points _ _ (fun j => indexSlot (draw j).2) hquestion
-  change points.first (actualFirst J gamma draw) = _ at hfirst
-  change points.second (actualSecond J g.name gamma draw) =
-    second (actualSecond J g.name gamma draw).question Y at hsecond
-  rw [hfirst, hsecond, htarget]
-  exact hagree
 
 variable [Fintype Q] [DecidableEq Q] [Fintype O] [DecidableEq O]
   [Fintype N] [DecidableEq N] [Fintype D]
 
-/-- Actual independent weighted occurrence/position draws, at a fixed genuine
-partner map. `table` is the product of the identical coordinate laws. -/
-def fixedMapSuccess (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) : ℝ :=
-  (FiniteDistribution.table (fun _ : Fin k => μ)).probability
-    (fun draw => decide (agrees g policy J Y draw))
-
-omit [DecidableEq O] [Fintype N] [DecidableEq N] [Fintype D] in
-theorem fixedMapSuccess_le (coordinates : D ≃ₗ[F2] (Q → F2))
-    (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) :
-    fixedMapSuccess μ g policy J Y ≤
-      UpperBound.fixedAdviceSuccess μ J g (encodedMapCoefficients coordinates J Y)
-        (strategy coordinates g policy J) := by
-  apply FiniteDistribution.probability_mono
-  intro draw h
-  exact decide_eq_true (agrees_implies_actualWin coordinates g policy J Y draw
-    (of_decide_eq_true h))
 
 def mapBitsEquiv (coordinates : D ≃ₗ[F2] (Q → F2)) (J : Finset (Fin k)) :
     (RawPoint J →ₗ[F2] D) ≃ RawCoefficients J (ZeroInformation.Bits Q) :=
@@ -146,46 +71,11 @@ theorem uniform_maps_to_bits (coordinates : D ≃ₗ[F2] (Q → F2))
   simp only [FiniteDistribution.expectation_uniform, ← Fintype.expect_eq_sum_div_card]
   exact Fintype.expect_equiv (mapBitsEquiv coordinates J) _ F (fun _ => rfl)
 
-def nativeStrategy (coordinates : D ≃ₗ[F2] (Q → F2))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D) :
-    NativeExperiment.MaskStrategy k Q O N :=
-  fun mask _ => strategy coordinates g policy (NativeExperiment.maskSet mask)
-
-/-- Sample the Bernoulli mask, a uniform actual map on its partner space, and
-independent weighted equation/position draws. This is the actual advice law. -/
-def success (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1) : ℝ :=
-  ((bernoulli β hβ₀ hβ₁).iid k).expectation fun mask =>
-    (FiniteDistribution.uniform (RawPoint (NativeExperiment.maskSet mask) →ₗ[F2] D)).expectation
-      (fun Y => fixedMapSuccess μ g policy (NativeExperiment.maskSet mask) Y)
 
 theorem expectation_mono {X : Type} [Fintype X] (μ : FiniteDistribution X)
     {f g : X → ℝ} (h : ∀ x, f x ≤ g x) : μ.expectation f ≤ μ.expectation g := by
   unfold FiniteDistribution.expectation
   exact Finset.sum_le_sum fun x _ => mul_le_mul_of_nonneg_left (h x) (μ.nonnegative x)
-omit [DecidableEq O] [Fintype N] [DecidableEq N] in
-/-- The exact map/coefficient bijection joins the actual policy success to the
-already-defined native clean experiment. -/
-theorem success_le_native (coordinates : D ≃ₗ[F2] (Q → F2))
-    (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1) :
-    success μ g policy β hβ₀ hβ₁ ≤
-      NativeExperiment.success k μ g β hβ₀ hβ₁ (nativeStrategy coordinates g policy) := by
-  unfold success NativeExperiment.success nativeStrategy
-  apply expectation_mono
-  intro mask
-  calc
-    _ ≤ (FiniteDistribution.uniform
-        (RawPoint (NativeExperiment.maskSet mask) →ₗ[F2] D)).expectation
-        (fun Y => UpperBound.fixedAdviceSuccess μ (NativeExperiment.maskSet mask) g
-          (encodedMapCoefficients coordinates (NativeExperiment.maskSet mask) Y)
-          (strategy coordinates g policy (NativeExperiment.maskSet mask))) :=
-      expectation_mono _ (fun Y => fixedMapSuccess_le coordinates μ g policy _ Y)
-    _ = _ := uniform_maps_to_bits coordinates (NativeExperiment.maskSet mask)
-      (fun gamma => UpperBound.fixedAdviceSuccess μ (NativeExperiment.maskSet mask) g gamma
-        (strategy coordinates g policy (NativeExperiment.maskSet mask)))
 
 end Clean.ActualAdviceBridge
 
@@ -213,22 +103,6 @@ theorem repeated_incidence_value_le
     (IncidenceGap.game_isProjection g ω distinct) n
     (IncidenceGap.game_value_le_fourteen_fifteenths g ω distinct hopt)
 
-/-- Section 5's clean agreement estimate, with every sampling/locality/rate
-step discharged for the explicit advice experiment. -/
-theorem clean_success_le (k : ℕ) (g : IncidenceExtraction.Incidence O N)
-    (ω : FiniteDistribution O) (extraLaw : FiniteDistribution (Additional k R))
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (strategy : Additional k R → SparseSeed k R → LocalStrategies k R O N)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (hopt : IncidenceGap.parityValue g ω ≤ (4 : ℝ) / 5) :
-    success k (IncidenceGap.slotLaw ω) g extraLaw β hβ₀ hβ₁ strategy ≤
-      (1 - (β / (Fintype.card (Coefficient R) : ℝ)) / 3600) ^ k := by
-  have h := success_le_of_repetition k (IncidenceGap.slotLaw ω) g extraLaw
-    β hβ₀ hβ₁ strategy distinct (1 - (1 : ℝ) / 3600)
-    (repeated_incidence_value_le g ω distinct hopt)
-  convert h using 1
-  congr 1
-  ring
 
 /-- A uniform bound on visible advice dimension makes the estimate independent
 of the sampled map `A`. Apply with `Coefficient R ≃ W × range A`. -/

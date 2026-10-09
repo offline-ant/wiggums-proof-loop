@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Module.LinearMap.DivisionRing
 import OAI.Computability.UniqueGames.Decoding.AdviceFibersLemmas
 import OAI.Computability.UniqueGames.Decoding.PrivateStrategyLemmas
@@ -48,104 +49,6 @@ omit [DecidableEq R] in
 @[simp] theorem slope_apply (a d : R) (x y : F2) :
     slope a d (x, y) = x • a + y • d := rfl
 
-omit [DecidableEq R] in
-theorem slope_zero_iff (a d : R) : slope a d = 0 ↔ a = 0 ∧ d = 0 := by
-  constructor
-  · intro h
-    have hfirst := congrArg (fun f : (F2 × F2) →ₗ[F2] R => f (1, 0)) h
-    have hsecond := congrArg (fun f : (F2 × F2) →ₗ[F2] R => f (0, 1)) h
-    exact ⟨by simpa using hfirst, by simpa using hsecond⟩
-  · rintro ⟨rfl, rfl⟩
-    apply LinearMap.ext
-    rintro ⟨x, y⟩
-    simp [slope]
-
-omit [DecidableEq R] in
-/-- Over the binary field, the remaining case really is a rank-two slope:
-the two-coordinate map is injective, rather than merely syntactically full. -/
-theorem slope_injective (a d : R) (ha : a ≠ 0) (hd : d ≠ 0) (had : a ≠ d) :
-    Function.Injective (slope a d) := by
-  have hzero : ∀ p, slope a d p = 0 → p = 0 := by
-    rintro ⟨x, y⟩ h
-    rcases scalar_cases x with rfl | rfl <;>
-      rcases scalar_cases y with rfl | rfl
-    · rfl
-    · exact False.elim (hd (by simpa using h))
-    · exact False.elim (ha (by simpa using h))
-    · have heq : a + d = 0 := by simpa using h
-      have hc := congrArg (fun z : R => z + d) heq
-      have had' : a = d := by
-        simpa only [add_assoc, ActualCanonical.add_self, add_zero, zero_add] using hc
-      exact False.elim (had had')
-  intro x y hxy
-  have hs : slope a d (x + y) = 0 := by
-    rw [map_add, hxy, ActualCanonical.add_self]
-  have hc := congrArg (fun p : F2 × F2 => p + y) (hzero (x + y) hs)
-  simpa only [add_assoc, ActualCanonical.add_self, add_zero, zero_add] using hc
-
-def freeTriple (a d : R) : Fin 3 → R := ![a, d, 0]
-
-/-- A single block's intercept correction and tagged retained record. -/
-def reduceBlock (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (a d : R) : R × ActualCanonical.Record Name Id R :=
-  (rhs e • ActualCanonical.pivot (freeTriple a d),
-    ActualCanonical.record names e (freeTriple a d))
-
-@[simp] theorem reduceBlock_zero (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) : reduceBlock names rhs e (0 : R) 0 = (0, .blank) := by
-  simp [reduceBlock, freeTriple, ActualCanonical.pivot, ActualCanonical.record]
-
-/-- The first rank-one direction uses the actual first variable. -/
-theorem reduceBlock_first (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (a : R) (ha : a ≠ 0) :
-    reduceBlock names rhs e a 0 = (0, .single (names e 0) a) := by
-  simp [reduceBlock, freeTriple, ActualCanonical.pivot, ActualCanonical.record, ha]
-
-/-- The second rank-one direction uses the actual second variable. -/
-theorem reduceBlock_second (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (d : R) (hd : d ≠ 0) :
-    reduceBlock names rhs e 0 d = (0, .single (names e 1) d) := by
-  simp [reduceBlock, freeTriple, ActualCanonical.pivot, ActualCanonical.record,
-    Ne.symm hd]
-
-/-- The third rank-one direction uses the actual third bit and adjusts the
-homogeneous intercept by the parity bit times the nonzero slope. -/
-theorem reduceBlock_third (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (a : R) (ha : a ≠ 0) :
-    reduceBlock names rhs e a a = (rhs e • a, .single (names e 2) a) := by
-  simp [reduceBlock, freeTriple, ActualCanonical.pivot, ActualCanonical.record, ha]
-
-/-- A genuine rank-two block retains its occurrence ID and both ordered slopes. -/
-theorem reduceBlock_full (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (a d : R) (ha : a ≠ 0) (hd : d ≠ 0) (had : a ≠ d) :
-    reduceBlock names rhs e a d = (0, .full e (freeTriple a d)) := by
-  simp [reduceBlock, freeTriple, ActualCanonical.pivot, ActualCanonical.record,
-    ActualCanonical.normalize, ha, hd, had]
-  funext i
-  exact add_zero _
-
-omit [DecidableEq R] in
-/-- Pulling an actual third-bit table back adds `b • a` to its intercept;
-reducing the rank-one slope adds exactly the same quantity a second time. -/
-theorem third_intercept_cancels (z a : R) (b : F2) :
-    (z + b • a) + b • a = z := by
-  rw [add_assoc, ActualCanonical.add_self, add_zero]
-
-theorem third_key_cancels (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (e : Id) (z a : R) (ha : a ≠ 0) :
-    ((z + rhs e • a) + (reduceBlock names rhs e a a).1,
-      (reduceBlock names rhs e a a).2) = (z, .single (names e 2) a) := by
-  rw [reduceBlock_third names rhs e a ha]
-  simp only [third_intercept_cancels]
-
-omit [AddCommGroup R] [Module F2 R] [DecidableEq R] in
-/-- The reduced representation never merges two distinct occurrence IDs in
-the full-block case. -/
-theorem full_record_occurrence_injective {e e' : Id} {a a' : Fin 3 → R}
-    (h : (ActualCanonical.Record.full e a : ActualCanonical.Record Name Id R) =
-      .full e' a') : e = e' := by
-  cases h
-  rfl
 
 end BlockReduction
 
@@ -160,15 +63,6 @@ def key (occ : Fin k → Id) (names : Id → Fin 3 → Name) (rhs : Id → F2)
     (P : ActualHomogeneous.E k →ₗ[F2] R) : Key k Name Id R :=
   ActualCanonical.canonical occ names rhs P
 
-omit [AddCommGroup R] [Module F2 R] [DecidableEq R] in
-/-- Key equality includes the affine intercept and every original position. -/
-theorem key_data_ext_iff (a b : Key k Name Id R) :
-    a = b ↔ a.1 = b.1 ∧ ∀ j : Fin k, a.2 j = b.2 j := by
-  constructor
-  · rintro rfl
-    exact ⟨rfl, fun _ => rfl⟩
-  · rintro ⟨hfirst, hrest⟩
-    exact Prod.ext hfirst (funext hrest)
 
 theorem key_shift (occ : Fin k → Id) (names : Id → Fin 3 → Name) (rhs : Id → F2)
     (P : ActualHomogeneous.E k →ₗ[F2] R) (c : R) :
@@ -176,14 +70,6 @@ theorem key_shift (occ : Fin k → Id) (names : Id → Fin 3 → Name) (rhs : Id
       ((key occ names rhs P).1 + c, (key occ names rhs P).2) :=
   ActualCanonical.canonical_shift occ names rhs P c
 
-/-- Translation of the entire reduced affine table is a free action. -/
-theorem key_shift_free (occ : Fin k → Id) (names : Id → Fin 3 → Name) (rhs : Id → F2)
-    (P : ActualHomogeneous.E k →ₗ[F2] R) (c : R)
-    (h : key occ names rhs (P + ActualHomogeneous.tau.smulRight c) =
-      key occ names rhs P) : c = 0 := by
-  rw [key_shift] at h
-  have hc := congrArg Prod.fst h
-  exact add_left_cancel (hc.trans (add_zero _).symm)
 
 variable [DecidableEq Name] [DecidableEq Id]
 
@@ -239,15 +125,6 @@ variable {k : Nat}
 def visibleTau (J : Finset (Fin k)) : RawPartnerTarget.RawPoint J →ₗ[F2] F2 :=
   LinearMap.proj none
 
-/-- Every visible valid answer extends to an answer of each compatible full
-question.  This proves surjectivity of the actual affine-coordinate projection. -/
-theorem projection_surjective (J : Finset (Fin k)) (rhs : Id → F2)
-    (occ : Fin k → Id) (slot : Fin k → PartnerProjection.Slot) :
-    Function.Surjective (RawPrivateTable.projection J rhs occ slot) := by
-  exact (PartnerMapCoordinates.pointEquiv (fun j => toBit (rhs (occ j))) J).surjective.comp
-    ((PartnerLinear.projection_surjective (fun j => toBit (rhs (occ j)))
-      (PartnerMapCoordinates.activeOf J) slot).comp
-        (PartnerLinear.sourceLinearEquiv (fun j => toBit (rhs (occ j)))).symm.surjective)
 
 theorem projection_preserves_homogeneous (J : Finset (Fin k)) (rhs : Id → F2)
     (occ : Fin k → Id) (slot : Fin k → PartnerProjection.Slot)
@@ -256,17 +133,6 @@ theorem projection_preserves_homogeneous (J : Finset (Fin k)) (rhs : Id → F2)
   change ofBit (toBit x.1) = x.1
   exact ofBit_toBit _
 
-/-- Equality after pullback is equality of the entire visible linear extension,
-so no affine intercept or hidden coefficient can be lost by sharing. -/
-theorem visible_table_unique (J : Finset (Fin k)) (rhs : Id → F2)
-    (occ : Fin k → Id) (slot : Fin k → PartnerProjection.Slot)
-    (Y Z : RawPartnerTarget.RawPoint J →ₗ[F2] R)
-    (h : Y.comp (RawPrivateTable.projection J rhs occ slot) =
-      Z.comp (RawPrivateTable.projection J rhs occ slot)) : Y = Z := by
-  apply LinearMap.ext
-  intro y
-  obtain ⟨x, rfl⟩ := projection_surjective J rhs occ slot y
-  exact congrArg (fun P : ActualHomogeneous.E k →ₗ[F2] R => P x) h
 
 theorem pullback_shift (J : Finset (Fin k)) (rhs : Id → F2)
     (occ : Fin k → Id) (slot : Fin k → PartnerProjection.Slot)
@@ -375,51 +241,12 @@ Its projection choices have not been supplied as extra compared coordinates. -/
 def paddedMatrix (d : Draw k Id K W R) : ActualHomogeneous.E k →ₗ[F2] K :=
   d.hiddenMatrix.comp (projection rhs d)
 
-def paddedComplement (d : Draw k Id K W R) : ActualHomogeneous.E k →ₗ[F2] W :=
-  d.complement.comp (projection rhs d)
-
-theorem left_rows_eq (d : Draw k Id K W R) :
-    (leftObservation rhs d).rows = d.rowMap.comp (paddedMatrix rhs d) := rfl
-
-theorem left_rows_attainable (d : Draw k Id K W R) :
-    ∃ M : ActualHomogeneous.E k →ₗ[F2] K,
-      (leftObservation rhs d).rowMap.comp M = (leftObservation rhs d).rows :=
-  ⟨paddedMatrix rhs d, rfl⟩
 
 theorem right_rows_attainable (d : Draw k Id K W R) :
     ∃ M : RawPartnerTarget.RawPoint d.singletons →ₗ[F2] K,
       d.rowMap.comp M = (rightObservation names d).2.rows :=
   ⟨d.hiddenMatrix, rfl⟩
 
-/-- Replace the entire hidden matrix once, consistently across all overlapping
-column events; the row advice remains fixed. -/
-def changeHidden (d : Draw k Id K W R)
-    (N : RawPartnerTarget.RawPoint d.singletons →ₗ[F2] d.rowMap.ker) : Draw k Id K W R :=
-  { d with hiddenMatrix := AdviceFibers.assemble d.rowMap d.hiddenMatrix N }
-
-theorem leftObservation_changeHidden (d : Draw k Id K W R)
-    (N : RawPartnerTarget.RawPoint d.singletons →ₗ[F2] d.rowMap.ker) :
-    leftObservation rhs (changeHidden d N) = leftObservation rhs d := by
-  simp only [leftObservation, changeHidden, projection, AdviceFibers.observed_assemble]
-
-theorem rightObservation_changeHidden (d : Draw k Id K W R)
-    (N : RawPartnerTarget.RawPoint d.singletons →ₗ[F2] d.rowMap.ker) :
-    rightObservation names (changeHidden d N) = rightObservation names d := by
-  simp only [rightObservation, changeHidden, AdviceFibers.observed_assemble]
-
-/-- A selected affine witness is fixed by the first player's observation,
-before any hidden matrix on its row fiber is sampled. -/
-theorem selectedWitness_changeHidden {Witness : Type*}
-    (choose : FullAdvice k Id K W R → Witness) (d : Draw k Id K W R)
-    (N : RawPartnerTarget.RawPoint d.singletons →ₗ[F2] d.rowMap.ker) :
-    choose (leftObservation rhs (changeHidden d N)) = choose (leftObservation rhs d) := by
-  rw [leftObservation_changeHidden]
-
-/-- Every projected answer keeps the actual homogeneous bit. -/
-theorem projection_actual_answer (d : Draw k Id K W R)
-    (z : ActualHomogeneous.E k) (hz : ActualHomogeneous.tau z = 1) :
-    TableKeys.visibleTau d.singletons (projection rhs d z) = 1 := by
-  rw [projection, TableKeys.projection_preserves_homogeneous, hz]
 
 end
 end UniqueGamesTheorem.Decoder.AdviceExperiment
@@ -435,78 +262,6 @@ open UniqueGamesTheorem.Reduction
 
 variable {R : Type*} [AddCommGroup R] [Module F2 R] [DecidableEq R]
 
-omit [DecidableEq R] in
-theorem slope_rank_zero : Module.finrank F2 (slope (0 : R) 0).range = 0 := by
-  rw [(slope_zero_iff 0 0).mpr ⟨rfl, rfl⟩]
-  simp
-
-omit [DecidableEq R] in
-theorem slope_rank_first (a : R) (ha : a ≠ 0) :
-    Module.finrank F2 (slope a 0).range = 1 := by
-  have hf : (LinearMap.fst F2 F2 F2) ≠ 0 := by
-    intro h
-    have hh := LinearMap.congr_fun h (1, 0)
-    simp at hh
-  have heq : slope a 0 = (LinearMap.fst F2 F2 F2).smulRight a := by
-    apply LinearMap.ext
-    intro x
-    simp [slope]
-  rw [heq, LinearMap.range_smulRight_apply hf]
-  exact finrank_span_singleton ha
-
-omit [DecidableEq R] in
-theorem slope_rank_second (a : R) (ha : a ≠ 0) :
-    Module.finrank F2 (slope 0 a).range = 1 := by
-  have hf : (LinearMap.snd F2 F2 F2) ≠ 0 := by
-    intro h
-    have hh := LinearMap.congr_fun h (0, 1)
-    simp at hh
-  have heq : slope 0 a = (LinearMap.snd F2 F2 F2).smulRight a := by
-    apply LinearMap.ext
-    intro x
-    simp [slope]
-  rw [heq, LinearMap.range_smulRight_apply hf]
-  exact finrank_span_singleton ha
-
-omit [DecidableEq R] in
-theorem slope_rank_third (a : R) (ha : a ≠ 0) :
-    Module.finrank F2 (slope a a).range = 1 := by
-  let ell := LinearMap.fst F2 F2 F2 + LinearMap.snd F2 F2 F2
-  have hf : ell ≠ 0 := by
-    intro h
-    have hh := LinearMap.congr_fun h (1, 0)
-    simp [ell] at hh
-  have heq : slope a a = ell.smulRight a := by
-    apply LinearMap.ext
-    intro x
-    simp [slope, ell, add_smul]
-  rw [heq, LinearMap.range_smulRight_apply hf]
-  exact finrank_span_singleton ha
-
-omit [DecidableEq R] in
-theorem slope_rank_two (a d : R) (ha : a ≠ 0) (hd : d ≠ 0) (had : a ≠ d) :
-    Module.finrank F2 (slope a d).range = 2 := by
-  have h := LinearMap.finrank_range_of_inj (slope_injective a d ha hd had)
-  simpa [Module.finrank_prod] using h
-
-/-- These cases exhaust all slopes; no unexamined binary rank-one direction
-can accidentally be retained as a full equation block. -/
-theorem slope_rank_one_iff (a d : R) :
-    Module.finrank F2 (slope a d).range = 1 ↔
-      (a ≠ 0 ∧ d = 0) ∨ (a = 0 ∧ d ≠ 0) ∨ (a = d ∧ a ≠ 0) := by
-  by_cases ha : a = 0
-  · subst a
-    by_cases hd : d = 0
-    · subst d
-      simp [slope_rank_zero]
-    · simp [hd, slope_rank_second d hd]
-  · by_cases hd : d = 0
-    · subst d
-      simp [ha, slope_rank_first a ha]
-    · by_cases had : a = d
-      · subst d
-        simp [ha, slope_rank_third a ha]
-      · simp [ha, hd, had, slope_rank_two a d ha hd had]
 
 end UniqueGamesTheorem.Decoder.TableKeys
 
@@ -692,22 +447,6 @@ theorem rowAnswer_fold (S : Source)
   unfold rowAnswer
   rw [assemble_prod_shift, TableKeysRestoration.projectedAnswer_fold]
 
-/-- At the actual hidden matrix this row table is exactly the projected table
-used by the verifier, with the same complement and the same complete key. -/
-theorem rowAnswer_actual (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2^s))
-    (J : Finset (Fin k)) (Q : RawPrivateTable.SupportedV J (ActualGame.names S))
-    (A : Alphabet s →ₗ[F2] R)
-    (M : RawPartnerTarget.RawPoint J →ₗ[F2] Alphabet s)
-    (T : RawPartnerTarget.RawPoint J →ₗ[F2] Vector d) :
-    rowAnswer S labeling J Q A (AdviceFibers.observe A M) T
-        (AdviceFibers.hiddenCoordinate A M) =
-      TableKeysRestoration.projectedAnswer S k s d labeling J Q (M.prod T) := by
-  have h := (AdviceFibers.observationEquiv A).left_inv M
-  change AdviceFibers.assemble A (AdviceFibers.observedBase A (AdviceFibers.observe A M))
-      (AdviceFibers.hiddenCoordinate A M) = M at h
-  unfold rowAnswer
-  rw [h]
 
 /-- This intercept is determined once the visible base and affine witness are
 fixed; it is not silently erased when decoding from a row fiber. -/

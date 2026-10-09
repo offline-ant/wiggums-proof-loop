@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.PCP.InputLemmas
 import OAI.Computability.UniqueGames.PCP.SourceMachine
@@ -21,18 +22,10 @@ inductive Label
   | dartsStart | dartsLoop | counterFirst | counterSecond | initialize
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.copyFirst, .copySecond, .verticesStart,
-  .verticesLoop, .dartsStart, .dartsLoop, .counterFirst, .counterSecond, .initialize]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.copyFirst, .copySecond, .verticesStart,
+  .verticesLoop, .dartsStart, .dartsLoop, .counterFirst, .counterSecond, .initialize}
+  complete x := by cases x <;> simp
 
 def statement (ports : Ports K) (labels : Label → Λ) (exit : Option Λ) :
     Label → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool)
@@ -62,11 +55,6 @@ def resultTapes (ports : Ports K) (base : K → List Bool)
           (ports 2) (encodeWord n)) (ports 3) (encodeWord m))
       (ports 4) (encodeWord m)) (ports 6) (encodeWord 0)
 
-theorem resultTapes_other (ports : Ports K) (base : K → List Bool)
-    (n m : Nat) (rows : List Bool) (tape : K)
-    (h : ∀ i : Fin 7, i ≠ 0 → i ≠ 5 → tape ≠ ports i) :
-    resultTapes ports base n m rows tape = base tape := by
-  simp [resultTapes, h]
 
 /-- Actual program placement is the only execution premise. Header values and
 unread row bits specify the input, and every auxiliary role starts empty. -/

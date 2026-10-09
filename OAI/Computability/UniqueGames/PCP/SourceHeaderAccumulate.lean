@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Reduction.CanonicalBodyTemplateLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineTransfer
@@ -31,23 +32,11 @@ def resultTapes (layout : Layout K) (base : K → List Bool) (nBits count : Nat)
   Function.update (Function.update (Function.update base layout.bits []) layout.count [])
     layout.accumulator ((encodeWords [nBits, count]).reverse ++ base layout.accumulator)
 
-@[simp] theorem result_bits (layout : Layout K) (base : K → List Bool) (nBits count : Nat) :
-    resultTapes layout base nBits count layout.bits = [] := by
-  simp [resultTapes, layout.bits_count, layout.bits_accumulator]
 
 @[simp] theorem result_count (layout : Layout K) (base : K → List Bool) (nBits count : Nat) :
     resultTapes layout base nBits count layout.count = [] := by
   simp [resultTapes, layout.count_accumulator]
 
-@[simp] theorem result_accumulator (layout : Layout K) (base : K → List Bool) (nBits count : Nat) :
-    resultTapes layout base nBits count layout.accumulator =
-      (encodeWords [nBits, count]).reverse ++ base layout.accumulator := by
-  simp [resultTapes]
-
-theorem result_frame (layout : Layout K) (base : K → List Bool) (nBits count : Nat)
-    (k : K) (hb : k ≠ layout.bits) (hc : k ≠ layout.count) (ha : k ≠ layout.accumulator) :
-    resultTapes layout base nBits count k = base k := by
-  simp [resultTapes, hb, hc, ha]
 
 theorem trace (layout : Layout K) (labels : Bool → Λ) (exit : Option Λ)
     (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (σ × Option Bool))
@@ -129,12 +118,6 @@ def machine [Fintype K] [Fintype σ] (layout : Layout K) (ambient : σ) : FinTM2
   initialState := (ambient, none)
   m := statement layout id none
 
-theorem source_inputBits_header (input : UniqueGamesTheorem.Reduction.SourceEncoding.Input) :
-    UniqueGamesTheorem.Reduction.SourceEncoding.inputBits input =
-      encodeWords [input.variables, input.equations.length] ++
-        encodeWords (input.equations.flatMap UniqueGamesTheorem.Reduction.SourceEncoding.equationWords) := by
-  simp only [UniqueGamesTheorem.Reduction.SourceEncoding.inputBits,
-    UniqueGamesTheorem.Reduction.SourceEncoding.inputWords, encodeWords_append]
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceHeaderAccumulate
 

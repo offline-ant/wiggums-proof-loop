@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineLoop
 
@@ -12,10 +13,6 @@ namespace UniqueGamesTheorem.Foundations.PCP.MachineRawInitialTable
 
 open Turing Target Complexity RawInitialMachineModel RawInitialMachineLoopData
 open RawInitialMachineBudget RawInitialMachineLoop
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 def prefixBits (F : Formula) : List Bool :=
   encodeWords ([F.variables + F.clauses.length + 1, 6 * F.clauses.length + 1] ++
@@ -45,7 +42,7 @@ theorem machineTrace (F : Formula) :
   have finish := RawInitialMachineFinish.finishTrace F.variables F.clauses.length
     (prefixBits F).reverse (finalSigns initialState.1 F.clauses, none)
   rw [List.reverse_reverse, ← outputBits F] at finish
-  have total := trace_trans _ (trace_trans _ startup loop) finish
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans startup loop) finish
   have time : (3 * F.variables + 5 * F.clauses.length + 13 + loopTime 0 F.clauses) +
       (3 * F.variables + 5 * F.clauses.length + 17 +
         (encodeWords (RawInitialRows.dummyWords F.variables F.clauses.length)).length +

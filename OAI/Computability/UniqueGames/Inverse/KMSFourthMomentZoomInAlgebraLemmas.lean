@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
 import Mathlib.LinearAlgebra.Isomorphisms
 import OAI.Computability.UniqueGames.Analysis.MatrixCharactersLemmas
@@ -44,12 +45,6 @@ def pointLift (ι : J →ₗ[F2] E) : (J × F2) →ₗ[F2] (E × F2) :=
 def pointPad (ι : J →ₗ[F2] E) : J →ₗ[F2] (E × F2) :=
   ι.prod 0
 
-theorem pointLift_injective (ι : J →ₗ[F2] E) (hι : Function.Injective ι) :
-    Function.Injective (pointLift ι) := by
-  rintro ⟨x, c⟩ ⟨y, d⟩ h
-  have hxy : ι x = ι y := congrArg (fun z : E × F2 => z.1) h
-  have hcd : c = d := congrArg (fun z : E × F2 => z.2) h
-  exact Prod.ext (hι hxy) hcd
 
 theorem pointPad_injective (ι : J →ₗ[F2] E) (hι : Function.Injective ι) :
     Function.Injective (pointPad ι) := by
@@ -61,8 +56,6 @@ theorem pointLift_comp_prod (ι : J →ₗ[F2] E) (T : F →ₗ[F2] J)
     (pointLift ι).comp (T.prod ell) = (ι.comp T).prod ell := by
   ext x <;> rfl
 
-theorem pointPad_comp (ι : J →ₗ[F2] E) (T : F →ₗ[F2] J) :
-    (pointPad ι).comp T = (ι.comp T).prod 0 := rfl
 
 /-- A non-surjective appended row vanishes on the kernel of a surjective
 base frequency; the proof explicitly constructs a preimage otherwise. -/
@@ -99,10 +92,7 @@ theorem not_surjective_prod_iff (T : F →ₗ[F2] J)
       simp [φ]
     refine ⟨φ, hφ, ?_⟩
     intro ψ hψ
-    ext y
-    obtain ⟨x, rfl⟩ := hT y
-    exact (congrArg (fun L : F →ₗ[F2] F2 => L x) hψ).trans
-      (congrArg (fun L : F →ₗ[F2] F2 => L x) hφ).symm
+    exact (LinearMap.cancel_right hT).mp (hψ.trans hφ.symm)
   · rintro ⟨φ, hφ, _⟩ hsurj
     obtain ⟨x, hx⟩ := hsurj (0, 1)
     have hTx : T x = 0 := congrArg Prod.fst hx
@@ -120,34 +110,14 @@ theorem surjective_of_surjective_prod (T : F →ₗ[F2] J)
 
 /-- Pullback along a surjection parametrizes the dependent rows exactly. -/
 def dependentRowEquiv (T : F →ₗ[F2] J) (hT : Function.Surjective T) :
-    (J →ₗ[F2] F2) ≃ {ell : F →ₗ[F2] F2 // ¬ Function.Surjective (T.prod ell)} where
-  toFun φ := ⟨φ.comp T, (not_surjective_prod_iff T hT _).mpr
-    ⟨φ, rfl, fun ψ hψ => by
-      ext y
-      obtain ⟨x, rfl⟩ := hT y
-      exact congrArg (fun L : F →ₗ[F2] F2 => L x) hψ⟩⟩
-  invFun ell := Classical.choose ((not_surjective_prod_iff T hT ell.val).mp ell.property)
-  left_inv φ := by
-    exact (Classical.choose_spec ((not_surjective_prod_iff T hT (φ.comp T)).mp
-      ((not_surjective_prod_iff T hT _).mpr
-        ⟨φ, rfl, fun ψ hψ => by
-          ext y
-          obtain ⟨x, rfl⟩ := hT y
-          exact congrArg (fun L : F →ₗ[F2] F2 => L x) hψ⟩))).2 φ rfl |>.symm
-  right_inv ell := by
-    apply Subtype.ext
-    exact (Classical.choose_spec
-      ((not_surjective_prod_iff T hT ell.val).mp ell.property)).1
+    (J →ₗ[F2] F2) ≃ {ell : F →ₗ[F2] F2 // ¬ Function.Surjective (T.prod ell)} :=
+  Equiv.ofBijective (fun φ => ⟨φ.comp T, (not_surjective_prod_iff T hT _).mpr
+    ⟨φ, rfl, fun _ h => (LinearMap.cancel_right hT).mp h⟩⟩) ⟨
+      fun _ _ h => (LinearMap.cancel_right hT).mp (congrArg Subtype.val h),
+      fun ell => by
+        obtain ⟨φ, hφ, _⟩ := (not_surjective_prod_iff T hT ell.val).mp ell.property
+        exact ⟨φ, Subtype.ext hφ⟩⟩
 
-/-- Dependent extension preserves the base kernel. -/
-theorem ker_prod_pullback (T : F →ₗ[F2] J) (φ : J →ₗ[F2] F2) :
-    (T.prod (φ.comp T)).ker = T.ker := by
-  ext x
-  change (T x, φ (T x)) = (0, 0) ↔ T x = 0
-  constructor
-  · exact fun h => congrArg Prod.fst h
-  · intro h
-    simp [h]
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -173,12 +143,8 @@ variable {E F : Type*}
 
 /-- Splitting the last frequency row is an exact bijection. -/
 def frequencyProdEquiv : ((F →ₗ[F2] E) × (F →ₗ[F2] F2)) ≃
-    (F →ₗ[F2] (E × F2)) where
-  toFun p := p.1.prod p.2
-  invFun S := ((LinearMap.fst F2 E F2).comp S,
-    (LinearMap.snd F2 E F2).comp S)
-  left_inv _ := rfl
-  right_inv _ := rfl
+    (F →ₗ[F2] (E × F2)) :=
+  (LinearMap.prodEquiv (S := F2)).toEquiv
 
 theorem sum_frequency_prod {A : Type*} [AddCommMonoid A]
     [Fintype (F →ₗ[F2] E)] [Fintype (F →ₗ[F2] F2)]
@@ -293,33 +259,6 @@ theorem pointRestrict_invariant (f : ((E × F2) →ₗ[F2] F) → ℝ)
   rw [pointAppend_comp_basis]
   exact hf (g.prodCongr (LinearEquiv.refl F2 F2)) (pointAppend X a)
 
-theorem pointAppend_add (X : E →ₗ[F2] F) (a : F)
-    (Z : (E × F2) →ₗ[F2] F) :
-    pointAppend X a + Z =
-      pointAppend (X + Z.comp (LinearMap.inl F2 E F2)) (a + Z (0, 1)) := by
-  have hZ (x : E) (c : F2) : Z (x, c) = Z (x, 0) + c • Z (0, 1) := by
-    calc
-      Z (x, c) = Z ((x, 0) + c • (0, 1)) := by simp
-      _ = Z (x, 0) + c • Z (0, 1) := by rw [map_add, map_smul]
-  apply LinearMap.ext
-  intro p
-  rcases p with ⟨x, c⟩
-  simp only [LinearMap.add_apply, pointAppend_apply, LinearMap.comp_apply,
-    LinearMap.inl_apply, smul_add]
-  rw [hZ]
-  abel
-
-/-- A translation of the full matrix merely translates the remaining
-coordinates and shifts the fixed primal value. -/
-theorem pointRestrict_translate (f : ((E × F2) →ₗ[F2] F) → ℝ)
-    (Z : (E × F2) →ₗ[F2] F) (a : F) :
-    pointRestrict (fun Y => f (Y + Z)) a =
-      fun X => pointRestrict f (a + Z (0, 1))
-        (X + Z.comp (LinearMap.inl F2 E F2)) := by
-  funext X
-  change f (pointAppend X a + Z) = _
-  rw [pointAppend_add]
-  rfl
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -386,10 +325,7 @@ theorem AffineDensityBound.pointRestrict [FiniteDimensional F2 E]
     AffineDensityBound r ε (pointRestrict f a) := by
   intro D _ _ _ C _ _ _ _ L hL J hJ T hdim
   let L' : (E × F2) →ₗ[F2] D := L.comp (LinearMap.fst F2 E F2)
-  have hL' : Function.Surjective L' := by
-    intro y
-    obtain ⟨x, hx⟩ := hL y
-    exact ⟨(x, 0), hx⟩
+  have hL' : Function.Surjective L' := hL.comp LinearMap.fst_surjective
   have hdim' : Module.finrank F2 (E × F2) + Module.finrank F2 F ≤
       Module.finrank F2 D + Module.finrank F2 C + (r + 1) := by
     rw [Module.finrank_prod, Module.finrank_self]
@@ -408,36 +344,6 @@ theorem AffineDensityBound.pointRestrict [FiniteDimensional F2 E]
 
 end
 end UniqueGamesTheorem.Inverse.KMSFourthMoment
-
-end
-
-section
-
-/-! The actual Grassmann local-density hypothesis discharges the affine
-squared-density predicate used by the new KMS point/character inductions. -/
-
-namespace UniqueGamesTheorem.Inverse.KMSAffineRestriction
-noncomputable section
-open scoped BigOperators
-open KMS KMSBasisComparison KMSBasisComparisonPseudorandom
-open UniqueGamesTheorem.Fourier.MatrixRestrictions
-
-/-- This supplies the local-density input of the genuine analytic induction
-from the actual lifted Grassmann indicator, with the exact order-two loss. -/
-theorem lifted_affineDensityBound {n ell d : ℕ} {ε : ℝ}
-    (S : Finset (Vertex n ell)) (hS : GrassmannPseudorandom S (2 * d) ε)
-    (hε : 0 ≤ ε) : KMSFourthMoment.AffineDensityBound d ε (liftedIndicator S) := by
-  intro D _ _ _ C _ _ _ _ L hL J hJ T hdim
-  calc
-    (𝔼 X : D →ₗ[F2] C, liftedIndicator S (T + J.comp (X.comp L)) ^ 2) =
-        𝔼 A : Parameter L.ker J.range,
-          (restrict (liftedIndicator S) L.ker J.range T A) ^ 2 :=
-      KMSAffineRestrictionPresentation.expect_presentation_sq L hL J hJ T _
-    _ ≤ ε := affine_squared_expect_bound S hS hε L.ker J.range T
-      (KMSAffineRestrictionPresentation.order_le_of_dimensions L hL J hJ d hdim)
-
-end
-end UniqueGamesTheorem.Inverse.KMSAffineRestriction
 
 end
 
@@ -516,18 +422,7 @@ theorem affine_expect_of_complement_of_tuple
   intro B _
   let bU := Module.finBasis F2 U
   let b0 := Module.finBasis F2 E0
-  have heq :
-      (𝔼 C : E0 →ₗ[F2] W,
-        liftedIndicator S (translate D W T (join D U E0 W hDU hc B C))) =
-      𝔼 C : E0 →ₗ[F2] W,
-        liftedIndicator S ((complementBasis U E0 hc bU b0).constr F2
-          (joinedTuple
-            (fun i => T (bU i) + (B ((localVanishing D U).mkQ (bU i)) : Ambient n)) W
-            (fun i => freeCenter E0 W T hE0 (b0 i) + C (b0 i)))) := by
-    apply Finset.expect_congr rfl
-    intro C _
-    rw [translate_join_eq_constr D U E0 W hDU hc T hE0 bU b0 B C]
-  rw [heq]
+  simp_rw [translate_join_eq_constr D U E0 W hDU hc T hE0 bU b0 B]
   exact lifted_expect_shifted_basis_of_tuple S hS (complementBasis U E0 hc bU b0)
     _ W b0 (freeCenter E0 W T hE0) hbudget
 
@@ -555,14 +450,11 @@ theorem affine_squared_expect_bound_of_tuple {d : ℕ}
     (D : Submodule F2 (Ambient ell)) (W : Submodule F2 (Ambient n))
     (T : BasisMap n ell) (horder : order D W ≤ d) :
     (𝔼 A : Parameter D W, (restrict (liftedIndicator S) D W T A) ^ 2) ≤ ε := by
-  have heq : (𝔼 A : Parameter D W, (restrict (liftedIndicator S) D W T A) ^ 2) =
-      𝔼 A : Parameter D W, restrict (liftedIndicator S) D W T A := by
-    apply Finset.expect_congr rfl
-    intro A _
-    unfold restrict liftedIndicator
-    split <;> norm_num
-  rw [heq]
-  exact affine_expect_bound_of_tuple S hS D W T horder
+  convert affine_expect_bound_of_tuple S hS D W T horder using 1
+  apply Finset.expect_congr rfl
+  intro A _
+  unfold restrict liftedIndicator
+  split <;> norm_num
 
 /-- Directly discharge the fourth-moment affine density input from the
 literal tuple pseudorandomness input of the ordered-basis expansion theorem. -/
@@ -608,26 +500,10 @@ theorem AffineDensityBound.domain_equiv
     (hf : AffineDensityBound r ε f) (e : E ≃ₗ[F2] E') :
     AffineDensityBound r ε (fun X : E' →ₗ[F2] F => f (X.comp e.toLinearMap)) := by
   intro D _ _ _ C _ _ _ _ L hL J hJ T hdim
-  have hdim' : Module.finrank F2 E + Module.finrank F2 F ≤
-      Module.finrank F2 D + Module.finrank F2 C + r := by
-    rw [e.finrank_eq]
-    exact hdim
   have h := hf D C (L.comp e.toLinearMap) (hL.comp e.surjective) J hJ
-    (T.comp e.toLinearMap) hdim'
+    (T.comp e.toLinearMap) (by rwa [e.finrank_eq])
   simpa only [LinearMap.add_comp, LinearMap.comp_assoc] using h
 
-/-- Homogeneous codomain restriction uses its actual codimension budget. -/
-theorem AffineDensityBound.codomain_pullback
-    [FiniteDimensional F2 B] (r s : ℕ) (ε : ℝ)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : AffineDensityBound (r + s) ε f)
-    (K : B →ₗ[F2] F) (hK : Function.Injective K)
-    (hdimK : Module.finrank F2 F ≤ Module.finrank F2 B + s) :
-    AffineDensityBound r ε (fun X : E →ₗ[F2] B => f (K.comp X)) := by
-  intro D _ _ _ C _ _ _ _ L hL J hJ T hdim
-  have hdim' : Module.finrank F2 E + Module.finrank F2 F ≤
-      Module.finrank F2 D + Module.finrank F2 C + (r + s) := by omega
-  have h := hf D C L hL (K.comp J) (hK.comp hJ) (K.comp T) hdim'
-  simpa only [LinearMap.comp_add, LinearMap.comp_assoc] using h
 
 end
 end UniqueGamesTheorem.Inverse.KMSFourthMoment
@@ -655,11 +531,8 @@ variable {E E' F I : Type*}
 
 /-- Reindex primal matrices by changing the ambient domain. -/
 def ambientPrimalEquiv (h : E ≃ₗ[F2] E') :
-    (E' →ₗ[F2] F) ≃ (E →ₗ[F2] F) where
-  toFun X := X.comp h.toLinearMap
-  invFun X := X.comp h.symm.toLinearMap
-  left_inv X := by ext x; simp
-  right_inv X := by ext x; simp
+    (E' →ₗ[F2] F) ≃ (E →ₗ[F2] F) :=
+  (h.symm.arrowCongr (LinearEquiv.refl F2 F)).toEquiv
 
 theorem ambient_character_transport (h : E ≃ₗ[F2] E')
     (S : F →ₗ[F2] E) (X : E' →ₗ[F2] F) :
@@ -673,14 +546,9 @@ theorem ambient_basisInvariant_transport (h : E ≃ₗ[F2] E')
     KMSBasisInvariant.IsBasisInvariant (fun X : E' →ₗ[F2] F =>
       f (X.comp h.toLinearMap)) := by
   intro g X
-  let k : E ≃ₗ[F2] E := (h.trans g).trans h.symm
-  have hc : (X.comp g.toLinearMap).comp h.toLinearMap =
-      (X.comp h.toLinearMap).comp k.toLinearMap := by
-    ext x
-    simp [k]
-  change f ((X.comp g.toLinearMap).comp h.toLinearMap) = f (X.comp h.toLinearMap)
-  rw [hc]
-  exact hf k (X.comp h.toLinearMap)
+  convert hf ((h.trans g).trans h.symm) (X.comp h.toLinearMap) using 2
+  ext x
+  simp
 
 variable [Fintype (E →ₗ[F2] F)] [Fintype (E' →ₗ[F2] F)]
 
@@ -797,18 +665,8 @@ theorem coefficient_codomain_pullback_fiber (J : B →ₗ[F2] F)
     (f : (E →ₗ[F2] F) → ℝ) (T : B →ₗ[F2] E) :
     linearCoeff (fun X => f (J.comp X)) T =
       ∑ S : {S : F →ₗ[F2] E // S.comp J = T}, linearCoeff f S.val := by
-  rw [coefficient_codomain_pullback]
-  rw [← Finset.sum_filter]
-  symm
-  refine Finset.sum_bij (fun S _ => S.val) ?_ ?_ ?_ ?_
-  · intro S _
-    exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, S.property⟩
-  · intro S _ R _ h
-    exact Subtype.ext h
-  · intro S hS
-    exact ⟨⟨S, (Finset.mem_filter.mp hS).2⟩, Finset.mem_univ _, rfl⟩
-  · intro S _
-    rfl
+  rw [coefficient_codomain_pullback, ← Finset.sum_filter]
+  exact Finset.sum_subtype _ (by simp) _
 
 end
 end UniqueGamesTheorem.Inverse.KMSFourthMoment

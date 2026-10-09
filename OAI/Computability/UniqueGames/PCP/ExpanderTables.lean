@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.PCP.ZigzagGraphsLemmas
 
@@ -167,9 +168,6 @@ theorem family_certificate {d : Nat} [NeZero d]
       ⟨Nat.ne_of_gt (vertexCount_positive (Nat.mul_pos (NeZero.pos d) (NeZero.pos d)) n)⟩
     exact step_certificate _ _ ih hH
 
-theorem family_row_count {d : Nat} (H : Table ((d * d) * (d * d)) d) (n : Nat) :
-    (family H n).rows.toList.length = ((d * d) * (d * d)) ^ n * (d * d) := by
-  rw [row_count, vertexCount_eq]
 
 /-- The only selected data is one fixed finite table, independent of the input. -/
 theorem exists_base_table : ∃ H : Table

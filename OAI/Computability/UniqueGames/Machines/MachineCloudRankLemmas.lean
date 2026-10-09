@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCloudCount
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
 import OAI.Computability.UniqueGames.Machines.MachineDrain
@@ -316,28 +317,6 @@ theorem cloudRankTrace (t : GraphTables.Table) (v : Fin t.vertices)
     replicate_encodeWord, Nat.add_zero] at h
   exact h
 
-/-- A genuine timed execution witness with a polynomial (indeed linear)
-transition budget. Neither the result nor a body trace is a premise. -/
-def cloudRankInTime (t : GraphTables.Table) (v : Fin t.vertices)
-    (e : DegreeReplacement.Cloud (GraphTables.semantics t) v)
-    (querySuffix countSuffix : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (rankProgram (σ := σ)))
-      ⟨some .queryFirst, ((ambient, false), register),
-        memory (GraphTables.tableBits t) [] (queryWord v.val e.val.val querySuffix) []
-          (encodeWord 0 ++ countSuffix) []⟩
-      (some ⟨none, ((ambient, false), none),
-        memory (GraphTables.tableBits t)
-          (encodeWords (((tableRows t).drop e.val.val).flatMap rowWords))
-          (queryWord v.val e.val.val querySuffix) []
-          (encodeWord (PreprocessingCloudIndex.cloudRank t v e).val ++ countSuffix)
-          (encodeWord 0 ++ querySuffix)⟩)
-      (5 * (GraphTables.tableBits t).length +
-        3 * (queryWord v.val e.val.val querySuffix).length + 6) where
-  steps := rankSteps t.vertices t.darts v.val e.val.val (tableRows t) querySuffix
-  evals_in_steps := cloudRankTrace t v e querySuffix countSuffix ambient register
-  steps_le_m := by
-    simpa only [tableRows_input] using
-      rankSteps_le t.vertices t.darts v.val e.val.val (tableRows t) querySuffix
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCloudRank
 
@@ -395,32 +374,16 @@ inductive Phase
   | checking | advancing | finishing
   deriving DecidableEq
 
-protected abbrev Phase.enumList : List Phase := [.checking, .advancing, .finishing]
-
-protected theorem Phase.enumList_getElem?_ctorIdx_eq (x : Phase) :
-    Phase.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Phase.enumList_nodup : Phase.enumList.Nodup := by decide
-
 instance : Fintype Phase where
-  elems := ⟨Phase.enumList, Phase.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.checking, .advancing, .finishing}
+  complete x := by cases x <;> simp
 inductive Control
   | initialize | dispatch
   deriving DecidableEq
 
-protected abbrev Control.enumList : List Control := [.initialize, .dispatch]
-
-protected theorem Control.enumList_getElem?_ctorIdx_eq (x : Control) :
-    Control.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Control.enumList_nodup : Control.enumList.Nodup := by decide
-
 instance : Fintype Control where
-  elems := ⟨Control.enumList, Control.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.initialize, .dispatch}
+  complete x := by cases x <;> simp
 
 abbrev Tape := BaseTape ⊕ Unit
 abbrev Alphabet : Tape → Type := MachineEmbedding.Alphabet BaseAlphabet (fun _ : Unit => Bool)
@@ -948,24 +911,6 @@ theorem cloudSelectSteps_le (t : GraphTables.Table) (v : Fin t.vertices)
     (tableWord_split t v e.val e.property)
   simpa only [cloudSelectSteps, e, MachineCloudCount.tableRows_input] using h
 
-noncomputable def timePolynomial : Polynomial Nat :=
-  Polynomial.C 10 * Polynomial.X + Polynomial.C 20
-
-def cloudSelectInTime (t : GraphTables.Table) (v : Fin t.vertices)
-    (i : Fin (PreprocessingCloudIndex.cloudSize t v)) (querySuffix outputSuffix : List Bool)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      (cfg (some (.inr .initialize)) .checking (GraphTables.tableBits t)
-        [] (queryWord v.val i.val querySuffix) [] [] outputSuffix ambient register)
-      (some (cfg none .checking (GraphTables.tableBits t) [] (queryWord v.val i.val querySuffix)
-        [] [] (encodeWord (PreprocessingCloudIndex.cloudSelect t v i).val.val ++ outputSuffix)
-        ambient none))
-      (timePolynomial.eval ((GraphTables.tableBits t).length + (queryWord v.val i.val querySuffix).length)) where
-  steps := cloudSelectSteps t v i querySuffix
-  evals_in_steps := cloudSelectTrace t v i querySuffix outputSuffix ambient register
-  steps_le_m := by
-    simpa only [timePolynomial, Polynomial.eval_add, Polynomial.eval_mul,
-      Polynomial.eval_C, Polynomial.eval_X] using cloudSelectSteps_le t v i querySuffix
 
 def machine : FinTM2 where
   K := Tape
@@ -978,25 +923,6 @@ def machine : FinTM2 where
   initialState := ((((), false), none), .checking)
   m := program
 
-/-- A concrete finite-machine certificate, with neither a runtime nor a
-selection oracle among its hypotheses. -/
-def machineInTime (t : GraphTables.Table) (v : Fin t.vertices)
-    (i : Fin (PreprocessingCloudIndex.cloudSize t v)) (querySuffix outputSuffix : List Bool)
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime machine.step
-      (cfg (some (.inr .initialize)) .checking (GraphTables.tableBits t)
-        [] (queryWord v.val i.val querySuffix) [] [] outputSuffix () register)
-      (some (cfg none .checking (GraphTables.tableBits t) [] (queryWord v.val i.val querySuffix)
-        [] [] (encodeWord (PreprocessingCloudIndex.cloudSelect t v i).val.val ++ outputSuffix)
-        () none))
-      (timePolynomial.eval ((GraphTables.tableBits t).length + (queryWord v.val i.val querySuffix).length)) where
-  steps := cloudSelectSteps t v i querySuffix
-  evals_in_steps := by
-    convert cloudSelectTrace t v i querySuffix outputSuffix () register using 1
-    rfl
-  steps_le_m := by
-    simpa only [timePolynomial, Polynomial.eval_add, Polynomial.eval_mul,
-      Polynomial.eval_C, Polynomial.eval_X] using cloudSelectSteps_le t v i querySuffix
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCloudSelect
 

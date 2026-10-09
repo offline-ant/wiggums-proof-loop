@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.PCP.SourceMachine
 
@@ -36,18 +37,10 @@ inductive Label
   | guard | skip | select | copy | accepted | rejected
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.guard, .skip, .select, .copy, .accepted,
-  .rejected]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.guard, .skip, .select, .copy, .accepted,
+  .rejected}
+  complete x := by cases x <;> simp
 
 /-- Six fixed labels and a single optional-bit register, independent of input. -/
 def program (index source destination : K) :

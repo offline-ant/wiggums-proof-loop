@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLookupDiscard
@@ -208,139 +209,8 @@ def boundedIndex (q j : Nat) : Fin (q + 1) := ⟨min j q, by omega⟩
 @[simp] theorem boundedIndex_val {q j : Nat} (hj : j ≤ q) :
     (boundedIndex q j).val = j := Nat.min_eq_left hj
 
-def destination (q j : Nat) : Fin (q + 1) := boundedIndex q (j + 1)
 def startLabel (q j : Nat) : Fin (q + 1) × Bool := (boundedIndex q j, false)
 def loopLabel (q j : Nat) : Fin (q + 1) × Bool := (boundedIndex q j, true)
-
-theorem destination_ne_source (q r : Nat) (hr : r < q) :
-    (0 : Fin (q + 1)) ≠ destination q r := by
-  intro heq
-  have hh := congrArg Fin.val heq
-  simp only [destination, boundedIndex_val (Nat.succ_le_iff.mpr hr)] at hh
-  change 0 = r + 1 at hh
-  omega
-
-theorem destination_injective_below (q r s : Nat) (hr : r < q) (hs : s < q)
-    (heq : destination q r = destination q s) : r = s := by
-  have hh := congrArg Fin.val heq
-  simp only [destination, boundedIndex_val (Nat.succ_le_iff.mpr hr),
-    boundedIndex_val (Nat.succ_le_iff.mpr hs)] at hh
-  omega
-
-@[simp] theorem destination_eq_succ {q : Nat} (j : Fin q) : destination q j.val = j.succ := by
-  apply Fin.ext
-  exact boundedIndex_val (Nat.succ_le_iff.mpr j.isLt)
-
-theorem output_source (q : Nat) (values : List Nat) (hlen : values.length = q)
-    (base : Fin (q + 1) → List Bool) (suffix : List Bool)
-    (hinput : base 0 = encodeWords values ++ suffix) :
-    sequenceTapes (0 : Fin (q + 1)) (destination q) base 0 values suffix 0 = suffix := by
-  apply sequenceTapes_source _ _ _ _ _ _ _ hinput
-  intro r hr
-  simpa using destination_ne_source q r (by omega)
-
-theorem output_field (q : Nat) (values : List Nat) (hlen : values.length = q)
-    (base : Fin (q + 1) → List Bool) (suffix : List Bool) (j : Fin q) :
-    sequenceTapes (0 : Fin (q + 1)) (destination q) base 0 values suffix j.succ =
-      encodeWord (values[j.val]'(by omega)) ++ base j.succ := by
-  have h := sequenceTapes_selected (0 : Fin (q + 1)) (destination q) base 0 values suffix
-    j.val (by omega)
-    (by intro r hr; simpa using destination_ne_source q r (by omega))
-    (by
-      intro r s hr hs heq
-      exact destination_injective_below q r s (by omega) (by omega)
-        (by simpa only [Nat.zero_add] using heq))
-  simpa only [Nat.zero_add, destination_eq_succ] using h
-
-/-- Every label either seeds one field, scans that field, or executes the final halt. -/
-def program (q : Nat) (label : Fin (q + 1) × Bool) :
-    TM2.Stmt (fun _ : Fin (q + 1) => Bool) (Fin (q + 1) × Bool) (Unit × Option Bool) :=
-  if label.1.val < q then
-    if label.2 then
-      fieldLoop 0 (destination q label.1.val) (label.1, true)
-        (some (startLabel q (label.1.val + 1)))
-    else fieldStart (destination q label.1.val) (label.1, true)
-  else finish 0 none
-
-def machine (q : Nat) : FinTM2 where
-  K := Fin (q + 1)
-  k₀ := 0
-  k₁ := 0
-  Γ _ := Bool
-  Λ := Fin (q + 1) × Bool
-  main := startLabel q 0
-  σ := Unit × Option Bool
-  initialState := ((), none)
-  m := program q
-
-theorem atStart (q r : Nat) (hr : r < q) :
-    program q (startLabel q r) = fieldStart (destination q r) (loopLabel q r) := by
-  simp [program, startLabel, loopLabel, boundedIndex_val hr.le, hr]
-
-theorem atLoop (q r : Nat) (hr : r < q) :
-    program q (loopLabel q r) = fieldLoop (0 : Fin (q + 1)) (destination q r)
-      (loopLabel q r) (some (startLabel q (r + 1))) := by
-  simp [program, startLabel, loopLabel, boundedIndex_val hr.le, hr]
-
-theorem atDone (q : Nat) : program q (startLabel q q) = finish (0 : Fin (q + 1)) none := by
-  simp [program, startLabel]
-
-def machineInTime (q : Nat) (values : List Nat) (hlen : values.length = q)
-    (base : Fin (q + 1) → List Bool) (suffix : List Bool)
-    (hinput : base 0 = encodeWords values ++ suffix) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine q).step
-      ⟨some (startLabel q 0), ((), register), base⟩
-      (some ⟨none, ((), none), sequenceTapes (0 : Fin (q + 1)) (destination q) base 0 values suffix⟩)
-      (values.sum + 2 * q + 1) := by
-  have hsep : ∀ r, r < values.length → (0 : Fin (q + 1)) ≠ destination q (0 + r) := by
-    intro r hr heq
-    have hr' : r + 1 ≤ q := by omega
-    have hh := congrArg Fin.val heq
-    simp only [Nat.zero_add, destination, boundedIndex_val hr'] at hh
-    change 0 = r + 1 at hh
-    omega
-  have hs : ∀ r, r < values.length → program q (startLabel q (0 + r)) =
-      fieldStart (destination q (0 + r)) (loopLabel q (0 + r)) := by
-    intro r hr
-    simpa only [Nat.zero_add] using atStart q r (by omega)
-  have hl : ∀ r, r < values.length → program q (loopLabel q (0 + r)) =
-      fieldLoop (0 : Fin (q + 1)) (destination q (0 + r)) (loopLabel q (0 + r))
-        (some (startLabel q (0 + r + 1))) := by
-    intro r hr
-    simpa only [Nat.zero_add] using atLoop q r (by omega)
-  have hd : program q (startLabel q (0 + values.length)) = finish (0 : Fin (q + 1)) none := by
-    simpa [hlen] using atDone q
-  simpa only [machine, FinTM2.Cfg, FinTM2.step, hlen] using! sequenceInTime (0 : Fin (q + 1)) (destination q)
-    (startLabel q) (loopLabel q) none (program q) base 0 values suffix hsep hs hl hd hinput () register
-
-/-- The same actual execution has a linear bound measured in the complete
-input stack, including its unread suffix. -/
-def machineInTime_inputBound (q : Nat) (values : List Nat) (hlen : values.length = q)
-    (base : Fin (q + 1) → List Bool) (suffix : List Bool)
-    (hinput : base 0 = encodeWords values ++ suffix) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine q).step
-      ⟨some (startLabel q 0), ((), register), base⟩
-      (some ⟨none, ((), none), sequenceTapes (0 : Fin (q + 1)) (destination q) base 0 values suffix⟩)
-      ((base 0).length + q + 1) := by
-  let run := machineInTime q values hlen base suffix hinput register
-  refine { toEvalsTo := run.toEvalsTo, steps_le_m := ?_ }
-  have hb := run.steps_le_m
-  have hi : (base 0).length = values.sum + q + suffix.length := by
-    rw [hinput, List.length_append, encodeWords_length, hlen]
-  omega
-
-/-- The six natural fields of a three-literal clause use seven actual stacks. -/
-def sixFieldsInTime (base : Fin 7 → List Bool) (a b c d e f : Nat) (suffix : List Bool)
-    (hinput : base 0 = encodeWords [a, b, c, d, e, f] ++ suffix) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine 6).step
-      ⟨some (startLabel 6 0), ((), register), base⟩
-      (some ⟨none, ((), none),
-        sequenceTapes (0 : Fin 7) (destination 6) base 0 [a, b, c, d, e, f] suffix⟩)
-      (a + b + c + d + e + f + 13) := by
-  have h := machineInTime 6 [a, b, c, d, e, f] rfl base suffix hinput register
-  convert h using 1
-  simp
-  omega
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceFieldArray
 
@@ -434,17 +304,6 @@ def program : Label → TM2.Stmt (fun _ : Tape => Bool) Label (Unit × Option Bo
             (some (readStart (slot.1.val + 1)))
         else fieldStart (fieldDestination slot.1.val) (.read (slot.1, true))
       else SourceFieldArray.finish .work none
-
-def machine : FinTM2 where
-  K := Tape
-  k₀ := .formula
-  k₁ := .field 0
-  Γ _ := Bool
-  Λ := Label
-  main := .copyOut
-  σ := Unit × Option Bool
-  initialState := ((), none)
-  m := program
 
 theorem atSkip (r : Nat) (hr : r < 6) :
     program (skipLabel r) = MachineLookup.discard .work (skipLabel r) (skipLabel (r + 1)) := by
@@ -732,22 +591,6 @@ theorem output_frame {n : Nat} (base : Tape → List Bool) (clause : Target.Clau
   rw [outputTapes, readSix_output_frame _ _ _ p hwork hfield]
   exact scanTapes_other _ _ _ _ p hindex hwork
 
-/-- Explicit variable/sign order consumed by later finite-control phases. -/
-theorem clauseWords_six {n : Nat} (clause : Target.Clause n) :
-    clauseWords clause =
-      [clause[0].variableIndex.val, if clause[0].positive then 1 else 0,
-       clause[1].variableIndex.val, if clause[1].positive then 1 else 0,
-       clause[2].variableIndex.val, if clause[2].positive then 1 else 0] := rfl
-
-def fieldWords (tapes : Tape → List Bool) : List (List Bool) :=
-  [tapes (.field 0), tapes (.field 1), tapes (.field 2),
-   tapes (.field 3), tapes (.field 4), tapes (.field 5)]
-
-theorem output_fieldWords {n : Nat} (base : Tape → List Bool) (clause : Target.Clause n)
-    (indexSuffix suffix : List Bool) (hempty : ∀ j : Fin 6, base (.field j) = []) :
-    fieldWords (outputTapes base clause indexSuffix suffix) =
-      (clauseWords clause).map encodeWord := by
-  simp [fieldWords, output_field, hempty, clauseWords_six]
 
 theorem lookupSteps_le_input (F : Target.Formula) (prior : List (Target.Clause F.variables))
     (clause : Target.Clause F.variables) (after : List (Target.Clause F.variables))
@@ -815,20 +658,6 @@ def lookupInTime (F : Target.Formula) (i : Fin F.clauses.length)
   apply lookupWithSplitInTime F (F.clauses.take i.val) F.clauses[i.val]
     (F.clauses.drop (i.val + 1)) hs base indexSuffix hformula
     (by simpa only [hp] using hindex) hwork hscratch register
-
-/-- The same proved run stated directly for the concrete finite machine. -/
-def machineInTime (F : Target.Formula) (i : Fin F.clauses.length)
-    (base : Tape → List Bool) (indexSuffix : List Bool)
-    (hformula : base .formula = formulaBits F)
-    (hindex : base .index = encodeWord i.val ++ indexSuffix)
-    (hwork : base .work = []) (hscratch : base .scratch = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime machine.step
-      ⟨some .copyOut, ((), register), base⟩
-      (some ⟨none, ((), none), outputTapes base F.clauses[i.val] indexSuffix
-        (encodeWords ((F.clauses.drop (i.val + 1)).flatMap clauseWords))⟩)
-      (timePolynomial.eval (formulaBits F).length) := by
-  exact lookupInTime F i base indexSuffix hformula hindex hwork hscratch register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceClauseLookup
 

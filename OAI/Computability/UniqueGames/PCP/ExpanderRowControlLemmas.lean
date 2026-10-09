@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.Prod
 import Mathlib.Tactic.DeriveFintype
 import Mathlib.Tactic.Ring
@@ -99,27 +100,6 @@ theorem secondAddress_eq_rowIndex {v d : Nat} (vertex : Fin v) (s : Control d) :
   rw [rowIndex_val]
   exact Nat.add_comm _ _
 
-theorem firstAddress_lt {v d : Nat} (vertex : Fin v) (s : Control d) :
-    firstAddress vertex.val s < v * degree d := by
-  rw [firstAddress_eq_rowIndex]
-  exact (rowIndex v (degree d) (vertex,firstOffset s)).isLt
-
-theorem secondAddress_lt {v d : Nat} (vertex : Fin v) (s : Control d) :
-    secondAddress vertex.val s < v * degree d := by
-  rw [secondAddress_eq_rowIndex]
-  exact (rowIndex v (degree d) (vertex,secondOffset s)).isLt
-
-/-- Actual table returns split into the unary vertex quotient and finite port
-remainder. Both formulas are the definitions of the table's mixed-radix inverse. -/
-theorem lookup_vertex_div {v q : Nat} (G : Table v q) (x : Fin v × Fin q) :
-    (lookup G x).1.val = (reverseIndex G (rowIndex v q x)).val / q := rfl
-
-theorem lookup_port_mod {v q : Nat} (G : Table v q) (x : Fin v × Fin q) :
-    (lookup G x).2.val = (reverseIndex G (rowIndex v q x)).val % q := rfl
-
-theorem lookup_port_eq_remainder {v q : Nat} (G : Table v q) (x : Fin v × Fin q)
-    (r : Fin q) (hr : r.val = (reverseIndex G (rowIndex v q x)).val % q) :
-    (lookup G x).2 = r := Fin.ext ((lookup_port_mod G x).trans hr.symm)
 
 theorem rowIndex_lookup {v q : Nat} (G : Table v q) (x : Fin v × Fin q) :
     rowIndex v q (lookup G x) = reverseIndex G (rowIndex v q x) := by
@@ -135,10 +115,6 @@ theorem outputAddress_eq_rowIndex {v d : Nat} (vertex : Fin v) (s : Control d) :
   simp only [outputAddress, outputOffset, outputPair, rowIndex_val, rowFactor]
   ring
 
-theorem outputAddress_lt {v d : Nat} (vertex : Fin v) (s : Control d) :
-    outputAddress vertex.val s < (v * cloudSize d) * degree d := by
-  rw [outputAddress_eq_rowIndex]
-  exact (rowIndex (v * cloudSize d) (degree d) (outputPair vertex s)).isLt
 
 /-- Pure row semantics: exactly two lookups in the input table. The two fixed
 H lookups occur inside `start` and `receiveSecond`. This is not a machine trace. -/
@@ -213,11 +189,6 @@ theorem rotationWords_getElem (table : Table v d) (i : ℕ) (hi : i < v * d) :
   simp only [rotationWords, List.getElem_map, Vector.getElem_toList,
     reverseIndex, Fin.getElem_fin]
 
-theorem rotationWords_get (table : Table v d) (i : Fin (v * d)) :
-    (rotationWords table).get
-      ⟨i.val, by simpa only [rotationWords_length] using i.isLt⟩ =
-      (reverseIndex table i).val := by
-  simpa only [List.get_eq_getElem] using rotationWords_getElem table i.val i.isLt
 
 /-- The exact zero-based lookup hypothesis consumed by the machine lookup API. -/
 theorem rotationWords_getElem? (table : Table v d) (i : Fin (v * d)) :
@@ -226,9 +197,6 @@ theorem rotationWords_getElem? (table : Table v d) (i : Fin (v * d)) :
   exact ⟨by simpa only [rotationWords_length] using i.isLt,
     rotationWords_getElem table i.val i.isLt⟩
 
-theorem rotationWords_getElem?_none (table : Table v d) (i : ℕ) (hi : v * d ≤ i) :
-    (rotationWords table)[i]? = none :=
-  List.getElem?_eq_none (by simpa only [rotationWords_length] using hi)
 
 theorem rotationWords_entry_lt (table : Table v d) (n : ℕ)
     (hn : n ∈ rotationWords table) : n < v * d := by
@@ -248,27 +216,6 @@ theorem rotationWords_row_order (table : Table v d) (x : Fin v × Fin d) :
       some ((lookup table x).2.val + d * (lookup table x).1.val) := by
   simpa only [rowIndex_val] using rotationWords_lookup table x
 
-@[simp] theorem decode_rotationWords (table : Table v d) :
-    decodeWords (encodeWords (rotationWords table)) = some (rotationWords table) :=
-  Complexity.decodeWords_encodeWords _
-
-/-- Fully decode the serialized list, then select the actual reverse-dart row. -/
-theorem decoded_lookup (table : Table v d) (i : Fin (v * d)) :
-    (decodeWords (encodeWords (rotationWords table))).bind (fun words => words[i.val]?) =
-      some (reverseIndex table i).val := by
-  rw [decode_rotationWords]
-  exact rotationWords_getElem? table i
-
-theorem decoded_coordinate_lookup (table : Table v d) (x : Fin v × Fin d) :
-    (decodeWords (encodeWords (rotationWords table))).bind
-        (fun words => words[x.2.val + d * x.1.val]?) =
-      some ((lookup table x).2.val + d * (lookup table x).1.val) := by
-  rw [decode_rotationWords]
-  exact rotationWords_row_order table x
-
-theorem encode_rotationWords_length_eq (table : Table v d) :
-    (encodeWords (rotationWords table)).length = (rotationWords table).sum + v * d := by
-  rw [Complexity.encodeWords_length, rotationWords_length]
 
 /-- Complete raw-row serialization bound, with no discarded delimiter or prefix. -/
 theorem encode_rotationWords_length_le (table : Table v d) :

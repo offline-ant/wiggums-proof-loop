@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.Archimedean.Real.Basic
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.NormNum
@@ -39,22 +40,6 @@ theorem exists_logical_dimension {α η : ℝ} (hα : 0 < α) (hη : 0 < η)
     (hpow (ell - r) hnsub).trans_le (min_le_left _ _),
     (hpow ell hnell).trans_le (min_le_right _ _)⟩
 
-/-- Uniform choice of `ell` bounds the trivial character fraction for every
-possible public row map without conditioning on its rank. -/
-theorem kernel_fraction_le {ell r : ℕ}
-    (A : (Fin ell → ZMod 2) →ₗ[ZMod 2] (Fin r → ZMod 2)) [Fintype A.ker] :
-    1 / (Fintype.card A.ker : ℝ) ≤ 1 / (2 : ℝ) ^ (ell - r) := by
-  have hcard : (2 : ℝ) ^ (ell - r) ≤ (Fintype.card A.ker : ℝ) := by
-    have h := Inverse.binary_kernel_card_lower A
-    rw [Nat.card_eq_fintype_card] at h
-    exact_mod_cast h
-  exact one_div_le_one_div_of_le (by positivity) hcard
-
-theorem kernel_fraction_lt {ell r : ℕ} {α : ℝ}
-    (A : (Fin ell → ZMod 2) →ₗ[ZMod 2] (Fin r → ZMod 2)) [Fintype A.ker]
-    (hsmall : 1 / (2 : ℝ) ^ (ell - r) < α / 8) :
-    1 / (Fintype.card A.ker : ℝ) < α / 8 :=
-  (kernel_fraction_le A).trans_lt hsmall
 
 end
 end UniqueGamesTheorem.Decoder.DimensionSelection

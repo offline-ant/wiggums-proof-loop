@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompare
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
@@ -29,18 +30,10 @@ inductive Label
   | compare | equal | different
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.seedLeft, .scanLeft, .restoreLeft, .seedRight,
-  .scanRight, .restoreRight, .compare, .equal, .different]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.seedLeft, .scanLeft, .restoreLeft, .seedRight,
+  .scanRight, .restoreRight, .compare, .equal, .different}
+  complete x := by cases x <;> simp
 
 def exitAt (exit : Option Λ) : TM2.Stmt (Alphabet (K := K)) Λ (State A) :=
   match exit with
@@ -101,10 +94,6 @@ theorem emit_step (destination : K) (bit : Bool) (exit : Option Λ)
   rw [atEmit]
   cases bit <;> cases exit <;>
     simp [emit, exitAt, TM2.stepAux, bitEncoding, encodeWord, Function.update_idem]
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Actual execution of the two copies, the translated comparison, and the
 literal bit writer, inside any program containing the stated instructions. -/
@@ -205,30 +194,11 @@ theorem equalityTrace (tape : Fin 6 → K) (distinct : Function.Injective tape)
     · simpa only [heq, ite_false, decide_false] using
         emit_step (tape 5) false exit program (labels .different) (atLabels .different)
           (clean ambient) base
-  have copied := joinTrace leftRun rightRun
-  have compared := joinTrace copied compareRun
+  have copied := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans leftRun rightRun
+  have compared := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans copied compareRun
   rw [steps, Function.iterate_succ_apply', compared, advance_some]
   exact emitRun
 
-/-- Timed correctness has only concrete input-tape and instruction premises. -/
-def equalityInTime (tape : Fin 6 → K) (distinct : Function.Injective tape)
-    (labels : Label → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
-    (atLabels : ∀ l, program (labels l) = instruction tape labels exit l)
-    (base : K → List Bool) (a b : Nat) (leftSuffix rightSuffix : List Bool)
-    (leftWord : base (tape 0) = encodeWord a ++ leftSuffix)
-    (rightWord : base (tape 1) = encodeWord b ++ rightSuffix)
-    (leftEmpty : base (tape 2) = []) (rightEmpty : base (tape 3) = [])
-    (scratchEmpty : base (tape 4) = []) (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .seedLeft), clean ambient, base⟩
-      (some ⟨exit, clean ambient,
-        Function.update base (tape 5) (bitEncoding (decide (a = b)) ++ base (tape 5))⟩)
-      (3 * (a + b) + 9) where
-  steps := steps a b
-  evals_in_steps := equalityTrace tape distinct labels exit program atLabels base a b
-    leftSuffix rightSuffix leftWord rightWord leftEmpty rightEmpty scratchEmpty ambient
-  steps_le_m := steps_le a b
 
 def machine : FinTM2 where
   K := Fin 6
@@ -241,18 +211,6 @@ def machine : FinTM2 where
   initialState := clean ()
   m := instruction id id none
 
-def machineInTime (base : Fin 6 → List Bool) (a b : Nat)
-    (leftSuffix rightSuffix : List Bool)
-    (leftWord : base 0 = encodeWord a ++ leftSuffix)
-    (rightWord : base 1 = encodeWord b ++ rightSuffix)
-    (leftEmpty : base 2 = []) (rightEmpty : base 3 = []) (scratchEmpty : base 4 = []) :
-    StateTransition.EvalsToInTime machine.step
-      ⟨some .seedLeft, clean (), base⟩
-      (some ⟨none, clean (),
-        Function.update base (5 : Fin 6) (bitEncoding (decide (a = b)) ++ base (5 : Fin 6))⟩)
-      (3 * (a + b) + 9) :=
-  equalityInTime id (fun _ _ h => h) id none (instruction id id none) (fun _ => rfl)
-    base a b leftSuffix rightSuffix leftWord rightWord leftEmpty rightEmpty scratchEmpty ()
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineUnaryEqualityBit
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.FinalCNFLoopLemmas
 
@@ -38,53 +39,6 @@ def cleanupSteps (ports : Tape → K) (base : K → List Bool) : Nat :=
   ((base (ports .remainderFirst)).length + 1) +
   ((base (ports .remainderSecond)).length + 1)
 
-omit [DecidableEq K] in
-theorem cleanupSteps_eq_sum (ports : Tape → K) (base : K → List Bool) :
-    cleanupSteps ports base = ∑ i : Fin 6, ((base (ports (dirtyTape i))).length + 1) := by
-  simp [cleanupSteps, Fin.sum_univ_succ, Nat.add_assoc]
-
-@[simp] theorem cleanupTapes_dirty (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) (i : Fin 6) :
-    cleanupTapes ports base (ports (dirtyTape i)) = [] := by
-  fin_cases i <;>
-    simp [cleanupTapes, distinct.eq_iff]
-
-/-- Every tape outside the six named work roles keeps its exact contents. -/
-theorem cleanupTapes_other (ports : Tape → K) (base : K → List Bool) (k : K)
-    (outside : ∀ i : Fin 6, k ≠ ports (dirtyTape i)) :
-    cleanupTapes ports base k = base k := by
-  have h0 := outside 0
-  have h1 := outside 1
-  have h2 := outside 2
-  have h3 := outside 3
-  have h4 := outside 4
-  have h5 := outside 5
-  change k ≠ ports .queryIndex at h0
-  change k ≠ ports .lookupOutput at h1
-  change k ≠ ports .quotientFirst at h2
-  change k ≠ ports .quotientSecond at h3
-  change k ≠ ports .remainderFirst at h4
-  change k ≠ ports .remainderSecond at h5
-  simp [cleanupTapes, h0, h1, h2, h3, h4, h5]
-
-@[simp] theorem cleanupTapes_table (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) :
-    cleanupTapes ports base (ports .table) = base (ports .table) := by
-  simp [cleanupTapes, distinct.eq_iff]
-
-@[simp] theorem cleanupTapes_inputVertex (ports : Tape → K)
-    (distinct : Function.Injective ports) (base : K → List Bool) :
-    cleanupTapes ports base (ports .inputVertex) = base (ports .inputVertex) := by
-  simp [cleanupTapes, distinct.eq_iff]
-
-@[simp] theorem cleanupTapes_output (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) :
-    cleanupTapes ports base (ports .output) = base (ports .output) := by
-  simp [cleanupTapes, distinct.eq_iff]
-
-private theorem join_trace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 variable [Fintype ρ] {d : Nat}
 
@@ -130,7 +84,7 @@ theorem cleanupTraceAt (positive : 0 < d) (H : Table (cloudSize d) d)
   have h5 := cleanupOneTraceAt positive H ports labels exit target code 5 t5 (state.1, none)
   simp [t1, t2, t3, t4, t5, distinct.eq_iff,
     -Function.iterate_succ] at h0 h1 h2 h3 h4 h5
-  have finished := join_trace (join_trace (join_trace (join_trace (join_trace h0 h1) h2) h3) h4) h5
+  have finished := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h0 h1) h2) h3) h4) h5
   simpa only [cleanupSteps, cleanupTapes] using finished
 
 /-- The done label transfers control without inspecting or modifying any tape. -/
@@ -160,7 +114,7 @@ theorem cleanupExitTraceAt (positive : 0 < d) (H : Table (cloudSize d) d)
       some ⟨exit, (state.1, none), cleanupTapes ports base⟩ := by
     simpa only [Function.iterate_one, advance_some] using
       doneStepAt positive H ports labels exit target code (cleanupTapes ports base) (state.1, none)
-  exact join_trace cleaned done
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans cleaned done
 
 def initializedTapes (ports : Tape → K) (base : K → List Bool) : K → List Bool :=
   Function.update

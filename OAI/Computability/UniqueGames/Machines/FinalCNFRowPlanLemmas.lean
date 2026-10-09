@@ -1,6 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.FinalCNFMachineLemmas
 import OAI.Computability.UniqueGames.Machines.FinalCNFPattern
-import OAI.Computability.UniqueGames.Machines.FinalCNFTableAdapter
 import OAI.Computability.UniqueGames.Machines.FinalCNFTemplate
 
 namespace OAI
@@ -115,12 +115,6 @@ theorem rowPlan_length : rowPlan.length = 860160 := by
     norm_num
   · intro p hp
     exact patternPlan_length p
-
-theorem encodeWords_flatMap {α : Type*} (xs : List α) (words : α → List Nat) :
-    encodeWords (xs.flatMap words) = xs.flatMap (fun x => encodeWords (words x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
 
 theorem patternPlan_bits (p : VerifierToCNF.PatternIndex 12)
     (vertices darts tail head row : Nat) (ambient : Ambient) :
@@ -315,8 +309,6 @@ def finishInTime (headerPlan plan : Plan) (base : Tape → List Bool)
   have run := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ r₁₂₃ run₄
   simpa only [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using run
 
-open FinalCNFTableAdapter
-
 @[simp] theorem headRoles_zero : headRoles 0 = Tape.archive := rfl
 @[simp] theorem headRoles_one : headRoles 1 = Tape.reverseIndex := rfl
 @[simp] theorem headRoles_two : headRoles 2 = Tape.scanWork := rfl
@@ -338,7 +330,7 @@ def preparedTapes (base : Tape → List Bool) (table : GraphTables.Table)
     (e : Fin table.darts) (rest : List Bool) : Tape → List Bool :=
   Lookup.headLookupTapes headRoles
     (endpointTapes base table.rows[e].tail.val table.rows[e].reverseIndex.val
-      (rowRest table e rest)) (genericTable table) e
+      (rowRest table e rest)) table e
 
 theorem prepared_input (base : Tape → List Bool) (table : GraphTables.Table)
     (e : Fin table.darts) (rest : List Bool) :
@@ -351,8 +343,7 @@ theorem prepared_head (base : Tape → List Bool) (table : GraphTables.Table)
     preparedTapes base table e rest .head =
       encodeWord table.rows[table.rows[e].reverseIndex].tail.val := by
   simp [preparedTapes, Lookup.headLookupTapes, MachineLookup.tapes,
-    genericTable_headValue, GraphTables.semantics, ConstraintGraph.head,
-    GraphTables.reverseAt]
+    Lookup.headValue, Lookup.headIndex]
 
 theorem prepared_tail (base : Tape → List Bool) (table : GraphTables.Table)
     (e : Fin table.darts) (rest : List Bool) :
@@ -462,26 +453,8 @@ theorem prepared_operands (base : Tape → List Bool) (table : GraphTables.Table
     (ht : base .tail = []) :
     ∀ i, (Function.update (preparedTapes base table e rest) Tape.input rest) (source i) =
       encodeWord (rowOperands table e i) := by
-  intro i
-  fin_cases i
-  · simpa [source, rowOperands, values] using
-      prepared_frame base table e rest .vertices (by decide) (by decide) (by decide)
-        (by decide) (by decide) (by decide) |>.trans hn
-  · change (Function.update (preparedTapes base table e rest) Tape.input rest) Tape.darts = _
-    simp only [Function.update_of_ne (show Tape.darts ≠ Tape.input by decide)]
-    exact (prepared_frame base table e rest .darts (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide)).trans hm
-  · change (Function.update (preparedTapes base table e rest) Tape.input rest) Tape.tail = _
-    simp only [Function.update_of_ne (show Tape.tail ≠ Tape.input by decide), prepared_tail,
-      ht, List.append_nil]
-    rfl
-  · change (Function.update (preparedTapes base table e rest) Tape.input rest) Tape.head = _
-    simp only [Function.update_of_ne (show Tape.head ≠ Tape.input by decide), prepared_head]
-    rfl
-  · change (Function.update (preparedTapes base table e rest) Tape.input rest) Tape.rowIndex = _
-    simp only [Function.update_of_ne (show Tape.rowIndex ≠ Tape.input by decide)]
-    exact (prepared_frame base table e rest .rowIndex (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide)).trans hr
+  simp [Fin.forall_fin_succ, source, rowOperands, values, prepared_frame,
+    prepared_tail, prepared_head, hn, hm, hr, ht]
 
 theorem rowOperands_bounded (table : GraphTables.Table) (e : Fin table.darts) :
     ∀ i, rowOperands table e i ≤ (GraphTables.tableBits table).length := by
@@ -522,16 +495,16 @@ noncomputable def rowInTime (headerPlan plan : Plan) (base : Tape → List Bool)
   let run₁ := endpointsInTime headerPlan plan base table.rows[e].tail.val
     table.rows[e].reverseIndex.val (rowRest table e rest)
     (by simpa [GraphTables.rowWords, encodeWords, List.append_assoc, rowRest] using hinput) ambient
-  have parsed_archive : parsed .archive = GenericGraphTables.tableBits (genericTable table) := by
+  have parsed_archive : parsed .archive = GraphTables.tableBits table := by
     simpa [parsed, endpointTapes, Hastad.SourceMachine.fieldTapes] using harchive
   have parsed_reverse : parsed .reverseIndex =
-      encodeWord (Lookup.headIndex (genericTable table) e).val := by
-    simp [parsed, endpointTapes, Hastad.SourceMachine.fieldTapes, hr]
+      encodeWord (Lookup.headIndex table e).val := by
+    simp [parsed, endpointTapes, Hastad.SourceMachine.fieldTapes, Lookup.headIndex, hr]
   have parsed_head : parsed .head = [] := by
     simp [parsed, endpointTapes, Hastad.SourceMachine.fieldTapes, hh]
   have parsed_scratch : parsed .scratch = [] := by
     simp [parsed, endpointTapes, Hastad.SourceMachine.fieldTapes, hscratch]
-  let run₂ := headPhaseInTime headerPlan plan parsed (genericTable table) e
+  let run₂ := headPhaseInTime headerPlan plan parsed table e
     parsed_archive parsed_reverse parsed_head parsed_scratch ambient
   let run₃ := relationInTime headerPlan plan ready table.rows[e].relation rest
     (prepared_input base table e rest) ambient
@@ -580,7 +553,8 @@ noncomputable def rowInTime (headerPlan plan : Plan) (base : Tape → List Bool)
   change table.rows[e].tail.val ≤ _ at htbound
   change table.rows[table.rows[e].reverseIndex].tail.val ≤ _ at hhbound
   simp only [Lookup.headTimePolynomial, Polynomial.eval_add, Polynomial.eval_mul,
-    Polynomial.eval_C, Polynomial.eval_X, genericTable_tableBits] at hb
+    Polynomial.eval_C, Polynomial.eval_X,
+    show GenericGraphTables.tableBits table = GraphTables.tableBits table from rfl] at hb
   unfold rowTime
   omega
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.LinearAlgebra.Dimension.Constructions
 import Mathlib.LinearAlgebra.FiniteDimensional.Basic
@@ -77,32 +78,13 @@ variable {K F : Type*} [Field K] [AddCommGroup F] [Module K F]
 The kernel coordinate is exactly `x - a x • t`. -/
 def splitEquiv (a : F →ₗ[K] K) (t : F) (ht : a t = 1) :
     F ≃ₗ[K] (a.ker × K) where
-  toFun x := (⟨x - a x • t, by simp [LinearMap.mem_ker, ht]⟩, a x)
+  toLinearMap := ((LinearMap.id - a.smulRight t).codRestrict a.ker
+    (fun x => by simp [LinearMap.mem_ker, ht])).prod a
   invFun p := (p.1 : F) + p.2 • t
-  map_add' x y := by
-    apply Prod.ext
-    · apply Subtype.ext
-      change x + y - a (x + y) • t = (x - a x • t) + (y - a y • t)
-      rw [map_add, add_smul]
-      abel
-    · exact a.map_add x y
-  map_smul' c x := by
-    apply Prod.ext
-    · apply Subtype.ext
-      change c • x - a (c • x) • t = c • (x - a x • t)
-      simp [smul_sub, smul_smul]
-    · exact a.map_smul c x
-  left_inv x := by
-    change x - a x • t + a x • t = x
-    exact sub_add_cancel _ _
+  left_inv x := sub_add_cancel x (a x • t)
   right_inv p := by
     have hp : a (p.1 : F) = 0 := p.1.property
-    apply Prod.ext
-    · apply Subtype.ext
-      change (p.1 : F) + p.2 • t - a ((p.1 : F) + p.2 • t) • t = p.1
-      simp [hp, ht]
-    · change a ((p.1 : F) + p.2 • t) = p.2
-      simp [hp, ht]
+    ext <;> simp [hp, ht]
 
 @[simp] theorem splitEquiv_apply_snd (a : F →ₗ[K] K) (t : F) (ht : a t = 1) (x : F) :
     (splitEquiv a t ht x).2 = a x := rfl
@@ -114,19 +96,6 @@ def splitEquiv (a : F →ₗ[K] K) (t : F) (ht : a t = 1) :
     (p : a.ker × K) :
     (splitEquiv a t ht).symm p = (p.1 : F) + p.2 • t := rfl
 
-@[simp] theorem splitEquiv_symm_apply_zero (a : F →ₗ[K] K) (t : F) (ht : a t = 1)
-    (b : a.ker) : (splitEquiv a t ht).symm (b, 0) = (b : F) := by
-  simp
-
-@[simp] theorem splitEquiv_apply_ker (a : F →ₗ[K] K) (t : F) (ht : a t = 1)
-    (b : a.ker) : splitEquiv a t ht (b : F) = (b, 0) := by
-  apply (splitEquiv a t ht).symm.injective
-  simp
-
-@[simp] theorem splitEquiv_apply_unit (a : F →ₗ[K] K) (t : F) (ht : a t = 1) :
-    splitEquiv a t ht t = (0, 1) := by
-  apply (splitEquiv a t ht).symm.injective
-  simp
 
 /-- A functional with a unit preimage has a kernel of codimension one. -/
 theorem finrank_eq_ker_add_one [FiniteDimensional K F]
@@ -221,16 +190,6 @@ theorem leftMap_surjective (s : CompatibleSplitting π A) :
   · apply Subtype.ext
     exact hx
 
-theorem rightMap_surjective (s : CompatibleSplitting π A) :
-    Function.Surjective s.rightMap := by
-  intro y
-  obtain ⟨x, hx⟩ := s.right_surjective y.val
-  refine ⟨⟨x, ?_⟩, ?_⟩
-  · change s.functional (A x) = 0
-    rw [hx]
-    exact y.property
-  · apply Subtype.ext
-    exact hx
 
 @[simp] theorem leftEquiv_symm_apply (s : CompatibleSplitting π A) (x : s.J × F2) :
     s.leftEquiv.symm x = (x.1 : I) + x.2 • s.leftVector := rfl
@@ -279,11 +238,6 @@ theorem left_finrank [FiniteDimensional F2 I] (s : CompatibleSplitting π A) :
     (by change s.functional (π s.leftVector) = 1
         rw [s.leftVector_image, s.functional_targetVector])
 
-theorem right_finrank [FiniteDimensional F2 F] (s : CompatibleSplitting π A) :
-    Module.finrank F2 F = Module.finrank F2 s.B + 1 :=
-  KMSAnalyticFunctionalSplit.finrank_eq_ker_add_one (s.functional.comp A) s.rightVector
-    (by change s.functional (A s.rightVector) = 1
-        rw [s.rightVector_image, s.functional_targetVector])
 
 end CompatibleSplitting
 
@@ -381,34 +335,18 @@ def extract (z : B →ₗ[R] W)
     (S : {S : (B × C) →ₗ[R] (A × (W × D)) //
       compressBlock S = z.prod (0 : B →ₗ[R] D)}) :
     assemble (extract z S) = S.val := by
-  apply LinearMap.ext
-  rintro ⟨b, c⟩
-  have hzero : (S.val (b, 0)).2.2 = 0 :=
-    congrArg (fun L : B →ₗ[R] (W × D) => (L b).2) S.property
-  have hlast : (S.val (b, c)).2.2 = (S.val (0, c)).2.2 := by
-    calc
-      _ = (S.val ((b, 0) + (0, c))).2.2 := by simp
-      _ = (S.val (b, 0)).2.2 + (S.val (0, c)).2.2 := by rw [map_add]; rfl
-      _ = _ := by rw [hzero, zero_add]
-  apply Prod.ext
+  apply LinearMap.prod_ext
+  · apply LinearMap.ext
+    intro b
+    have hzero := congrArg (fun L : B →ₗ[R] (W × D) => (L b).2) S.property
+    exact Prod.ext rfl (Prod.ext rfl
+      (by simpa [assemble, extract, Prod.mk_zero_zero] using hzero.symm))
   · rfl
-  · apply Prod.ext
-    · rfl
-    · exact hlast.symm
 
 @[simp] theorem extract_assemble {z : B →ₗ[R] W}
     (p : Coordinates (A := A) (D := D) (C := C) z) :
     extract z ⟨assemble p, compressBlock_assemble p⟩ = p := by
-  apply Coordinates.ext
-  · apply LinearMap.ext
-    intro x
-    rfl
-  · apply LinearMap.ext
-    intro x
-    rfl
-  · apply LinearMap.ext
-    intro c
-    rfl
+  apply Coordinates.ext <;> rfl
 
 /-- An exact compressed-fiber parametrization, valid over any ring. -/
 def compressedFiberEquiv (z : B →ₗ[R] W) :
@@ -420,14 +358,6 @@ def compressedFiberEquiv (z : B →ₗ[R] W) :
   left_inv S := Subtype.ext (assemble_extract z S)
   right_inv := extract_assemble
 
-/-- Equality of assembled maps forces equality of every chosen coordinate;
-there are no hidden change-of-basis fibers in this parametrization. -/
-theorem assemble_injective (z : B →ₗ[R] W) :
-    Function.Injective (assemble (R := R) (A := A) (D := D) (C := C) (z := z)) := by
-  intro p q h
-  have hh : (compressedFiberEquiv (A := A) (D := D) (C := C) z).symm p =
-      (compressedFiberEquiv (A := A) (D := D) (C := C) z).symm q := Subtype.ext h
-  exact (compressedFiberEquiv (A := A) (D := D) (C := C) z).symm.injective hh
 
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridCoordinates
 

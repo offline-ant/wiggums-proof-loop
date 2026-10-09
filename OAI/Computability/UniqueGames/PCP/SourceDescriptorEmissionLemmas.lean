@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fin.Rev
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
@@ -21,72 +22,6 @@ open Target SourceContexts SourceOccurrences SourceLocalSignature SourceLocalEqu
 open UniqueGamesTheorem.Reduction.CloneGap
 open UniqueGamesTheorem.Foundations.Complexity
 
-def codedEquation (u D : ℕ) (state : LocalInput u D) :
-    Equation (Fin (localKeyEncoding u).size) :=
-  mapEquation (localKeyEncoding u).code (SourceLocalEquation.emit u D state)
-
-def descriptorWords (u D : ℕ) (state : LocalInput u D) : List ℕ :=
-  UniqueGamesTheorem.Reduction.SourceEncoding.equationWords (codedEquation u D state)
-
-def descriptorBits (u D : ℕ) (state : LocalInput u D) : List Bool :=
-  encodeWords (descriptorWords u D state)
-
-@[simp] theorem descriptorWords_length (u D : ℕ) (state : LocalInput u D) :
-    (descriptorWords u D state).length = 4 :=
-  UniqueGamesTheorem.Reduction.SourceEncoding.equationWords_length _
-
-theorem descriptorBits_length_le (u D : ℕ) (state : LocalInput u D) :
-    (descriptorBits u D state).length ≤ 3 * (localKeyEncoding u).size + 2 :=
-  UniqueGamesTheorem.Reduction.SourceEncoding.equationBits_length_le _
-
-@[simp] theorem decode_descriptorBits (u D : ℕ) (state : LocalInput u D) :
-    decodeWords (descriptorBits u D state) = some (descriptorWords u D state) :=
-  decodeWords_encodeWords _
-
-@[simp] theorem parse_descriptorWords (u D : ℕ) (state : LocalInput u D) :
-    UniqueGamesTheorem.Reduction.SourceEncoding.parseEquation (localKeyEncoding u).size
-      (descriptorWords u D state) = some (codedEquation u D state, []) := by
-  simpa only [List.append_nil, descriptorWords] using
-    UniqueGamesTheorem.Reduction.SourceEncoding.parseEquation_encoded (codedEquation u D state) []
-
-/-- Decoding the finite address suffixes recovers the exact local equation,
-including all repeated occurrences and the Boolean correction. -/
-theorem decode_codedEquation (u D : ℕ) (state : LocalInput u D) :
-    mapEquation (localKeyEncoding u).code.symm (codedEquation u D state) =
-      SourceLocalEquation.emit u D state := by
-  unfold codedEquation
-  rw [SourceLocalEquation.mapEquation_comp]
-  have h : (localKeyEncoding u).code.symm ∘ (localKeyEncoding u).code = id := by
-    funext key
-    exact (localKeyEncoding u).code.symm_apply_apply key
-  rw [h]
-  rfl
-
-theorem codedEquation_global (F : Formula) (u D : ℕ) (p : SourceIndex F u D) :
-    mapEquation
-      (addressMap F u p.1.1 (sampledVariables F p.1.1 p.1.2) ∘
-        (localKeyEncoding u).code.symm)
-      (codedEquation u D (ofContext F p.1.1 p.1.2, p.2)) =
-      sourceEquation F u D p := by
-  rw [← SourceLocalEquation.mapEquation_comp, decode_codedEquation]
-  exact (sourceEquation_eq_map_emit F u D p).symm
-
-def descriptorPushBound (u D : ℕ) : ℕ :=
-  ((localInputs u D).map (fun state => (descriptorBits u D state).length)).sum
-
-theorem descriptorPushBound_le (u D : ℕ) :
-    descriptorPushBound u D ≤
-      (localInputs u D).length * (3 * (localKeyEncoding u).size + 2) := by
-  have hlist (states : List (LocalInput u D)) :
-      (states.map (fun state => (descriptorBits u D state).length)).sum ≤
-        states.length * (3 * (localKeyEncoding u).size + 2) := by
-    induction states with
-    | nil => simp
-    | cons state states ih =>
-      simp only [List.map_cons, List.sum_cons, List.length_cons, Nat.add_mul, Nat.one_mul]
-      have hstate := descriptorBits_length_le u D state
-      omega
-  exact hlist (localInputs u D)
 
 variable {K Λ : Type} [DecidableEq K]
 
@@ -97,52 +32,6 @@ instance localInputDecidableEq (u D : ℕ) : DecidableEq (LocalInput u D) :=
       isTrue ((localInputEncoding u D).code.injective h)
     else isFalse (fun hxy => h (congrArg (localInputEncoding u D).code hxy))
 
-/-- Concrete finite-table statement. Its state is the finite signature/tape
-pair; every branch leaf contains a fixed finite push chain. -/
-def emitDescriptor (u D : ℕ) (dst : K)
-    (next : TM2.Stmt (fun _ : K => Bool) Λ (LocalInput u D)) :
-    TM2.Stmt (fun _ : K => Bool) Λ (LocalInput u D) :=
-  MachineFiniteTable.emit (Γ := fun _ : K => Bool) dst
-    (descriptorBits u D) (localInputs u D) next
-
-theorem stepAux_emitDescriptor (u D : ℕ) (dst : K)
-    (next : TM2.Stmt (fun _ : K => Bool) Λ (LocalInput u D))
-    (state : LocalInput u D) (tapes : K → List Bool) :
-    TM2.stepAux (emitDescriptor u D dst next) state tapes =
-      TM2.stepAux next state
-        (Function.update tapes dst (descriptorBits u D state ++ tapes dst)) :=
-  MachineFiniteTable.stepAux_emit (Γ := fun _ : K => Bool) dst
-    (descriptorBits u D) (localInputs u D)
-    (mem_localInputs u D) next state tapes
-
-omit [DecidableEq K] in
-theorem emitDescriptor_push_bound (u D : ℕ) (dst : K)
-    (next : TM2.Stmt (fun _ : K => Bool) Λ (LocalInput u D)) :
-    Runtime.statementPushBound (emitDescriptor u D dst next) ≤
-      descriptorPushBound u D + Runtime.statementPushBound next :=
-  MachineFiniteTable.emit_push_bound (Γ := fun _ : K => Bool) dst
-    (descriptorBits u D) (localInputs u D) next
-
-/-- One actual TM2 transition emits the descriptor and enters the chosen
-continuation label. Only a program-definition equation is required. -/
-def emitDescriptorInTime (u D : ℕ) (dst : K)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (LocalInput u D))
-    (label exitLabel : Λ)
-    (atLabel : program label = emitDescriptor u D dst (.goto (fun _ => exitLabel)))
-    (state : LocalInput u D) (tapes : K → List Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some label, state, tapes⟩
-      (some ⟨some exitLabel, state,
-        Function.update tapes dst (descriptorBits u D state ++ tapes dst)⟩) 1 :=
-  MachineFiniteTable.emitInTime (Γ := fun _ : K => Bool) dst
-    (descriptorBits u D) (localInputs u D)
-    (mem_localInputs u D) program label exitLabel atLabel state tapes
-
-theorem descriptor_output_frame (u D : ℕ) (dst : K)
-    (state : LocalInput u D) (tapes : K → List Bool) (k : K) (h : k ≠ dst) :
-    (Function.update tapes dst (descriptorBits u D state ++ tapes dst)) k = tapes k :=
-  MachineFiniteTable.output_frame (Γ := fun _ : K => Bool) dst
-    (descriptorBits u D) state tapes k h
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceDescriptorEmission
 
@@ -162,18 +51,10 @@ inductive Label
   | secondDrain | secondFork | secondEmit | firstDrain | firstFork | firstEmit
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.seed, .thirdDrain, .thirdFork, .thirdEmit,
-  .secondDrain, .secondFork, .secondEmit, .firstDrain, .firstFork, .firstEmit]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.seed, .thirdDrain, .thirdFork, .thirdEmit,
+  .secondDrain, .secondFork, .secondEmit, .firstDrain, .firstFork, .firstEmit}
+  complete x := by cases x <;> simp
 
 abbrev Alphabet {K : Type} (_ : K) := Bool
 abbrev State (σ : Type) := σ × Option Bool
@@ -290,39 +171,6 @@ theorem equationTrace (sources : Fin 3 → K) (destination scratch : K)
     Function.iterate_add_apply _ (2 * values e.second.1 + 5),
     Function.iterate_add_apply _ (2 * values e.third.1 + 5), hseed, hthird, hsecond, hfirst]
 
-def equationInTime (sources : Fin 3 → K) (destination scratch : K)
-    (sourceDestination : ∀ side, sources side ≠ destination)
-    (sourceScratch : ∀ side, sources side ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (e : Equation Descriptor)
-    (labels : Label → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement sources destination scratch e labels exit label)
-    (base : K → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (sources side) = encodeWord (values side))
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .seed), (ambient, register), base⟩
-      (some ⟨exit, (ambient, none), prefixTapes destination base (words values e)⟩)
-      (steps values e) where
-  steps := steps values e
-  evals_in_steps := equationTrace sources destination scratch sourceDestination sourceScratch
-    destinationScratch e labels exit p atLabels base values sourceWords scratchEmpty ambient register
-  steps_le_m := Nat.le_refl _
-
-def programInTime (sources : Fin 3 → K) (destination scratch : K)
-    (sourceDestination : ∀ side, sources side ≠ destination)
-    (sourceScratch : ∀ side, sources side ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (e : Equation Descriptor)
-    (base : K → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (sources side) = encodeWord (values side))
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ) sources destination scratch e))
-      ⟨some .seed, (ambient, register), base⟩
-      (some ⟨none, (ambient, none), prefixTapes destination base (words values e)⟩)
-      (steps values e) :=
-  equationInTime sources destination scratch sourceDestination sourceScratch destinationScratch
-    e id none (program sources destination scratch e) (fun _ => rfl)
-    base values sourceWords scratchEmpty ambient register
 
 abbrev Tape := Fin 3 ⊕ Bool
 
@@ -337,16 +185,6 @@ def machine (e : Equation Descriptor) : FinTM2 where
   initialState := ((), none)
   m := program Sum.inl (.inr false) (.inr true) e
 
-def machineInTime (e : Equation Descriptor) (base : Tape → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (.inl side) = encodeWord (values side))
-    (scratchEmpty : base (.inr true) = []) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine e).step
-      ⟨some Label.seed, ((), register), base⟩
-      (some ⟨none, ((), none), prefixTapes (.inr false : Tape) base (words values e)⟩)
-      (steps values e) :=
-  programInTime Sum.inl (.inr false : Tape) (.inr true)
-    (fun _ => Sum.inl_ne_inr) (fun _ => Sum.inl_ne_inr) (by decide)
-    e base values sourceWords scratchEmpty () register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceEquationEmit
 
@@ -498,22 +336,6 @@ theorem rankTrace (slots : MachineHorner.Layout width ↪ K)
   rw [horner_reverse_eq_rank] at h
   simpa only [MachineHorner.resultTapes, reverseSlots_control] using h
 
-def rankInTime (slots : MachineHorner.Layout width ↪ K)
-    (labels : MachineHorner.Label width → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (radix : Nat) (digits : Fin width → Nat)
-    (operandRadix : base (slots (.inl 0)) = encodeWord radix)
-    (operandDigits : ∀ i, base (slots (.inr i)) = encodeWord (digits i))
-    (clean : MachineHorner.Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .start), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), MachineHorner.resultTapes slots base (rank radix digits)⟩)
-      (MachineHorner.steps radix (reverseDigits digits) width) where
-  steps := MachineHorner.steps radix (reverseDigits digits) width
-  evals_in_steps := rankTrace slots labels exit p atLabels base radix digits operandRadix
-    operandDigits clean ambient register
-  steps_le_m := Nat.le_refl _
 
 def rankInPolynomialTime (slots : MachineHorner.Layout width ↪ K)
     (labels : MachineHorner.Label width → Λ) (exit : Option Λ)
@@ -566,17 +388,6 @@ def clauseRankInTime (F : Formula) (u : Nat) (c : ClauseContext F u)
     operandRadix operandDigits clean ambient register F.clauses.length (Nat.le_refl _) (fun i => (c i).isLt.le)
   simpa only [rank, ← clause_rank F u c] using h
 
-def programInTime (slots : MachineHorner.Layout width ↪ K)
-    (base : K → List Bool) (radix : Nat) (digits : Fin width → Nat)
-    (operandRadix : base (slots (.inl 0)) = encodeWord radix)
-    (operandDigits : ∀ i, base (slots (.inr i)) = encodeWord (digits i))
-    (clean : MachineHorner.Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ) slots))
-      ⟨some .start, ((ambient, ()), register), base⟩
-      (some ⟨none, ((ambient, ()), none), MachineHorner.resultTapes slots base (rank radix digits)⟩)
-      (MachineHorner.steps radix (reverseDigits digits) width) :=
-  rankInTime slots id none (program slots) (fun _ => rfl) base radix digits operandRadix
-    operandDigits clean ambient register
 
 def machine (width : Nat) : FinTM2 where
   K := MachineHorner.Layout width
@@ -589,17 +400,6 @@ def machine (width : Nat) : FinTM2 where
   initialState := (((), ()), none)
   m := program (Function.Embedding.refl (MachineHorner.Layout width))
 
-def machineInTime (width radix : Nat) (digits : Fin width → Nat)
-    (base : MachineHorner.Layout width → List Bool)
-    (operandRadix : base (.inl 0) = encodeWord radix)
-    (operandDigits : ∀ i, base (.inr i) = encodeWord (digits i))
-    (clean : MachineHorner.Clean (Function.Embedding.refl _) base) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine width).step
-      ⟨some (MachineHorner.Label.start), (((), ()), register), base⟩
-      (some ⟨none, (((), ()), none),
-        MachineHorner.resultTapes (Function.Embedding.refl _) base (rank radix digits)⟩)
-      (MachineHorner.steps radix (reverseDigits digits) width) :=
-  programInTime (Function.Embedding.refl _) base radix digits operandRadix operandDigits clean () register
 
 variable {u : Nat} {Extra : Type}
 
@@ -752,18 +552,6 @@ theorem stepAux_statement (field : Position u → K) (exit : Option Λ)
       ⟨exit, ({initial with signs := readSigns field tapes}, ambient), tapes⟩ := by
   rw [statement, stepAux_peekChain, fillSigns_positions]
 
-omit [DecidableEq K] in
-theorem peekChain_pushBound (field : Position u → K) (exit : Option Λ)
-    (cells : List (Position u)) :
-    Runtime.statementPushBound (peekChain (τ := τ) field exit cells) = 0 := by
-  induction cells with
-  | nil => cases exit <;> rfl
-  | cons p rest ih => exact ih
-
-omit [DecidableEq K] in
-theorem statement_pushBound (field : Position u → K) (exit : Option Λ) :
-    Runtime.statementPushBound (statement (τ := τ) field exit) = 0 :=
-  peekChain_pushBound field exit (positions u)
 
 omit [DecidableEq K] in
 theorem readSigns_of_unary (field : Position u → K) (tapes : K → List Bool)
@@ -774,67 +562,6 @@ theorem readSigns_of_unary (field : Position u → K) (tapes : K → List Bool)
   rw [readSigns, hfields]
   cases values p <;> rfl
 
-/-- Exact actual caller-program step. Every stored field and unread suffix
-is preserved, as are sameName, selected, and all ambient registers. -/
-theorem loadStep (field : Position u → K) (entryLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State u τ))
-    (atEntry : program entryLabel = statement field exit)
-    (initial : Signature u) (ambient : τ) (tapes : K → List Bool)
-    (values : Position u → Bool) (suffix : Position u → List Bool)
-    (hfields : ∀ p, tapes (field p) = encodeWord (if values p then 1 else 0) ++ suffix p) :
-    TM2.step program ⟨some entryLabel, (initial, ambient), tapes⟩ =
-      some ⟨exit, ({initial with signs := values}, ambient), tapes⟩ := by
-  change some (TM2.stepAux (program entryLabel) (initial, ambient) tapes) = _
-  rw [atEntry, stepAux_statement, readSigns_of_unary field tapes values suffix hfields]
-
-def loadInTime (field : Position u → K) (entryLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State u τ))
-    (atEntry : program entryLabel = statement field exit)
-    (initial : Signature u) (ambient : τ) (tapes : K → List Bool)
-    (values : Position u → Bool) (suffix : Position u → List Bool)
-    (hfields : ∀ p, tapes (field p) = encodeWord (if values p then 1 else 0) ++ suffix p) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some entryLabel, (initial, ambient), tapes⟩
-      (some ⟨exit, ({initial with signs := values}, ambient), tapes⟩) 1 where
-  steps := 1
-  evals_in_steps := by
-    change (MachineComposition.advance (TM2.step program))^[1] _ = _
-    simpa only [Function.iterate_one, MachineComposition.advance_some] using
-      loadStep field entryLabel exit program atEntry initial ambient tapes values suffix hfields
-  steps_le_m := Nat.le_refl _
-
-omit [DecidableEq K] in
-/-- The actual context signature is recovered when equality and selected-slot
-data have already been loaded by their separate verified preparation stages. -/
-theorem loaded_ofContext (F : Target.Formula) (c : SourceContexts.ClauseContext F u)
-    (selected : SourceContexts.SlotContext u) (initial : Signature u)
-    (hnames : initial.sameName = contextNameProfile F c)
-    (hselected : initial.selected = selected) :
-    {initial with signs := (ofContext F c selected).signs} = ofContext F c selected := by
-  cases initial with
-  | mk signs sameName chosen =>
-    dsimp only at hnames hselected
-    cases hnames
-    cases hselected
-    rfl
-
-def loadContextInTime (F : Target.Formula) (c : SourceContexts.ClauseContext F u)
-    (selected : SourceContexts.SlotContext u) (field : Position u → K)
-    (entryLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State u τ))
-    (atEntry : program entryLabel = statement field exit)
-    (initial : Signature u) (hnames : initial.sameName = contextNameProfile F c)
-    (hselected : initial.selected = selected) (ambient : τ) (tapes : K → List Bool)
-    (suffix : Position u → List Bool)
-    (hfields : ∀ p, tapes (field p) =
-      encodeWord (if positiveAt (PCP.clauseAt F (c p.1)) p.2 then 1 else 0) ++ suffix p) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some entryLabel, (initial, ambient), tapes⟩
-      (some ⟨exit, (ofContext F c selected, ambient), tapes⟩) 1 := by
-  have h := loadInTime field entryLabel exit program atEntry initial ambient tapes
-    (ofContext F c selected).signs suffix hfields
-  rw [loaded_ofContext F c selected initial hnames hselected] at h
-  exact h
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceSignLoad
 

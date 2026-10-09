@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Group.AddChar
@@ -28,49 +29,21 @@ abbrev F2 := UniqueGamesTheorem.Integration.BinaryLinear.F2
 def tracePair {n m : Nat} (X : Matrix (Fin n) (Fin m) F2)
     (S : Matrix (Fin m) (Fin n) F2) : F2 := Matrix.trace (X * S)
 
-theorem tracePair_eq_sum_entries {n m : Nat} (X : Matrix (Fin n) (Fin m) F2)
-    (S : Matrix (Fin m) (Fin n) F2) :
-    tracePair X S = ∑ i, ∑ j, X i j * S j i := rfl
-
-theorem tracePair_swap {n m : Nat} (X : Matrix (Fin n) (Fin m) F2)
-    (S : Matrix (Fin m) (Fin n) F2) : tracePair X S = tracePair S X :=
-  Matrix.trace_mul_comm X S
 
 @[simp] theorem tracePair_zero_left {n m : Nat} (S : Matrix (Fin m) (Fin n) F2) :
     tracePair (0 : Matrix (Fin n) (Fin m) F2) S = 0 := by simp [tracePair]
 
-@[simp] theorem tracePair_zero_right {n m : Nat} (X : Matrix (Fin n) (Fin m) F2) :
-    tracePair X (0 : Matrix (Fin m) (Fin n) F2) = 0 := by simp [tracePair]
 
 theorem tracePair_add_left {n m : Nat} (X Y : Matrix (Fin n) (Fin m) F2)
     (S : Matrix (Fin m) (Fin n) F2) :
     tracePair (X + Y) S = tracePair X S + tracePair Y S := by
   simp [tracePair, Matrix.add_mul]
 
-theorem tracePair_add_right {n m : Nat} (X : Matrix (Fin n) (Fin m) F2)
-    (S T : Matrix (Fin m) (Fin n) F2) :
-    tracePair X (S + T) = tracePair X S + tracePair X T := by
-  simp [tracePair, Matrix.mul_add]
 
 theorem tracePair_ext_right {n m : Nat} {S T : Matrix (Fin m) (Fin n) F2}
     (h : ∀ X, tracePair X S = tracePair X T) : S = T :=
   Matrix.ext_iff_trace_mul_left.mpr h
 
-theorem tracePair_ext_left {n m : Nat} {X Y : Matrix (Fin n) (Fin m) F2}
-    (h : ∀ S, tracePair X S = tracePair Y S) : X = Y :=
-  Matrix.ext_iff_trace_mul_right.mpr h
-
-/-- A nonzero matrix has trace pairing one with a dual matrix. -/
-theorem exists_tracePair_eq_one {n m : Nat} (S : Matrix (Fin m) (Fin n) F2)
-    (hS : S ≠ 0) : ∃ X, tracePair X S = 1 := by
-  by_contra h
-  apply hS
-  apply tracePair_ext_right
-  intro X
-  rw [tracePair_zero_right]
-  rcases scalar_cases (tracePair X S) with hzero | hone
-  · exact hzero
-  · exact False.elim (h ⟨X, hone⟩)
 
 /-- The unique nontrivial complex-valued character of the binary field. -/
 def binarySign (a : F2) : ℂ := if a = 0 then 1 else -1
@@ -78,22 +51,12 @@ def binarySign (a : F2) : ℂ := if a = 0 then 1 else -1
 @[simp] theorem binarySign_zero : binarySign 0 = 1 := by simp [binarySign]
 @[simp] theorem binarySign_one : binarySign 1 = -1 := by simp [binarySign]
 
-theorem binarySign_eq_neg_one_pow_val (a : F2) :
-    binarySign a = (-1 : ℂ) ^ a.val := by
-  rcases scalar_cases a with rfl | rfl <;>
-    simp [show (1 : F2).val = 1 by decide]
 
 theorem binarySign_add (a b : F2) : binarySign (a + b) = binarySign a * binarySign b := by
   have htwo : (1 : F2) + 1 = 0 := by decide
   rcases scalar_cases a with rfl | rfl <;>
     rcases scalar_cases b with rfl | rfl <;> simp [htwo]
 
-theorem binarySign_sum {ι : Type*} (s : Finset ι) (f : ι → F2) :
-    binarySign (∑ i ∈ s, f i) = ∏ i ∈ s, binarySign (f i) := by
-  classical
-  induction s using Finset.induction_on with
-  | empty => simp
-  | @insert a s ha ih => simp [ha, binarySign_add, ih]
 
 theorem binarySign_injective : Function.Injective binarySign := by
   intro a b h
@@ -114,9 +77,6 @@ theorem binarySign_real (a : F2) : ((binarySign a).re : ℂ) = binarySign a := b
   unfold binarySign
   split <;> simp
 
-@[simp] theorem binarySign_mul_self (a : F2) : binarySign a * binarySign a = 1 := by
-  unfold binarySign
-  split <;> simp
 
 section LinearFunctionals
 
@@ -170,52 +130,6 @@ def traceCharacter {n m : Nat} (S : Matrix (Fin m) (Fin n) F2) :
     (X : Matrix (Fin n) (Fin m) F2) :
     traceCharacter S X = binarySign (tracePair X S) := rfl
 
-theorem traceCharacter_eq_coordinate_sign {n m : Nat} (S : Matrix (Fin m) (Fin n) F2)
-    (X : Matrix (Fin n) (Fin m) F2) :
-    traceCharacter S X = if (∑ i, ∑ j, X i j * S j i) = 0 then 1 else -1 := rfl
-
-theorem traceCharacter_eq_trace_exponent {n m : Nat} (S : Matrix (Fin m) (Fin n) F2)
-    (X : Matrix (Fin n) (Fin m) F2) :
-    traceCharacter S X = (-1 : ℂ) ^ (Matrix.trace (X * S)).val :=
-  binarySign_eq_neg_one_pow_val _
-
-theorem traceCharacter_eq_product_entries {n m : Nat} (S : Matrix (Fin m) (Fin n) F2)
-    (X : Matrix (Fin n) (Fin m) F2) :
-    traceCharacter S X = ∏ i, ∏ j, binarySign (X i j * S j i) := by
-  simp only [traceCharacter_apply, tracePair_eq_sum_entries, binarySign_sum]
-
-theorem traceCharacter_real {n m : Nat} (S : Matrix (Fin m) (Fin n) F2)
-    (X : Matrix (Fin n) (Fin m) F2) :
-    ((traceCharacter S X).re : ℂ) = traceCharacter S X := binarySign_real _
-
-theorem traceCharacter_add {n m : Nat} (S T : Matrix (Fin m) (Fin n) F2) :
-    traceCharacter (S + T) = traceCharacter S + traceCharacter T := by
-  ext X
-  simp only [traceCharacter_apply, tracePair_add_right, binarySign_add, AddChar.add_apply]
-
-@[simp] theorem traceCharacter_zero {n m : Nat} :
-    traceCharacter (0 : Matrix (Fin m) (Fin n) F2) = 0 := by
-  ext X
-  simp
-
-theorem traceCharacter_injective {n m : Nat} :
-    Function.Injective (traceCharacter (n := n) (m := m)) := by
-  intro S T h
-  apply tracePair_ext_right
-  intro X
-  apply binarySign_injective
-  exact congrArg (fun ψ : AddChar (Matrix (Fin n) (Fin m) F2) ℂ => ψ X) h
-
-theorem traceCharacter_eq_zero_iff {n m : Nat} (S : Matrix (Fin m) (Fin n) F2) :
-    traceCharacter S = 0 ↔ S = 0 := by
-  rw [← traceCharacter_zero, traceCharacter_injective.eq_iff]
-
-theorem sum_traceCharacter {n m : Nat} (S : Matrix (Fin m) (Fin n) F2) :
-    ∑ X, traceCharacter S X =
-      if S = 0 then (Fintype.card (Matrix (Fin n) (Fin m) F2) : ℂ) else 0 := by
-  classical
-  rw [AddChar.sum_eq_ite]
-  simp only [traceCharacter_eq_zero_iff]
 
 section LinearMaps
 
@@ -272,13 +186,6 @@ theorem linearTraceCharacter_add (S T : F →ₗ[F2] E) :
   ext X
   simp
 
-theorem linearTraceCharacter_eq_matrix_traceCharacter {n m : Nat}
-    (bE : Module.Basis (Fin m) F2 E) (bF : Module.Basis (Fin n) F2 F)
-    (S : F →ₗ[F2] E) (X : E →ₗ[F2] F) :
-    linearTraceCharacter S X =
-      traceCharacter (LinearMap.toMatrix bF bE S) (LinearMap.toMatrix bE bF X) := by
-  simp only [linearTraceCharacter_apply, traceCharacter_apply,
-    linearTracePair_eq_matrix_tracePair bE bF]
 
 variable [FiniteDimensional F2 E] [FiniteDimensional F2 F]
 
@@ -303,29 +210,6 @@ theorem linearTracePair_ext_right {S T : F →ₗ[F2] E}
   exact (linearTracePair_eq_matrix_tracePair bE bF X' S).symm.trans
     ((h X').trans (linearTracePair_eq_matrix_tracePair bE bF X' T))
 
-/-- Nondegeneracy also holds in the primal-map argument. -/
-theorem linearTracePair_ext_left {X Y : E →ₗ[F2] F}
-    (h : ∀ S, linearTracePair X S = linearTracePair Y S) : X = Y := by
-  classical
-  let bE := Module.finBasis F2 E
-  let bF := Module.finBasis F2 F
-  apply (LinearMap.toMatrix bE bF).injective
-  apply tracePair_ext_left
-  intro S
-  obtain ⟨S', rfl⟩ := (LinearMap.toMatrix bF bE).surjective S
-  exact (linearTracePair_eq_matrix_tracePair bE bF X S').symm.trans
-    ((h S').trans (linearTracePair_eq_matrix_tracePair bE bF Y S'))
-
-theorem exists_linearTracePair_eq_one (S : F →ₗ[F2] E) (hS : S ≠ 0) :
-    ∃ X, linearTracePair X S = 1 := by
-  by_contra h
-  apply hS
-  apply linearTracePair_ext_right
-  intro X
-  rw [linearTracePair_zero_right]
-  rcases scalar_cases (linearTracePair X S) with hzero | hone
-  · exact hzero
-  · exact False.elim (h ⟨X, hone⟩)
 
 theorem linearTraceCharacter_injective :
     Function.Injective (linearTraceCharacter (E := E) (F := F)) := by
@@ -383,16 +267,6 @@ variable {G : Type*} [AddCommGroup G] [Fintype G]
 def fourierCoeff (f : G → ℂ) (ψ : AddChar G ℂ) : ℂ :=
   𝔼 x, f x * star (ψ x)
 
-theorem fourierCoeff_sum {J : Type*} (s : Finset J) (f : J → G → ℂ)
-    (ψ : AddChar G ℂ) :
-    fourierCoeff (∑ j ∈ s, f j) ψ = ∑ j ∈ s, fourierCoeff (f j) ψ := by
-  simp only [fourierCoeff, Finset.sum_apply, Finset.sum_mul]
-  exact Finset.expect_sum_comm _ _ _
-
-theorem fourierCoeff_smul (c : ℂ) (f : G → ℂ) (ψ : AddChar G ℂ) :
-    fourierCoeff (c • f) ψ = c * fourierCoeff f ψ := by
-  simp only [fourierCoeff, Pi.smul_apply, smul_eq_mul, mul_assoc]
-  exact Finset.mul_expect _ _ _ |>.symm
 
 omit [AddCommGroup G] in
 theorem star_expect (f : G → ℂ) :
@@ -667,74 +541,6 @@ namespace UniqueGamesTheorem.Fourier.MatrixParity
 open UniqueGamesTheorem.Integration.BinaryLinear
 open scoped Matrix BigOperators Classical
 
-/-- The rank-one shift `c τ` paired against `S` evaluates the functional `τ S`
-at `c`, exactly the parity appearing in the decoding condition. -/
-theorem trace_rankOne {m n : Nat} (c : Vector n) (τ : Vector m)
-    (S : Matrix (Fin m) (Fin n) F2) :
-    Matrix.trace (Matrix.vecMulVec c τ * S) = τ ⬝ᵥ (S *ᵥ c) := by
-  rw [Matrix.vecMulVec_mul, Matrix.trace_vecMulVec, dotProduct_comm,
-    ← Matrix.dotProduct_mulVec]
-
-/-- Coordinate form of the requirement `τ ∘ T ≠ 0`. -/
-def MatrixValid {m n : Nat} (τ : Vector m) (S : Matrix (Fin m) (Fin n) F2) : Prop :=
-  τ ᵥ* S ≠ 0
-
-theorem matrixValid_iff_exists {m n : Nat} (τ : Vector m)
-    (S : Matrix (Fin m) (Fin n) F2) :
-    MatrixValid τ S ↔ ∃ c : Vector n, τ ⬝ᵥ (S *ᵥ c) = 1 := by
-  constructor
-  · intro h
-    have he : ∃ i, (τ ᵥ* S) i ≠ 0 := by
-      by_contra he
-      apply h
-      funext i
-      by_contra hi
-      exact he ⟨i, hi⟩
-    obtain ⟨i, hi⟩ := he
-    have hone : (τ ᵥ* S) i = 1 := (scalar_cases _).resolve_left hi
-    exact ⟨Pi.single i 1, by rw [Matrix.dotProduct_mulVec, dotProduct_single_one, hone]⟩
-  · rintro ⟨c, hc⟩ hzero
-    rw [Matrix.dotProduct_mulVec, hzero] at hc
-    simp at hc
-
-theorem exists_matrixValid {m n : Nat} (τ : Vector m) (hτ : τ ≠ 0) (hn : 0 < n) :
-    ∃ S : Matrix (Fin m) (Fin n) F2, MatrixValid τ S := by
-  classical
-  have he : ∃ i, τ i ≠ 0 := by
-    by_contra he
-    apply hτ
-    funext i
-    by_contra hi
-    exact he ⟨i, hi⟩
-  obtain ⟨i, hi⟩ := he
-  have hone : τ i = 1 := (scalar_cases _).resolve_left hi
-  let j : Fin n := ⟨0, hn⟩
-  refine ⟨Matrix.vecMulVec (Pi.single i 1) (Pi.single j 1), ?_⟩
-  unfold MatrixValid
-  rw [Matrix.vecMul_vecMulVec, dotProduct_single_one, hone, one_smul]
-  intro hz
-  have := congrFun hz j
-  simp at this
-
-/-- Abstract linear-map form of the nonzero-parity condition. -/
-theorem comp_ne_zero_iff_exists {E C : Type*}
-    [AddCommGroup E] [Module F2 E] [AddCommGroup C] [Module F2 C]
-    (τ : E →ₗ[F2] F2) (T : C →ₗ[F2] E) :
-    τ.comp T ≠ 0 ↔ ∃ c, τ (T c) = 1 := by
-  constructor
-  · intro h
-    have he : ∃ c, τ (T c) ≠ 0 := by
-      by_contra he
-      apply h
-      ext c
-      by_contra hc
-      exact he ⟨c, hc⟩
-    obtain ⟨c, hc⟩ := he
-    exact ⟨c, (scalar_cases _).resolve_left hc⟩
-  · rintro ⟨c, hc⟩ hz
-    have hv := LinearMap.congr_fun hz c
-    simp only [LinearMap.comp_apply, LinearMap.zero_apply, hc] at hv
-    exact one_ne_zero hv
 
 section LinearMaps
 
@@ -743,26 +549,6 @@ variable {E C : Type*} [AddCommGroup E] [Module F2 E]
 
 def Valid (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) : Prop := τ.comp S ≠ 0
 
-theorem valid_iff_exists (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) :
-    Valid τ S ↔ ∃ c, τ (S c) = 1 := comp_ne_zero_iff_exists τ S
-
-/-- Any nonzero parity functional admits a parity-valid map out of a nontrivial
-binary vector space. This also proves the candidate family is nonempty. -/
-theorem exists_valid [Nontrivial C] (τ : E →ₗ[F2] F2) (hτ : τ ≠ 0) :
-    ∃ S : C →ₗ[F2] E, Valid τ S := by
-  classical
-  have he : ∃ e, τ e ≠ 0 := by
-    by_contra he
-    apply hτ
-    ext e
-    by_contra he'
-    exact he ⟨e, he'⟩
-  obtain ⟨e, he⟩ := he
-  obtain ⟨c, hc⟩ := exists_ne (0 : C)
-  obtain ⟨φ, hφ⟩ := Module.Projective.exists_dual_eq_one F2 hc
-  refine ⟨φ.smulRight e, (valid_iff_exists τ _).mpr ⟨c, ?_⟩⟩
-  rw [LinearMap.smulRight_apply, hφ, one_smul]
-  exact (scalar_cases _).resolve_left he
 
 /-- Generic trace pairing of a rank-one color shift. -/
 theorem trace_smulRight_comp [FiniteDimensional F2 C]
@@ -789,15 +575,6 @@ theorem card_linearMaps [FiniteDimensional F2 E] [FiniteDimensional F2 C]
   simp [F2, Integration.BinaryLinear.F2, Nat.card_eq_fintype_card, ← pow_mul,
     Nat.mul_comm]
 
-theorem card_linearMaps_le [FiniteDimensional F2 E] [FiniteDimensional F2 C]
-    [Fintype (C →ₗ[F2] E)] (r s : Nat)
-    (hE : Module.finrank F2 E ≤ r) (hC : Module.finrank F2 C ≤ s) :
-    Fintype.card (C →ₗ[F2] E) ≤ 2 ^ (r * s) := by
-  rw [card_linearMaps]
-  apply Nat.pow_le_pow_right (by decide : 0 < 2)
-  calc
-    Module.finrank F2 C * Module.finrank F2 E ≤ s * r := Nat.mul_le_mul hC hE
-    _ = r * s := Nat.mul_comm s r
 
 end LinearMaps
 
@@ -807,41 +584,6 @@ variable {E C D : Type*} [AddCommGroup E] [Module F2 E]
   [AddCommGroup C] [Module F2 C] [Fintype C]
   [AddCommGroup D] [Module F2 D]
 
-/-- A folded map hits a fixed color at most once along its `C`-shift orbit.
-The injection models the inclusion of the subspace `C'` in the full color space. -/
-theorem folded_indicator_sum_le_one (τ : E →ₗ[F2] F2)
-    (inclusion : C →ₗ[F2] D) (inclusion_injective : Function.Injective inclusion)
-    (F : (E →ₗ[F2] C) → D)
-    (folded : ∀ X c, F (X + τ.smulRight c) = F X + inclusion c)
-    (X : E →ₗ[F2] C) (y : D) :
-    (∑ c : C, if F (X + τ.smulRight c) = y then (1 : ℝ) else 0) ≤ 1 := by
-  classical
-  let hits : Finset C := Finset.univ.filter fun c => F (X + τ.smulRight c) = y
-  have hcard : hits.card ≤ 1 := by
-    apply Finset.card_le_one.mpr
-    intro a ha b hb
-    have ha' : F (X + τ.smulRight a) = y := (Finset.mem_filter.mp ha).2
-    have hb' : F (X + τ.smulRight b) = y := (Finset.mem_filter.mp hb).2
-    apply inclusion_injective
-    apply add_left_cancel (a := F X)
-    simpa only [folded] using ha'.trans hb'.symm
-  have hsum : (∑ c : C, if F (X + τ.smulRight c) = y then (1 : ℝ) else 0) =
-      (hits.card : ℝ) := by
-    simp only [hits, Finset.sum_boole]
-  rw [hsum]
-  exact_mod_cast hcard
-
-/-- Equation (5.19)'s first bound, with the actual finite folded shift average. -/
-theorem folded_indicator_average_le (τ : E →ₗ[F2] F2)
-    (inclusion : C →ₗ[F2] D) (inclusion_injective : Function.Injective inclusion)
-    (F : (E →ₗ[F2] C) → D)
-    (folded : ∀ X c, F (X + τ.smulRight c) = F X + inclusion c)
-    (X : E →ₗ[F2] C) (y : D) :
-    (∑ c : C, if F (X + τ.smulRight c) = y then (1 : ℝ) else 0) /
-        Fintype.card C ≤ 1 / (Fintype.card C : ℝ) := by
-  exact div_le_div_of_nonneg_right
-    (folded_indicator_sum_le_one τ inclusion inclusion_injective F folded X y)
-    (Nat.cast_nonneg _)
 
 end Folding
 
@@ -852,46 +594,6 @@ open MatrixCharacters hiding F2
 variable {E C : Type*} [AddCommGroup E] [Module F2 E]
   [AddCommGroup C] [Module F2 C]
 
-/-- The character of the color-shift group indexed by the functional `τ S`. -/
-def parityCharacter (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) : AddChar C ℂ where
-  toFun c := binarySign (τ (S c))
-  map_zero_eq_one' := by simp
-  map_add_eq_mul' c d := by simp only [map_add, binarySign_add]
-
-theorem parityCharacter_eq_zero_iff (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) :
-    parityCharacter τ S = 0 ↔ τ.comp S = 0 := by
-  constructor
-  · intro h
-    ext c
-    apply binarySign_injective
-    have hc := congrArg (fun ψ : AddChar C ℂ => ψ c) h
-    simpa [parityCharacter] using hc
-  · intro h
-    ext c
-    have hc := LinearMap.congr_fun h c
-    simp only [LinearMap.comp_apply, LinearMap.zero_apply] at hc
-    simp [parityCharacter, hc]
-
-/-- Unnormalized annihilator identity for exactly the `c τ` shift subgroup. -/
-theorem linearTrace_shift_sum [Fintype C] [FiniteDimensional F2 C]
-    (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) :
-    (∑ c : C, linearTraceCharacter S (τ.smulRight c)) =
-      if τ.comp S = 0 then (Fintype.card C : ℂ) else 0 := by
-  classical
-  simp only [linearTraceCharacter_apply, linearTracePair, trace_smulRight_comp]
-  change (∑ c : C, parityCharacter τ S c) = _
-  rw [AddChar.sum_eq_ite]
-  simp only [parityCharacter_eq_zero_iff]
-
-/-- Averaging the Fourier character in the folding directions kills precisely
-the indices with nonzero `τ S`, the multiplier used in Equation (5.19). -/
-theorem linearTrace_shift_average [Fintype C] [FiniteDimensional F2 C]
-    (τ : E →ₗ[F2] F2) (S : C →ₗ[F2] E) :
-    (∑ c : C, linearTraceCharacter S (τ.smulRight c)) / (Fintype.card C : ℂ) =
-      if τ.comp S = 0 then 1 else 0 := by
-  classical
-  rw [linearTrace_shift_sum]
-  split <;> simp [Fintype.card_ne_zero]
 
 end ShiftCharacters
 

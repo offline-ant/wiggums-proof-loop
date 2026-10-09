@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.Quotient.Basic
 import Mathlib.Tactic.Abel
 import Std
@@ -7,167 +8,6 @@ import OAI.Computability.UniqueGames.Analysis.FiberEnergyLemmas
 namespace OAI
 
 section
-
-namespace UniqueGamesTheorem.Appendix.Identities
-
-abbrev Vector (n : Nat) := Fin n → Bool
-
-def add {n : Nat} (v w : Vector n) : Vector n := fun i => v i ^^ w i
-
-def zero (n : Nat) : Vector n := fun _ => false
-
-theorem add_assoc {n : Nat} (u v w : Vector n) :
-    add (add u v) w = add u (add v w) := by
-  funext i
-  exact Bool.xor_assoc (u i) (v i) (w i)
-
-theorem add_self {n : Nat} (u : Vector n) : add u u = zero n := by
-  funext i
-  exact Bool.xor_self (u i)
-
-theorem add_zero {n : Nat} (u : Vector n) : add u (zero n) = u := by
-  funext i
-  exact Bool.xor_false (u i)
-
-theorem zero_add {n : Nat} (u : Vector n) : add (zero n) u = u := by
-  funext i
-  exact Bool.false_xor (u i)
-
-theorem add_comm {n : Nat} (u v : Vector n) : add u v = add v u := by
-  funext i
-  exact Bool.xor_comm (u i) (v i)
-
-theorem add_shuffle {n : Nat} (u v w x : Vector n) :
-    add (add u v) (add w x) = add (add u w) (add v x) := by
-  funext i
-  change ((u i ^^ v i) ^^ (w i ^^ x i)) = ((u i ^^ w i) ^^ (v i ^^ x i))
-  cases u i <;> cases v i <;> cases w i <;> cases x i <;> rfl
-
-structure Subspace (n : Nat) where
-  mem : Vector n → Prop
-  zero_mem : mem (zero n)
-  add_mem : ∀ {u v}, mem u → mem v → mem (add u v)
-
-def Subspace.Included {n : Nat} (A B : Subspace n) : Prop :=
-  ∀ v, A.mem v → B.mem v
-
-structure LinearMap (n m : Nat) where
-  apply : Vector n → Vector m
-  map_zero : apply (zero n) = zero m
-  map_add : ∀ u v, apply (add u v) = add (apply u) (apply v)
-
-def Hybrid {n m : Nat} (Y : LinearMap n m) (A : Subspace m)
-    (B : Subspace n) : Prop :=
-  (∀ a, A.mem a → ∃ w, Y.apply w = a) ∧
-  (∀ w, A.mem (Y.apply w) → B.mem w)
-
-/-- The hybrid selector for `Q_A₀ Y|_B₀` at `(A/A₀, B)`.
-
-The first component states that every coset of `A/A₀` has a preimage in
-`B₀`; the second states that the preimage of `A/A₀` is contained in `B`.
-`A₀ ≤ A` and `B ≤ B₀` are supplied by the composition theorem.
--/
-def OuterHybrid {n m : Nat} (Y : LinearMap n m)
-    (A₀ A : Subspace m) (B B₀ : Subspace n) : Prop :=
-  (∀ a, A.mem a → ∃ b, B₀.mem b ∧
-    ∃ a₀, A₀.mem a₀ ∧ Y.apply b = add a a₀) ∧
-  (∀ b, B₀.mem b → A.mem (Y.apply b) → B.mem b)
-
-/-- Equation (A.3), at the level of the exact character selectors.
-
-In particular the forward proof checks the subtle point that the outer
-image condition forces the full preimage `Y⁻¹(A)` into `B₀`.
--/
-theorem nested_hybrid_selector_iff {n m : Nat} (Y : LinearMap n m)
-    (A₀ A : Subspace m) (B B₀ : Subspace n)
-    (hA : A₀.Included A) (hB : B.Included B₀) :
-    (Hybrid Y A₀ B₀ ∧ OuterHybrid Y A₀ A B B₀) ↔ Hybrid Y A B := by
-  constructor
-  · rintro ⟨inner, outer⟩
-    constructor
-    · intro a ha
-      rcases outer.1 a ha with ⟨b, _, a₀, ha₀, hb⟩
-      rcases inner.1 a₀ ha₀ with ⟨c, hc⟩
-      refine ⟨add b c, ?_⟩
-      rw [Y.map_add, hb, hc, add_assoc, add_self, add_zero]
-    · intro w hw
-      rcases outer.1 (Y.apply w) hw with ⟨b, hb, a₀, ha₀, hyb⟩
-      have hpre : Y.apply (add w b) = a₀ := by
-        rw [Y.map_add, hyb, ← add_assoc, add_self, zero_add]
-      have hwb : B₀.mem (add w b) := inner.2 (add w b) (hpre ▸ ha₀)
-      have hw₀ : B₀.mem w := by
-        have h := B₀.add_mem hwb hb
-        simpa only [add_assoc, add_self, add_zero] using h
-      exact outer.2 w hw₀ hw
-  · intro full
-    constructor
-    · constructor
-      · intro a₀ ha₀
-        exact full.1 a₀ (hA a₀ ha₀)
-      · intro w hw
-        exact hB w (full.2 w (hA (Y.apply w) hw))
-    · constructor
-      · intro a ha
-        rcases full.1 a ha with ⟨w, hw⟩
-        have hwB : B.mem w := full.2 w (hw ▸ ha)
-        refine ⟨w, hB w hwB, zero m, A₀.zero_mem, ?_⟩
-        rw [hw, add_zero]
-      · intro w _ hw
-        exact full.2 w hw
-
-/-- Disjointness of the images of `Q_A X|_B` and `Q_A Z|_B`, written
-without quotient objects. Equality of the two cosets means their sum lies
-in `A`, in which case both cosets must be zero. -/
-def ImagesDisjointModulo {n m : Nat} (X Z : LinearMap n m)
-    (A : Subspace m) (B : Subspace n) : Prop :=
-  ∀ b c, B.mem b → B.mem c → A.mem (add (X.apply b) (Z.apply c)) →
-    A.mem (X.apply b) ∧ A.mem (Z.apply c)
-
-theorem reverse_sum_image {n m : Nat} (X Y Z : LinearMap n m)
-    (A₀ : Subspace m) (B₀ : Subspace n)
-    (hZ : ∀ w, Z.apply w = add (Y.apply w) (X.apply w))
-    (inner : Hybrid Y A₀ B₀)
-    (avoids : ∀ w, A₀.mem (X.apply w) → X.apply w = zero m)
-    (disjoint : ImagesDisjointModulo X Z A₀ B₀) :
-    ∀ a₀, A₀.mem a₀ → ∃ w, Z.apply w = a₀ := by
-  intro a₀ ha₀
-  rcases inner.1 a₀ ha₀ with ⟨w, hw⟩
-  have hw₀ : B₀.mem w := inner.2 w (hw ▸ ha₀)
-  have hsum : add (X.apply w) (Z.apply w) = a₀ := by
-    rw [hZ, add_comm (Y.apply w), ← add_assoc, add_self, zero_add, hw]
-  have hx := avoids w ((disjoint w w hw₀ hw₀ (hsum ▸ ha₀)).1)
-  refine ⟨w, ?_⟩
-  rw [hZ, hw, hx, add_zero]
-
-/-- The second asserted implication in the reverse direction of (A.5).
-
-`covered` expresses `B₀ + ker X = W`; `localLift` expresses
-`im (Q_A₀ X|_B₀) ≤ im (Q_A₀ Y|_B₀)`. The rank-additive summand gives
-the latter inclusion. This theorem checks the passage from those
-specific linear-algebra hypotheses to the full preimage inclusion.
--/
-theorem reverse_sum_preimage {n m : Nat} (X Y Z : LinearMap n m)
-    (A₀ : Subspace m) (B₀ : Subspace n)
-    (hZ : ∀ w, Z.apply w = add (Y.apply w) (X.apply w))
-    (inner : Hybrid Y A₀ B₀)
-    (covered : ∀ w, ∃ b, B₀.mem b ∧ X.apply b = X.apply w)
-    (localLift : ∀ b, B₀.mem b →
-      ∃ c, B₀.mem c ∧ A₀.mem (add (Y.apply c) (X.apply b))) :
-    ∀ w, A₀.mem (Z.apply w) → B₀.mem w := by
-  intro w hw
-  rcases covered w with ⟨b, hb, hxb⟩
-  rcases localLift b hb with ⟨c, hc, hyc⟩
-  rw [hxb] at hyc
-  have hsum : add (Z.apply w) (add (Y.apply c) (X.apply w)) =
-      Y.apply (add w c) := by
-    rw [hZ, add_shuffle, add_self, add_zero, Y.map_add]
-  have hpre : A₀.mem (Y.apply (add w c)) :=
-    hsum ▸ A₀.add_mem hw hyc
-  have hwc := inner.2 (add w c) hpre
-  have h := B₀.add_mem hwc hc
-  simpa only [add_assoc, add_self, add_zero] using h
-
-end UniqueGamesTheorem.Appendix.Identities
 
 namespace UniqueGamesTheorem.Appendix.LinearIdentities
 
@@ -255,14 +95,8 @@ theorem compress_rank_preserved (X : W →ₗ[K] V)
     Module.finrank K (LinearMap.range (compress X A B)) =
       Module.finrank K (LinearMap.range X) := by
   have hrestrict : LinearMap.range (X.domRestrict B) = LinearMap.range X := by
-    apply le_antisymm (LinearMap.range_domRestrict_le_range X B)
-    intro v hv
-    rcases hv with ⟨w, hw⟩
-    have hwtop : w ∈ B ⊔ LinearMap.ker X := by rw [hcover]; trivial
-    rcases Submodule.mem_sup.mp hwtop with ⟨b, hb, k, hk, hbk⟩
-    refine ⟨⟨b, hb⟩, ?_⟩
-    change X b = v
-    rw [← hw, ← hbk, map_add, show X k = 0 from hk, add_zero]
+    rw [LinearMap.range_domRestrict, Submodule.map_eq_range_iff]
+    exact codisjoint_iff.mpr hcover
   have h := (A.mkQ.comp (LinearMap.range X).subtype).finrank_range_add_finrank_ker
   have hr : LinearMap.range (A.mkQ.comp (LinearMap.range X).subtype) =
       LinearMap.range (compress X A B) := by
@@ -349,33 +183,13 @@ theorem rankBelow_of_compressed_rankBelow (X Y : W →ₗ[K] V)
 /-- The complement in the codomain is forced by the remainder image. -/
 theorem image_inter_complement_eq (A₀ I J : Submodule K V)
     (hA : A₀ ≤ J) (hdis : Disjoint I J) : J ⊓ (A₀ ⊔ I) = A₀ := by
-  apply le_antisymm
-  · intro v hv
-    rcases Submodule.mem_sup.mp hv.2 with ⟨a, ha, i, hi, hai⟩
-    have hiJ : i ∈ J := by
-      have h := J.sub_mem hv.1 (hA ha)
-      have heq : v - a = i := by rw [← hai]; abel
-      exact heq ▸ h
-    have hi0 := Submodule.disjoint_def.mp hdis i hi hiJ
-    rw [hi0, add_zero] at hai
-    exact hai ▸ ha
-  · intro a ha
-    exact ⟨hA ha, (show A₀ ≤ A₀ ⊔ I from le_sup_left) ha⟩
+  rw [inf_comm, sup_inf_assoc_of_le _ hA, hdis.eq_bot, sup_bot_eq]
 
 omit [FiniteDimensional K W] in
 /-- The complement in the domain is forced by the remainder kernel. -/
 theorem domain_complement_eq (B₀ K₀ J : Submodule K W)
     (hJ : J ≤ B₀) (hcover : K₀ ⊔ J = ⊤) : B₀ = (B₀ ⊓ K₀) ⊔ J := by
-  apply le_antisymm
-  · intro w hw
-    have hwtop : w ∈ K₀ ⊔ J := by rw [hcover]; trivial
-    rcases Submodule.mem_sup.mp hwtop with ⟨k, hk, j, hj, hkj⟩
-    have hkB : k ∈ B₀ := by
-      have h := B₀.sub_mem hw (hJ hj)
-      have heq : w - j = k := by rw [← hkj]; abel
-      exact heq ▸ h
-    exact Submodule.mem_sup.mpr ⟨k, ⟨hkB, hk⟩, j, hj, hkj⟩
-  · exact sup_le inf_le_left hJ
+  rw [inf_sup_assoc_of_le _ hJ, hcover, inf_top_eq]
 
 /-- Every surviving right-hand pair in (A.5) is the displayed canonical pair. -/
 theorem surviving_pair_forced (X Y : W →ₗ[K] V)
@@ -489,32 +303,18 @@ theorem canonical_domain_complement (X Y : W →ₗ[K] V)
     (B ⊔ LinearMap.ker (Y - X)) ⊓ LinearMap.ker X = B ∧
       (B ⊔ LinearMap.ker (Y - X)) ⊔ LinearMap.ker X = ⊤ := by
   constructor
-  · apply le_antisymm
-    · intro w hw
-      rcases Submodule.mem_sup.mp hw.1 with ⟨b, hb, j, hj, hbj⟩
-      have hjK : j ∈ LinearMap.ker X := by
-        have h := (LinearMap.ker X).sub_mem hw.2 (hB hb)
-        have heq : w - b = j := by rw [← hbj]; abel
-        exact heq ▸ h
-      have hyj : Y j = 0 := by
-        have hz : Y j - X j = 0 := hj
-        rw [show X j = 0 from hjK, sub_zero] at hz
-        exact hz
-      have hq : (⟨j, hjK⟩ : LinearMap.ker X) ∈
-          (A.map (LinearMap.range X).mkQ).comap
-            (compress Y (LinearMap.range X) (LinearMap.ker X)) := by
-        change (LinearMap.range X).mkQ (Y j) ∈ A.map (LinearMap.range X).mkQ
-        rw [hyj, map_zero]
-        exact Submodule.zero_mem _
-      have hjB : j ∈ B := outer.2 hq
-      have h := B.add_mem hb hjB
-      exact hbj ▸ h
-    · exact le_inf le_sup_left hB
-  · have hc := ((RankAdditivity.rankBelow_iff X Y).mp hrank).2
-    calc
-      (B ⊔ LinearMap.ker (Y - X)) ⊔ LinearMap.ker X =
-        B ⊔ (LinearMap.ker X ⊔ LinearMap.ker (Y - X)) := by ac_rfl
-      _ = ⊤ := by rw [hc, sup_top_eq]
+  · rw [sup_inf_assoc_of_le _ hB]
+    apply sup_eq_left.mpr
+    intro w hw
+    have hy : Y w = 0 := by
+      have hz : Y w - X w = 0 := hw.1
+      rwa [show X w = 0 from hw.2, sub_zero] at hz
+    apply outer.2 (show (⟨w, hw.2⟩ : LinearMap.ker X) ∈
+      (A.map (LinearMap.range X).mkQ).comap
+        (compress Y (LinearMap.range X) (LinearMap.ker X)) from ?_)
+    simp only [Submodule.mem_comap, compress_apply, hy, map_zero, Submodule.zero_mem]
+  · rw [sup_assoc, sup_comm (LinearMap.ker (Y - X)),
+      ((RankAdditivity.rankBelow_iff X Y).mp hrank).2, sup_top_eq]
 
 theorem compressed_rankBelow_of_hybrids (X Y : W →ₗ[K] V)
     (A₀ : Submodule K V) (B₀ : Submodule K W)
@@ -817,21 +617,9 @@ theorem a4_kernel_of_gluing (Y : W →ₗ[K] V)
 theorem disjoint_quotient_images_of_intersection
     (A₀ A C : Submodule K V) (hA₀ : A₀ = C ⊓ A) :
     Disjoint (A.map A₀.mkQ) (C.map A₀.mkQ) := by
-  apply Submodule.disjoint_def.mpr
-  intro v hvA hvC
-  rcases hvA with ⟨a, ha, hqa⟩
-  rcases hvC with ⟨c, hc, hqc⟩
-  have hdiff : c - a ∈ A₀ := (Submodule.Quotient.eq A₀).mp (hqc.trans hqa.symm)
-  have hdiffA : c - a ∈ A := by rw [hA₀] at hdiff; exact hdiff.2
-  have hcA : c ∈ A := by
-    have h := A.add_mem hdiffA ha
-    simpa only [sub_add_cancel] using h
-  have hc₀ : c ∈ A₀ := by rw [hA₀]; exact ⟨hc, hcA⟩
-  have hqzero : A₀.mkQ c = 0 := by
-    change c ∈ LinearMap.ker A₀.mkQ
-    rw [Submodule.ker_mkQ]
-    exact hc₀
-  exact hqc.symm.trans hqzero
+  subst A₀
+  rw [disjoint_iff, Submodule.map_inf_eq_map_inf_comap, Submodule.comap_map_mkQ,
+    sup_of_le_right inf_le_left, inf_comm, Submodule.mkQ_map_self]
 
 omit [FiniteDimensional K W] in
 theorem a4_range_of_gluing (Y : W →ₗ[K] V)
@@ -946,16 +734,11 @@ theorem canonical_glued_map (Y : W →ₗ[F2] V) (A : Submodule F2 V) (B : Submo
   let bb := B.comap B₀.subtype
   let f := compress Y A₀ B₀
   have hc : pp ⊔ bb = ⊤ := by
-    apply le_antisymm le_top
-    intro w _
-    rcases Submodule.mem_sup.mp w.property with ⟨b, hb, p, hp, hbp⟩
-    let pv : B₀ := ⟨p, Submodule.mem_sup_right hp⟩
-    let bv : B₀ := ⟨b, Submodule.mem_sup_left hb⟩
-    refine Submodule.mem_sup.mpr ⟨pv, hp, bv, hb, ?_⟩
-    apply Subtype.ext
-    change p + b = (w : W)
-    rw [add_comm]
-    exact hbp
+    change P.comap B₀.subtype ⊔ B.comap B₀.subtype = ⊤
+    rw [← Submodule.comap_sup_of_injective B₀.subtype_injective
+      (by simpa [B₀] using (le_sup_right : P ≤ B ⊔ P))
+      (by simpa [B₀] using (le_sup_left : B ≤ B ⊔ P)), sup_comm]
+    exact Submodule.comap_subtype_self B₀
   have compat : ∀ w ∈ pp, w ∈ bb → f w = 0 := by
     intro w hp hb
     have hm : Y w ∈ A₀ := ⟨⟨(w : W), hb, rfl⟩, hp⟩

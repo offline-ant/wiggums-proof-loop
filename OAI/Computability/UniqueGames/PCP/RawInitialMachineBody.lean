@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineCleanup
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineLoopData
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineReadClause
@@ -14,10 +15,6 @@ namespace UniqueGamesTheorem.Foundations.PCP.RawInitialMachineBody
 
 open Turing Target Complexity RawInitialMachineModel RawInitialMachineLoopData
 open RawInitialMachineReadClause RawInitialMachineRows RawInitialMachineBudget
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 theorem guardTrace_succ (n i remaining : Nat) (input reversed : List Bool)
     (state : State) :
@@ -87,7 +84,7 @@ theorem bodyTrace {n : Nat} (i remaining : Nat) (c : Clause n)
     funext tape
     cases tape <;> simp [emitted, loopTapes]
   rw [finalFrame] at cleanup
-  have total := trace_trans _ (trace_trans _ (trace_trans _ first read) rows) cleanup
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first read) rows) cleanup
   have time : 1 + ((encodeWords (Complexity.clauseWords c)).length + 7) +
       (6 * n + 18 * i + 2 * nameSum c + 48) +
       ((encodeWords (Complexity.clauseWords c)).length + 7) = bodyTime i c := by

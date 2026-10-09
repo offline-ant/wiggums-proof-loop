@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.CompressionCountLemmas
 import OAI.Computability.UniqueGames.Analysis.Identities
 import OAI.Computability.UniqueGames.Analysis.RestrictionLemmas
@@ -84,8 +85,6 @@ theorem spectralProjector_restriction_projector
 open UniqueGamesTheorem.Appendix.LinearIdentities
 open UniqueGamesTheorem.Appendix.RankAdditivity
 
-abbrev A4Geometry (A : Submodule F2 E) (B : Submodule F2 F) :=
-  A4IndexCount.Valid A B
 
 abbrev A4GeometricIndex (A : Submodule F2 E) (B : Submodule F2 F) :=
   A4IndexCount.Index A B

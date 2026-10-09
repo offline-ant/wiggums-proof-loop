@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Computability.Encoding
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
@@ -8,79 +9,78 @@ namespace OAI
 section
 
 /-!
-# Executable directed-dart tables for the fixed 64-label alphabet
+# Executable directed graph tables over a fixed finite alphabet
 
-The header gives vertex and dart counts. Every dart has one ordered row:
-tail index, reverse-dart index, and 4096 Boolean predicate entries. Entry
-`b + 64 * a` is the predicate at labels `(a,b)`. All fields, including bits
-as 0/1 words, use the existing zero-delimited unary natural-word codec.
-
-The decoder checks all index bounds, row counts, predicate lengths, reverse
-involution, predicate transpose, and absence of trailing fields. Directed rows
-preserve loops, self-reversing darts, and repeated constraint occurrences.
-The size theorems concern the full encoded table, not a machine runtime.
+The alphabet size `q` is fixed by the encoding, not encoded as a variable input
+field. The header stores vertex and directed-dart counts. Each ordered dart row
+stores its tail, reverse index, and every `q*q` predicate bit in order `b+q*a`.
+All fields use the existing unary natural-word codec. Decoding validates graph
+laws and preserves loops and repeated darts. Size bounds count the complete
+serialized table and make no running-time assertion.
 -/
 
-namespace UniqueGamesTheorem.Foundations.PCP.GraphTables
+namespace UniqueGamesTheorem.Foundations.PCP.GenericGraphTables
 
 open UniqueGamesTheorem.Foundations.Complexity
 
-abbrev Label := Fin 64
-abbrev RelationTable := Vector Bool 4096
+abbrev Label (q : Nat) := Fin q
+abbrev RelationTable (q : Nat) := Vector Bool (q * q)
+
+variable {q : Nat}
 
 /-- The fixed row-major ordering of the complete predicate table. -/
-def relationIndex : Label × Label ≃ Fin 4096 := finProdFinEquiv
+def relationIndex (q : Nat) : (Label q) × (Label q) ≃ Fin (q * q) := finProdFinEquiv
 
-theorem relationIndex_val (a b : Label) :
-    (relationIndex (a, b)).val = b.val + 64 * a.val := rfl
+theorem relationIndex_val (a b : (Label q)) :
+    ((relationIndex q) (a, b)).val = b.val + q * a.val := rfl
 
-def relationAt (table : RelationTable) (a b : Label) : Bool :=
-  table[relationIndex (a, b)]
+def relationAt (table : (RelationTable q)) (a b : (Label q)) : Bool :=
+  table[(relationIndex q) (a, b)]
 
-def relationOf (predicate : Label → Label → Bool) : RelationTable :=
-  Vector.ofFn (fun i => predicate (relationIndex.symm i).1 (relationIndex.symm i).2)
+def relationOf (predicate : (Label q) → (Label q) → Bool) : (RelationTable q) :=
+  Vector.ofFn (fun i => predicate ((relationIndex q).symm i).1 ((relationIndex q).symm i).2)
 
-@[simp] theorem relationAt_relationOf (predicate : Label → Label → Bool) (a b : Label) :
+@[simp] theorem relationAt_relationOf (predicate : (Label q) → (Label q) → Bool) (a b : (Label q)) :
     relationAt (relationOf predicate) a b = predicate a b := by
   simp [relationAt, relationOf]
 
 /-- The row itself is finite data; index bounds are checked while parsing. -/
-structure DartRow (vertices darts : Nat) where
+structure DartRow (q vertices darts : Nat) where
   tail : Fin vertices
   reverseIndex : Fin darts
-  relation : RelationTable
+  relation : (RelationTable q)
 
-abbrev Rows (vertices darts : Nat) := Vector (DartRow vertices darts) darts
+abbrev Rows (q vertices darts : Nat) := Vector (DartRow q vertices darts) darts
 
-def reverseAt {n m : Nat} (rows : Rows n m) (e : Fin m) : Fin m :=
+def reverseAt {n m : Nat} (rows : Rows q n m) (e : Fin m) : Fin m :=
   rows[e].reverseIndex
 
-def acceptsAt {n m : Nat} (rows : Rows n m) (e : Fin m) (a b : Label) : Bool :=
+def acceptsAt {n m : Nat} (rows : Rows q n m) (e : Fin m) (a b : (Label q)) : Bool :=
   relationAt rows[e].relation a b
 
 /-- The two graph laws are decidable finite checks on the stored rows. -/
-def Valid {n m : Nat} (rows : Rows n m) : Prop :=
+def Valid {n m : Nat} (rows : Rows q n m) : Prop :=
   (∀ e, reverseAt rows (reverseAt rows e) = e) ∧
   (∀ e a b, acceptsAt rows (reverseAt rows e) b a = acceptsAt rows e a b)
 
-instance {n m : Nat} (rows : Rows n m) : Decidable (Valid rows) := by
+instance {n m : Nat} (rows : Rows q n m) : Decidable (Valid rows) := by
   unfold Valid
   infer_instance
 
-structure Table where
+structure Table (q : Nat) where
   vertices : Nat
   darts : Nat
-  rows : Rows vertices darts
+  rows : Rows q vertices darts
   valid : Valid rows
 
 /-- The ordered list serialized by the codec. Equal rows remain separate. -/
-def rowList (table : Table) : List (DartRow table.vertices table.darts) := table.rows.toList
+def rowList (table : (Table q)) : List (DartRow q table.vertices table.darts) := table.rows.toList
 
-@[simp] theorem rowList_length (table : Table) : (rowList table).length = table.darts := by
+@[simp] theorem rowList_length (table : (Table q)) : (rowList table).length = table.darts := by
   simp [rowList]
 
 /-- Decode validated finite data into the actual constraint-graph semantics. -/
-def semantics (table : Table) : ConstraintGraph (Fin table.vertices) (Fin table.darts) Label where
+def semantics (table : (Table q)) : ConstraintGraph (Fin table.vertices) (Fin table.darts) (Label q) where
   reverse :=
     { toFun := reverseAt table.rows
       invFun := reverseAt table.rows
@@ -91,29 +91,29 @@ def semantics (table : Table) : ConstraintGraph (Fin table.vertices) (Fin table.
   accepts := acceptsAt table.rows
   reverse_accepts := table.valid.2
 
-@[simp] theorem semantics_reverse (table : Table) (e : Fin table.darts) :
+@[simp] theorem semantics_reverse (table : (Table q)) (e : Fin table.darts) :
     (semantics table).reverse e = table.rows[e].reverseIndex := rfl
 
-@[simp] theorem semantics_tail (table : Table) (e : Fin table.darts) :
+@[simp] theorem semantics_tail (table : (Table q)) (e : Fin table.darts) :
     (semantics table).tail e = table.rows[e].tail := rfl
 
-@[simp] theorem semantics_accepts (table : Table) (e : Fin table.darts) (a b : Label) :
+@[simp] theorem semantics_accepts (table : (Table q)) (e : Fin table.darts) (a b : (Label q)) :
     (semantics table).accepts e a b = relationAt table.rows[e].relation a b := rfl
 
-def graphRows {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) : Rows n m :=
+def graphRows {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) (Label q)) : Rows q n m :=
   Vector.ofFn (fun e => ⟨G.tail e, G.reverse e, relationOf (G.accepts e)⟩)
 
 @[simp] theorem reverseAt_graphRows {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) (e : Fin m) :
     reverseAt (graphRows G) e = G.reverse e := by
   simp [reverseAt, graphRows]
 
 @[simp] theorem acceptsAt_graphRows {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) (a b : Label) :
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) (e : Fin m) (a b : (Label q)) :
     acceptsAt (graphRows G) e a b = G.accepts e a b := by
   simp [acceptsAt, graphRows]
 
-theorem graphRows_valid {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) :
+theorem graphRows_valid {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) (Label q)) :
     Valid (graphRows G) := by
   constructor
   · intro e
@@ -121,29 +121,25 @@ theorem graphRows_valid {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) 
   · intro e a b
     simpa using G.reverse_accepts e a b
 
-def ofGraph {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) : Table :=
+def ofGraph {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) (Label q)) : (Table q) :=
   ⟨n, m, graphRows G, graphRows_valid G⟩
 
 @[simp] theorem semantics_ofGraph_reverse {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) (e : Fin m) :
     (semantics (ofGraph G)).reverse e = G.reverse e := by
   exact reverseAt_graphRows G e
 
 @[simp] theorem semantics_ofGraph_tail {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) (e : Fin m) :
     (semantics (ofGraph G)).tail e = G.tail e := by
   change (graphRows G)[e.val].tail = G.tail e
   simp only [graphRows, Vector.getElem_ofFn]
 
 @[simp] theorem semantics_ofGraph_accepts {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) (a b : Label) :
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) (e : Fin m) (a b : (Label q)) :
     (semantics (ofGraph G)).accepts e a b = G.accepts e a b := by
   exact acceptsAt_graphRows G e a b
 
-@[simp] theorem semantics_ofGraph_edgeSatisfied {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (labeling : Fin n → Label) (e : Fin m) :
-    (semantics (ofGraph G)).edgeSatisfied labeling e = G.edgeSatisfied labeling e := by
-  simp [ConstraintGraph.edgeSatisfied, ConstraintGraph.head]
 
 private theorem constraintGraph_ext {V E A : Type*} {G H : ConstraintGraph V E A}
     (hr : ∀ e, G.reverse e = H.reverse e) (ht : G.tail = H.tail)
@@ -161,7 +157,7 @@ private theorem constraintGraph_ext {V E A : Type*} {G H : ConstraintGraph V E A
 
 /-- Complete semantic graph roundtrip, including its actual reversal map. -/
 @[simp] theorem semantics_ofGraph {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) : semantics (ofGraph G) = G := by
+    (G : ConstraintGraph (Fin n) (Fin m) (Label q)) : semantics (ofGraph G) = G := by
   apply constraintGraph_ext
   · exact semantics_ofGraph_reverse G
   · funext e
@@ -169,17 +165,12 @@ private theorem constraintGraph_ext {V E A : Type*} {G H : ConstraintGraph V E A
   · funext e a b
     exact semantics_ofGraph_accepts G e a b
 
-@[simp] theorem semantics_ofGraph_rejectionCount {n m : Nat}
-    (G : ConstraintGraph (Fin n) (Fin m) Label) (labeling : Fin n → Label) :
-    (semantics (ofGraph G)).rejectionCount labeling = G.rejectionCount labeling := by
-  rw [semantics_ofGraph]
-  rfl
 
 /-- Explicit enumerations determine every vertex name, dart position, and
 predicate label. No hidden choice of a graph representation is made. -/
 def enumeratedGraph {V E A : Type*} {n m : Nat} (G : ConstraintGraph V E A)
-    (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m) (labelOrder : A ≃ Label) :
-    ConstraintGraph (Fin n) (Fin m) Label where
+    (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m) (labelOrder : A ≃ (Label q)) :
+    ConstraintGraph (Fin n) (Fin m) (Label q) where
   reverse := (dartOrder.symm.trans G.reverse).trans dartOrder
   reverse_involutive e := by
     change dartOrder (G.reverse (dartOrder.symm
@@ -195,7 +186,7 @@ def enumeratedGraph {V E A : Type*} {n m : Nat} (G : ConstraintGraph V E A)
 
 theorem enumeratedGraph_edgeSatisfied {V E A : Type*} {n m : Nat}
     (G : ConstraintGraph V E A) (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m)
-    (labelOrder : A ≃ Label) (labeling : V → A) (e : E) :
+    (labelOrder : A ≃ (Label q)) (labeling : V → A) (e : E) :
     (enumeratedGraph G vertexOrder dartOrder labelOrder).edgeSatisfied
       (fun v => labelOrder (labeling (vertexOrder.symm v))) (dartOrder e) =
         G.edgeSatisfied labeling e := by
@@ -204,7 +195,7 @@ theorem enumeratedGraph_edgeSatisfied {V E A : Type*} {n m : Nat}
 /-- Every directed occurrence contributes once before and after enumeration. -/
 theorem enumeratedGraph_rejectionCount {V E A : Type*} [Fintype E] {n m : Nat}
     (G : ConstraintGraph V E A) (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m)
-    (labelOrder : A ≃ Label) (labeling : V → A) :
+    (labelOrder : A ≃ (Label q)) (labeling : V → A) :
     (enumeratedGraph G vertexOrder dartOrder labelOrder).rejectionCount
       (fun v => labelOrder (labeling (vertexOrder.symm v))) = G.rejectionCount labeling := by
   classical
@@ -215,7 +206,7 @@ theorem enumeratedGraph_rejectionCount {V E A : Type*} [Fintype E] {n m : Nat}
   simp only [ConstraintGraph.mem_rejectedDarts, enumeratedGraph_edgeSatisfied]
 
 def ofEnumeratedGraph {V E A : Type*} {n m : Nat} (G : ConstraintGraph V E A)
-    (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m) (labelOrder : A ≃ Label) : Table :=
+    (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m) (labelOrder : A ≃ (Label q)) : (Table q) :=
   ofGraph (enumeratedGraph G vertexOrder dartOrder labelOrder)
 
 def bitWord (b : Bool) : Nat := if b then 1 else 0
@@ -234,127 +225,130 @@ def parseBit : Nat → Option Bool
   | nil => rfl
   | cons bit bits ih => simp [ih]
 
-def relationWords (relation : RelationTable) : List Nat := relation.toList.map bitWord
+def relationWords (relation : (RelationTable q)) : List Nat := relation.toList.map bitWord
 
-@[simp] theorem relationWords_length (relation : RelationTable) :
-    (relationWords relation).length = 4096 := by simp [relationWords]
+@[simp] theorem relationWords_length (relation : (RelationTable q)) :
+    (relationWords relation).length = (q * q) := by simp [relationWords]
 
-def parseRelation (words : List Nat) : Option RelationTable := do
+def parseRelation (q : Nat) (words : List Nat) : Option (RelationTable q) := do
   let bits ← words.mapM parseBit
-  if length_ok : bits.length = 4096 then
+  if length_ok : bits.length = (q * q) then
     some ⟨bits.toArray, by simpa using length_ok⟩
   else none
 
-@[simp] theorem parseRelation_encoded (relation : RelationTable) :
-    parseRelation (relationWords relation) = some relation := by
+@[simp] theorem parseRelation_encoded (relation : (RelationTable q)) :
+    (parseRelation q) (relationWords relation) = some relation := by
   unfold parseRelation relationWords
   rw [parseBits_bitWords]
   simp
   exact Vector.toArray_toList
 
-def rowWords {n m : Nat} (row : DartRow n m) : List Nat :=
+def rowWords {n m : Nat} (row : DartRow q n m) : List Nat :=
   [row.tail.val, row.reverseIndex.val] ++ relationWords row.relation
 
-def parseRow (vertices darts : Nat) : List Nat → Option (DartRow vertices darts × List Nat)
+def parseRow (q : Nat) (vertices darts : Nat) : List Nat → Option (DartRow q vertices darts × List Nat)
   | tail :: reverseIndex :: words => do
       let tail ← parseLabel vertices tail
       let reverseIndex ← parseLabel darts reverseIndex
-      let relation ← parseRelation (words.take 4096)
-      return (⟨tail, reverseIndex, relation⟩, words.drop 4096)
+      let relation ← (parseRelation q) (words.take (q * q))
+      return (⟨tail, reverseIndex, relation⟩, words.drop (q * q))
   | _ => none
 
-@[simp] theorem parseRow_encoded {n m : Nat} (row : DartRow n m) (rest : List Nat) :
-    parseRow n m (rowWords row ++ rest) = some (row, rest) := by
+@[simp] theorem parseRow_encoded {n m : Nat} (row : DartRow q n m) (rest : List Nat) :
+    (parseRow q) n m (rowWords row ++ rest) = some (row, rest) := by
   cases row with
   | mk tail reverseIndex relation =>
       have taken := List.take_left' (l₂ := rest) (relationWords_length relation)
       have dropped := List.drop_left' (l₂ := rest) (relationWords_length relation)
       simp [rowWords, parseRow, taken, dropped]
 
-def parseRows (vertices darts : Nat) :
-    Nat → List Nat → Option (List (DartRow vertices darts) × List Nat)
+def parseRows (q : Nat) (vertices darts : Nat) :
+    Nat → List Nat → Option (List (DartRow q vertices darts) × List Nat)
   | 0, words => some ([], words)
   | count + 1, words => do
-      let (row, words) ← parseRow vertices darts words
-      let (rows, words) ← parseRows vertices darts count words
+      let (row, words) ← (parseRow q) vertices darts words
+      let (rows, words) ← (parseRows q) vertices darts count words
       return (row :: rows, words)
 
-@[simp] theorem parseRows_encoded {n m : Nat} (rows : List (DartRow n m)) (rest : List Nat) :
-    parseRows n m rows.length (rows.flatMap rowWords ++ rest) = some (rows, rest) := by
+@[simp] theorem parseRows_encoded {n m : Nat} (rows : List (DartRow q n m)) (rest : List Nat) :
+    (parseRows q) n m rows.length (rows.flatMap rowWords ++ rest) = some (rows, rest) := by
   induction rows with
   | nil => rfl
   | cons row rows ih => simp [parseRows, List.append_assoc, ih]
 
-def tableWords (table : Table) : List Nat :=
+def tableWords (table : (Table q)) : List Nat :=
   [table.vertices, table.darts] ++ (rowList table).flatMap rowWords
 
-def tableBits (table : Table) : List Bool := encodeWords (tableWords table)
+def tableBits (table : (Table q)) : List Bool := encodeWords (tableWords table)
 
-def decodeTableWords : List Nat → Option Table
+def decodeTableWords (q : Nat) : List Nat → Option (Table q)
   | vertices :: darts :: words => do
-      let (parsed, trailing) ← parseRows vertices darts darts words
+      let (parsed, trailing) ← (parseRows q) vertices darts darts words
       if trailing = [] then
         if length_ok : parsed.length = darts then
-          let rows : Rows vertices darts := ⟨parsed.toArray, by simpa using length_ok⟩
+          let rows : Rows q vertices darts := ⟨parsed.toArray, by simpa using length_ok⟩
           if valid : Valid rows then some ⟨vertices, darts, rows, valid⟩ else none
         else none
       else none
   | _ => none
 
-@[simp] theorem decodeTableWords_encoded (table : Table) :
-    decodeTableWords (tableWords table) = some table := by
+@[simp] theorem decodeTableWords_encoded (table : (Table q)) :
+    (decodeTableWords q) (tableWords table) = some table := by
   cases table with
   | mk vertices darts rows valid =>
       have parsed := parseRows_encoded rows.toList []
       simp only [Vector.length_toList, List.append_nil] at parsed
       simp [tableWords, rowList, decodeTableWords, parsed, valid, Vector.toArray_toList]
 
-def decodeTableBits (bits : List Bool) : Option Table :=
-  decodeWords bits >>= decodeTableWords
+def decodeTableBits (q : Nat) (bits : List Bool) : Option (Table q) :=
+  decodeWords bits >>= (decodeTableWords q)
 
-@[simp] theorem decodeTableBits_encoded (table : Table) :
-    decodeTableBits (tableBits table) = some table := by
+@[simp] theorem decodeTableBits_encoded (table : (Table q)) :
+    (decodeTableBits q) (tableBits table) = some table := by
   simp [decodeTableBits, tableBits]
 
-/-- A concrete encoding suitable for the existing TM2 computation interface. -/
-def encoding : Computability.Encoding Table Bool where
+/-- A concrete encoding for the fixed alphabet, suitable for the existing TM2 computation interface. -/
+def encoding (q : Nat) : Computability.Encoding (Table q) Bool where
   encode := tableBits
-  decode := decodeTableBits
+  decode := (decodeTableBits q)
   decode_encode := decodeTableBits_encoded
 
-theorem tableBits_injective : Function.Injective tableBits := encoding.encode_injective
+theorem tableBits_injective : Function.Injective (tableBits (q := q)) := (encoding q).encode_injective
 
-@[simp] theorem rowWords_length {n m : Nat} (row : DartRow n m) :
-    (rowWords row).length = 4098 := by simp [rowWords]
+@[simp] theorem rowWords_length {n m : Nat} (row : DartRow q n m) :
+    (rowWords row).length = (q * q + 2) := by
+  simp only [rowWords, List.length_append, List.length_cons, List.length_nil,
+    relationWords_length]
+  omega
 
-theorem rowsWords_length {n m : Nat} (rows : List (DartRow n m)) :
-    (rows.flatMap rowWords).length = 4098 * rows.length := by
+theorem rowsWords_length {n m : Nat} (rows : List (DartRow q n m)) :
+    (rows.flatMap rowWords).length = (q * q + 2) * rows.length := by
   induction rows with
   | nil => rfl
   | cons row rows ih => simp [ih, Nat.mul_add, Nat.add_comm]
 
-@[simp] theorem tableWords_length (table : Table) :
-    (tableWords table).length = 2 + 4098 * table.darts := by
+@[simp] theorem tableWords_length (table : (Table q)) :
+    (tableWords table).length = 2 + (q * q + 2) * table.darts := by
   simp only [tableWords, List.length_append, List.length_cons, List.length_nil,
     rowsWords_length, rowList_length]
 
 /-- At least one unary delimiter is stored for every field, including all
-4096 entries of every predicate table. -/
-theorem tableWords_length_le_bits (table : Table) :
-    2 + 4098 * table.darts ≤ (tableBits table).length := by
+(q * q) entries of every predicate table. -/
+theorem tableWords_length_le_bits (table : (Table q)) :
+    2 + (q * q + 2) * table.darts ≤ (tableBits table).length := by
   rw [tableBits, encodeWords_length, ← tableWords_length]
   omega
 
-theorem relationBits_length_le (relation : RelationTable) :
-    (encodeWords (relationWords relation)).length ≤ 8192 := by
+theorem relationBits_length_le (relation : (RelationTable q)) :
+    (encodeWords (relationWords relation)).length ≤ (2 * (q * q)) := by
   have h := encodeWords_length_le (relationWords relation) 1 (by
     intro word hword
     obtain ⟨bit, _, rfl⟩ := List.mem_map.mp hword
     cases bit <;> decide)
-  simpa only [relationWords_length] using h
+  simpa only [relationWords_length, Nat.mul_comm] using h
 
-theorem rowBits_length_le {n m : Nat} (row : DartRow n m) :
-    (encodeWords (rowWords row)).length ≤ n + m + 8192 := by
+theorem rowBits_length_le {n m : Nat} (row : DartRow q n m) :
+    (encodeWords (rowWords row)).length ≤ n + m + (2 * (q * q)) := by
   have ht := row.tail.isLt
   have hr := row.reverseIndex.isLt
   have hp := relationBits_length_le row.relation
@@ -362,8 +356,8 @@ theorem rowBits_length_le {n m : Nat} (row : DartRow n m) :
     encodeWord_length, List.length_nil] at ⊢
   omega
 
-theorem rowsBits_length_le {n m : Nat} (rows : List (DartRow n m)) :
-    (encodeWords (rows.flatMap rowWords)).length ≤ rows.length * (n + m + 8192) := by
+theorem rowsBits_length_le {n m : Nat} (rows : List (DartRow q n m)) :
+    (encodeWords (rows.flatMap rowWords)).length ≤ rows.length * (n + m + (2 * (q * q))) := by
   induction rows with
   | nil => simp [encodeWords]
   | cons row rows ih =>
@@ -374,29 +368,221 @@ theorem rowsBits_length_le {n m : Nat} (rows : List (DartRow n m)) :
 
 /-- Full unary size bound: headers, both bounded indices in every row, and
 every Boolean predicate entry are counted. This is not a runtime assertion. -/
-theorem tableBits_length_le (table : Table) :
+theorem tableBits_length_le (table : (Table q)) :
     (tableBits table).length ≤ table.vertices + table.darts + 2 +
-      table.darts * (table.vertices + table.darts + 8192) := by
+      table.darts * (table.vertices + table.darts + (2 * (q * q))) := by
   have hrows := rowsBits_length_le (rowList table)
   rw [rowList_length] at hrows
   simp only [tableBits, tableWords, encodeWords_append, List.length_append,
     encodeWords, encodeWord_length, List.length_nil]
   omega
 
-theorem vertices_le_tableBits_length (table : Table) :
+theorem vertices_le_tableBits_length (table : (Table q)) :
     table.vertices ≤ (tableBits table).length := by
   simp only [tableBits, tableWords, encodeWords_append, List.length_append,
     encodeWords, encodeWord_length, List.length_nil]
   omega
 
-theorem darts_le_tableBits_length (table : Table) :
+theorem darts_le_tableBits_length (table : (Table q)) :
     table.darts ≤ (tableBits table).length := by
   simp only [tableBits, tableWords, encodeWords_append, List.length_append,
     encodeWords, encodeWord_length, List.length_nil]
   omega
 
-end UniqueGamesTheorem.Foundations.PCP.GraphTables
+end UniqueGamesTheorem.Foundations.PCP.GenericGraphTables
 
 end
+
+end OAI
+
+namespace OAI
+
+namespace UniqueGamesTheorem.Foundations.PCP.GraphTables
+
+/-! The fixed 64-label table format is the specialization of the arbitrary
+alphabet codec. In particular it has the same two headers, row-major predicate
+bits, validation checks, and unary encoding; there is no second codec. -/
+
+open UniqueGamesTheorem.Foundations.Complexity
+
+abbrev Label := Fin 64
+abbrev RelationTable := Vector Bool 4096
+def relationIndex : Label × Label ≃ Fin 4096 := finProdFinEquiv
+def relationAt (table : RelationTable) (a b : Label) : Bool := table[relationIndex (a, b)]
+def relationOf (predicate : Label → Label → Bool) : RelationTable :=
+  Vector.ofFn (fun i => predicate (relationIndex.symm i).1 (relationIndex.symm i).2)
+abbrev DartRow := GenericGraphTables.DartRow 64
+abbrev DartRow.mk {n m : Nat} := @GenericGraphTables.DartRow.mk 64 n m
+abbrev Rows := GenericGraphTables.Rows 64
+def reverseAt {n m : Nat} (rows : Rows n m) (e : Fin m) : Fin m := rows[e].reverseIndex
+def acceptsAt {n m : Nat} (rows : Rows n m) (e : Fin m) (a b : Label) : Bool :=
+  relationAt rows[e].relation a b
+def Valid {n m : Nat} (rows : Rows n m) : Prop :=
+  (∀ e, reverseAt rows (reverseAt rows e) = e) ∧
+  (∀ e a b, acceptsAt rows (reverseAt rows e) b a = acceptsAt rows e a b)
+
+instance {n m : Nat} (rows : Rows n m) : Decidable (Valid rows) := by
+  unfold Valid
+  infer_instance
+
+abbrev Table := GenericGraphTables.Table 64
+abbrev Table.mk := @GenericGraphTables.Table.mk 64
+def rowList (table : Table) : List (DartRow table.vertices table.darts) := table.rows.toList
+def semantics (table : Table) : ConstraintGraph (Fin table.vertices) (Fin table.darts) Label where
+  reverse :=
+    { toFun := fun e => table.rows[e].reverseIndex
+      invFun := fun e => table.rows[e].reverseIndex
+      left_inv := table.valid.1
+      right_inv := table.valid.1 }
+  reverse_involutive := table.valid.1
+  tail e := table.rows[e].tail
+  accepts := acceptsAt table.rows
+  reverse_accepts := table.valid.2
+def graphRows {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) : Rows n m :=
+  Vector.ofFn (fun e => ⟨G.tail e, G.reverse e, relationOf (G.accepts e)⟩)
+abbrev ofGraph {n m : Nat} := GenericGraphTables.ofGraph (q := 64) (n := n) (m := m)
+abbrev enumeratedGraph {V E A : Type*} {n m : Nat} :=
+  GenericGraphTables.enumeratedGraph (q := 64) (V := V) (E := E) (A := A) (n := n) (m := m)
+abbrev ofEnumeratedGraph {V E A : Type*} {n m : Nat} :=
+  GenericGraphTables.ofEnumeratedGraph (q := 64) (V := V) (E := E) (A := A) (n := n) (m := m)
+def bitWord (b : Bool) : Nat := if b then 1 else 0
+abbrev parseBit := GenericGraphTables.parseBit
+def relationWords (relation : RelationTable) : List Nat := relation.toList.map bitWord
+abbrev parseRelation := GenericGraphTables.parseRelation 64
+def rowWords {n m : Nat} (row : DartRow n m) : List Nat :=
+  [row.tail.val, row.reverseIndex.val] ++ relationWords row.relation
+abbrev parseRow := GenericGraphTables.parseRow 64
+abbrev parseRows := GenericGraphTables.parseRows 64
+def tableWords (table : Table) : List Nat :=
+  [table.vertices, table.darts] ++ (rowList table).flatMap rowWords
+def tableBits (table : Table) : List Bool := encodeWords (tableWords table)
+abbrev decodeTableWords := GenericGraphTables.decodeTableWords 64
+abbrev decodeTableBits := GenericGraphTables.decodeTableBits 64
+abbrev encoding := GenericGraphTables.encoding 64
+
+theorem relationIndex_val (a b : Label) :
+    (relationIndex (a, b)).val = b.val + 64 * a.val := rfl
+
+@[simp] theorem relationAt_relationOf (predicate : Label → Label → Bool) (a b : Label) :
+    relationAt (relationOf predicate) a b = predicate a b :=
+  GenericGraphTables.relationAt_relationOf predicate a b
+
+@[simp] theorem rowList_length (table : Table) : (rowList table).length = table.darts :=
+  GenericGraphTables.rowList_length table
+
+@[simp] theorem semantics_reverse (table : Table) (e : Fin table.darts) :
+    (semantics table).reverse e = table.rows[e].reverseIndex := rfl
+
+@[simp] theorem semantics_tail (table : Table) (e : Fin table.darts) :
+    (semantics table).tail e = table.rows[e].tail := rfl
+
+@[simp] theorem semantics_accepts (table : Table) (e : Fin table.darts) (a b : Label) :
+    (semantics table).accepts e a b = relationAt table.rows[e].relation a b := rfl
+
+@[simp] theorem reverseAt_graphRows {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    reverseAt (graphRows G) e = G.reverse e := GenericGraphTables.reverseAt_graphRows G e
+
+@[simp] theorem acceptsAt_graphRows {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) (a b : Label) :
+    acceptsAt (graphRows G) e a b = G.accepts e a b := GenericGraphTables.acceptsAt_graphRows G e a b
+
+theorem graphRows_valid {n m : Nat} (G : ConstraintGraph (Fin n) (Fin m) Label) :
+    Valid (graphRows G) := GenericGraphTables.graphRows_valid G
+
+@[simp] theorem semantics_ofGraph_reverse {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    (semantics (ofGraph G)).reverse e = G.reverse e := GenericGraphTables.semantics_ofGraph_reverse G e
+
+@[simp] theorem semantics_ofGraph_tail {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) :
+    (semantics (ofGraph G)).tail e = G.tail e := GenericGraphTables.semantics_ofGraph_tail G e
+
+@[simp] theorem semantics_ofGraph_accepts {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) (e : Fin m) (a b : Label) :
+    (semantics (ofGraph G)).accepts e a b = G.accepts e a b :=
+  GenericGraphTables.semantics_ofGraph_accepts G e a b
+
+@[simp] theorem semantics_ofGraph {n m : Nat}
+    (G : ConstraintGraph (Fin n) (Fin m) Label) : semantics (ofGraph G) = G :=
+  GenericGraphTables.semantics_ofGraph G
+
+theorem enumeratedGraph_edgeSatisfied {V E A : Type*} {n m : Nat}
+    (G : ConstraintGraph V E A) (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m)
+    (labelOrder : A ≃ Label) (labeling : V → A) (e : E) :
+    (enumeratedGraph G vertexOrder dartOrder labelOrder).edgeSatisfied
+      (fun v => labelOrder (labeling (vertexOrder.symm v))) (dartOrder e) =
+        G.edgeSatisfied labeling e :=
+  GenericGraphTables.enumeratedGraph_edgeSatisfied G vertexOrder dartOrder labelOrder labeling e
+
+theorem enumeratedGraph_rejectionCount {V E A : Type*} [Fintype E] {n m : Nat}
+    (G : ConstraintGraph V E A) (vertexOrder : V ≃ Fin n) (dartOrder : E ≃ Fin m)
+    (labelOrder : A ≃ Label) (labeling : V → A) :
+    (enumeratedGraph G vertexOrder dartOrder labelOrder).rejectionCount
+      (fun v => labelOrder (labeling (vertexOrder.symm v))) = G.rejectionCount labeling :=
+  GenericGraphTables.enumeratedGraph_rejectionCount G vertexOrder dartOrder labelOrder labeling
+
+@[simp] theorem parseBit_bitWord (b : Bool) : parseBit (bitWord b) = some b :=
+  GenericGraphTables.parseBit_bitWord b
+
+@[simp] theorem parseBits_bitWords (bits : List Bool) :
+    (bits.map bitWord).mapM parseBit = some bits := GenericGraphTables.parseBits_bitWords bits
+
+@[simp] theorem relationWords_length (relation : RelationTable) :
+    (relationWords relation).length = 4096 := GenericGraphTables.relationWords_length (q := 64) relation
+
+@[simp] theorem parseRelation_encoded (relation : RelationTable) :
+    parseRelation (relationWords relation) = some relation :=
+  GenericGraphTables.parseRelation_encoded (q := 64) relation
+
+@[simp] theorem parseRow_encoded {n m : Nat} (row : DartRow n m) (rest : List Nat) :
+    parseRow n m (rowWords row ++ rest) = some (row, rest) :=
+  GenericGraphTables.parseRow_encoded row rest
+
+@[simp] theorem parseRows_encoded {n m : Nat} (rows : List (DartRow n m)) (rest : List Nat) :
+    parseRows n m rows.length (rows.flatMap rowWords ++ rest) = some (rows, rest) :=
+  GenericGraphTables.parseRows_encoded rows rest
+
+@[simp] theorem decodeTableWords_encoded (table : Table) :
+    decodeTableWords (tableWords table) = some table := GenericGraphTables.decodeTableWords_encoded table
+
+@[simp] theorem decodeTableBits_encoded (table : Table) :
+    decodeTableBits (tableBits table) = some table := GenericGraphTables.decodeTableBits_encoded table
+
+theorem tableBits_injective : Function.Injective tableBits := GenericGraphTables.tableBits_injective
+
+@[simp] theorem rowWords_length {n m : Nat} (row : DartRow n m) :
+    (rowWords row).length = 4098 := GenericGraphTables.rowWords_length row
+
+theorem rowsWords_length {n m : Nat} (rows : List (DartRow n m)) :
+    (rows.flatMap rowWords).length = 4098 * rows.length := GenericGraphTables.rowsWords_length rows
+
+@[simp] theorem tableWords_length (table : Table) :
+    (tableWords table).length = 2 + 4098 * table.darts := GenericGraphTables.tableWords_length table
+
+theorem tableWords_length_le_bits (table : Table) :
+    2 + 4098 * table.darts ≤ (tableBits table).length := GenericGraphTables.tableWords_length_le_bits table
+
+theorem relationBits_length_le (relation : RelationTable) :
+    (encodeWords (relationWords relation)).length ≤ 8192 := GenericGraphTables.relationBits_length_le (q := 64) relation
+
+theorem rowBits_length_le {n m : Nat} (row : DartRow n m) :
+    (encodeWords (rowWords row)).length ≤ n + m + 8192 := GenericGraphTables.rowBits_length_le row
+
+theorem rowsBits_length_le {n m : Nat} (rows : List (DartRow n m)) :
+    (encodeWords (rows.flatMap rowWords)).length ≤ rows.length * (n + m + 8192) :=
+  GenericGraphTables.rowsBits_length_le rows
+
+theorem tableBits_length_le (table : Table) :
+    (tableBits table).length ≤ table.vertices + table.darts + 2 +
+      table.darts * (table.vertices + table.darts + 8192) := GenericGraphTables.tableBits_length_le table
+
+theorem vertices_le_tableBits_length (table : Table) :
+    table.vertices ≤ (tableBits table).length := GenericGraphTables.vertices_le_tableBits_length table
+
+theorem darts_le_tableBits_length (table : Table) :
+    table.darts ≤ (tableBits table).length := GenericGraphTables.darts_le_tableBits_length table
+
+end UniqueGamesTheorem.Foundations.PCP.GraphTables
 
 end OAI

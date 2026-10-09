@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Reduction.AddressTupleBody
 
@@ -14,19 +15,18 @@ variable {k s d noiseCount : Nat}
 
 def radixBound (s d L : Nat) : Nat := L + (2^s + 2^d + 4)
 
+/-- A bound on input words and their unary serialization, not on the computed
+address. The edge machine's polynomial already accounts for radix powers. -/
 def magnitude (k s d L : Nat) : Nat :=
-  (L+1) + radixBound s d L + (radixBound s d L)^(1+9*k) +
-    (1+9*k)*(radixBound s d L+1) + 1
+  (1+9*k)*(radixBound s d L+1)
 
 noncomputable def magnitudePolynomial (k s d : Nat) : Polynomial Nat :=
-  (Polynomial.X+1) + (Polynomial.X+Polynomial.C (2^s+2^d+4)) +
-    (Polynomial.X+Polynomial.C (2^s+2^d+4))^(1+9*k) +
-    Polynomial.C (1+9*k)*(Polynomial.X+Polynomial.C (2^s+2^d+4)+1) + 1
+  Polynomial.C (1+9*k)*(Polynomial.X+Polynomial.C (2^s+2^d+4)+1)
 
 @[simp] theorem magnitudePolynomial_eval (k s d L : Nat) :
     (magnitudePolynomial k s d).eval L = magnitude k s d L := by
   simp only [magnitudePolynomial, magnitude, radixBound, Polynomial.eval_add,
-    Polynomial.eval_mul, Polynomial.eval_pow, Polynomial.eval_X,
+    Polynomial.eval_mul, Polynomial.eval_X,
     Polynomial.eval_C, Polynomial.eval_one]
 
 theorem source_counts_le (F : SourceEncoding.Input) :
@@ -44,21 +44,13 @@ theorem radix_le (F : SourceEncoding.Input) (s d : Nat) :
 theorem radix_le_magnitude (F : SourceEncoding.Input) (k s d : Nat) :
     CanonicalAddress.base F.variables F.equations.length s d ≤
       magnitude k s d (SourceEncoding.inputBits F).length := by
-  have h := radix_le F s d
-  unfold magnitude
-  omega
+  exact (radix_le F s d).trans ((Nat.le_succ _).trans
+    (Nat.le_mul_of_pos_left _ (by omega)))
 
-theorem capacity_le_magnitude (F : SourceEncoding.Input) (k s d : Nat) :
-    AddressGame.bodyCapacity (source F) k s d ≤
-      magnitude k s d (SourceEncoding.inputBits F).length := by
-  have h := Nat.pow_le_pow_left (radix_le F s d) (1+9*k)
-  change (CanonicalAddress.base F.variables F.equations.length s d)^(1+9*k) ≤ _
-  unfold magnitude
-  omega
 
 theorem field_length_le_magnitude (k s d L : Nat) : L+1 ≤ magnitude k s d L := by
-  unfold magnitude
-  omega
+  exact (Nat.add_le_add_right (Nat.le_add_right L (2^s+2^d+4)) 1).trans
+    (Nat.le_mul_of_pos_left _ (by omega))
 
 theorem canonicalValues_le (F : SourceEncoding.Input)
     (tuple : Fin k → Fin F.equations.length) (j : Fin k) (slot : Fin 4) :
@@ -117,8 +109,7 @@ theorem queryWords_encoded_length_le_magnitude (F : SourceEncoding.Input)
     (radixBound s d (SourceEncoding.inputBits F).length)
     (fun w hw => (Nat.le_of_lt (queryWords_lt_radix F tuple X w hw)).trans (radix_le F s d))
   rw [AddressByteSemantics.queryWords_length] at hwords
-  unfold magnitude
-  omega
+  exact hwords
 
 theorem queryWords_digits_le_magnitude (F : SourceEncoding.Input)
     (tuple : Fin k → Fin F.equations.length) (X : ActualGame.Map k s d)
@@ -165,15 +156,6 @@ noncomputable def rowPolynomial (k : Nat) {s d : Nat} (T : NoiseTables.Table s d
   Polynomial.C (2^((2*k+1)*(s+d+1))*T.vectors.length) *
     MachineAddressEdge.timePolynomial (1+9*k) (1+9*k) (1+9*k) + 1
 
-private theorem eval_sum_constant {α : Type} (items : List α) (p : Polynomial Nat) (M : Nat) :
-    ((items.map (fun _ => p)).sum).eval M = items.length*p.eval M := by
-  induction items with
-  | nil => simp
-  | cons item items ih =>
-    simp only [List.map_cons, List.sum_cons, Polynomial.eval_add, List.length_cons,
-      Nat.add_mul, Nat.one_mul, ih]
-    omega
-
 theorem selected_polynomial_eval (k : Nat) {s d : Nat} (T : NoiseTables.Table s d)
     (b : Fin k → Bool) (M : Nat) :
     (MachineOutcomeRows.timePolynomial
@@ -182,8 +164,9 @@ theorem selected_polynomial_eval (k : Nat) {s d : Nat} (T : NoiseTables.Table s 
   simp only [MachineOutcomeRows.timePolynomial, AddressOutcomeSpecs.selected_rows,
     List.map_map, Function.comp_def, AddressOutcomeSpecs.row_left_length,
     AddressOutcomeSpecs.row_right_length, Polynomial.eval_add, Polynomial.eval_one,
-    eval_sum_constant, FixedOutcomes.tableParams_length, rowPolynomial,
-    Polynomial.eval_mul, Polynomial.eval_C]
+    List.map_const', List.sum_replicate, nsmul_eq_mul,
+    FixedOutcomes.tableParams_length, rowPolynomial, Polynomial.eval_mul,
+    Polynomial.eval_natCast, Nat.cast_id, Polynomial.eval_C]
 
 theorem rows_budget_le (F : SourceEncoding.Input)
     (tuple : Fin k → Fin F.equations.length) (T : NoiseTables.Table s d)
@@ -191,19 +174,18 @@ theorem rows_budget_le (F : SourceEncoding.Input)
     (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base) :
     (MachineOutcomeRows.rowCosts (Slots k s d noiseCount)
       (CanonicalAddress.base F.variables F.equations.length s d)
-      (AddressGame.bodyCapacity (source F) k s d)
       (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple))
       (MachineOutcomeRows.selected (AddressOutcomeSpecs.rows k T) (rhs F tuple))
       (loaded F tuple base)).sum+1 ≤
         (rowPolynomial k T).eval (magnitude k s d (SourceEncoding.inputBits F).length) := by
   have h := MachineOutcomeRows.phaseCost_le_timePolynomial (Slots k s d noiseCount)
     (MachineOutcomeRows.selected (AddressOutcomeSpecs.rows k T) (rhs F tuple))
-    (loaded F tuple base) _ _
+    (loaded F tuple base) _
     (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple))
     (magnitude k s d (SourceEncoding.inputBits F).length)
     (AddressTupleLoaded.loaded_clean F tuple base clean)
     (loaded_fields_le_magnitude F tuple base ready)
-    (radix_le_magnitude F k s d) (capacity_le_magnitude F k s d)
+    (radix_le_magnitude F k s d)
     (selected_values_bound F tuple T)
   simpa only [selected_polynomial_eval] using h
 
@@ -220,28 +202,16 @@ theorem physicalField_le (F : SourceEncoding.Input)
     simp only [SourceEncoding.equationWords, List.getElem_cons_zero,
       List.getElem_cons_succ] <;> (try split_ifs) <;> omega
 
-private theorem lengthSum_le_of_mem {K : Type} [DecidableEq K]
-    (chosen : List K) (base : K → List Bool) (M : Nat)
-    (bounded : ∀ tape ∈ chosen, (base tape).length ≤ M) :
-    MachineDrainMany.lengthSum chosen base ≤ chosen.length*M := by
-  induction chosen with
-  | nil => simp [MachineDrainMany.lengthSum]
-  | cons tape chosen ih =>
-    have first := bounded tape (by simp)
-    have rest := ih (fun t ht => bounded t (List.mem_cons_of_mem tape ht))
-    simp only [MachineDrainMany.lengthSum, List.map_cons, List.sum_cons,
-      List.length_cons, Nat.add_mul, Nat.one_mul] at *
-    omega
-
 /-- Cleanup sees only the four loaded fields per position; output is not scanned. -/
-theorem cleanup_budget_le (rows : Rows k) (B C : Nat)
+theorem cleanup_budget_le (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) (ready : Ready F tuple base) :
-    AddressTupleCleanup.budget k s d noiseCount (emitted rows B C values F tuple base) ≤
+    AddressTupleCleanup.budget k s d noiseCount (emitted rows B values F tuple base) ≤
       4*k*((SourceEncoding.inputBits F).length+2) := by
-  have h := lengthSum_le_of_mem (AddressTupleCleanup.loadedFields k s d noiseCount)
-    (emitted rows B C values F tuple base) ((SourceEncoding.inputBits F).length+1) (by
+  have h := List.sum_le_sum (l := AddressTupleCleanup.loadedFields k s d noiseCount)
+    (f := fun tape => (emitted rows B values F tuple base tape).length)
+    (g := fun _ => (SourceEncoding.inputBits F).length+1) (by
       intro tape member
       obtain ⟨j, slot, rfl⟩ :=
         (AddressTupleCleanup.mem_loadedFields k s d noiseCount tape).mp member
@@ -250,7 +220,8 @@ theorem cleanup_budget_le (rows : Rows k) (B C : Nat)
         exact Nat.add_le_add_right (physicalField_le F tuple j slot) 1
       · rw [AddressMachineSpace.addressSlots_output]
         simp [AddressMachineSpace.headerTape])
-  rw [AddressTupleCleanup.loadedFields_length] at h
+  simp only [List.map_const', List.sum_replicate, nsmul_eq_mul, Nat.cast_id,
+    AddressTupleCleanup.loadedFields_length] at h
   change MachineDrainMany.lengthSum _ _ + 4*k ≤ _
   calc
     _ ≤ 4*k*((SourceEncoding.inputBits F).length+1)+4*k := Nat.add_le_add_right h _
@@ -276,13 +247,11 @@ theorem budget_le_timePolynomial (F : SourceEncoding.Input)
     (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base) :
     AddressTupleBody.budget (AddressOutcomeSpecs.rows k T)
       (CanonicalAddress.base F.variables F.equations.length s d)
-      (AddressGame.bodyCapacity (source F) k s d)
       (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple base ≤
         (timePolynomial k T).eval (SourceEncoding.inputBits F).length := by
   have rowsBound := rows_budget_le F tuple T base ready clean
   have cleanupBound := cleanup_budget_le (AddressOutcomeSpecs.rows k T)
     (CanonicalAddress.base F.variables F.equations.length s d)
-    (AddressGame.bodyCapacity (source F) k s d)
     (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple base ready
   rw [AddressTupleBody.budget, timePolynomial_eval]
   omega

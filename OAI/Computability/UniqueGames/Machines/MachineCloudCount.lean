@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineLookupDiscard
 import OAI.Computability.UniqueGames.PCP.OverlayLemmas
@@ -13,18 +14,10 @@ inductive Tape
   | original | work | target | scratch | count | spare
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.original, .work, .target, .scratch, .count,
-  .spare]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.original, .work, .target, .scratch, .count,
+  .spare}
+  complete x := by cases x <;> simp
 
 abbrev Alphabet (_ : Tape) := Bool
 abbrev State (σ : Type) := (σ × Bool) × Option Bool
@@ -211,25 +204,6 @@ theorem preservingFieldTrace (again restore next : Λ)
     Function.iterate_add_apply, hfield]
   exact hrestore
 
-def preservingFieldInTime (again restore next : Λ)
-    (program : Λ → TM2.Stmt Alphabet Λ (State σ))
-    (atField : program again = fieldLoop again restore)
-    (atRestore : program restore = Reduction.MachineTransfer.loopAt
-      .scratch .target id false restore (some next))
-    (original suffix targetSuffix count spare : List Bool) (x v : Nat)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some again, ((ambient, false), register),
-        memory original (encodeWord x ++ suffix) (encodeWord v ++ targetSuffix)
-          [] count spare⟩
-      (some ⟨some next, ((ambient, false), none),
-        memory original suffix (encodeWord v ++ targetSuffix) []
-          (List.replicate (if x = v then 1 else 0) true ++ count) spare⟩)
-      (2 * x + 2) where
-  steps := x + min x v + 2
-  evals_in_steps := preservingFieldTrace again restore next program atField atRestore
-    original suffix targetSuffix count spare x v ambient register
-  steps_le_m := by have h := Nat.min_le_left x v; omega
 
 /-- Consecutive concrete field-discard instructions consume a fixed list of
 fields. The hypotheses specify code, not an abstract body execution. -/
@@ -540,21 +514,6 @@ theorem cloudCountTrace (t : GraphTables.Table) (v : Fin t.vertices)
   rw [tableRows_input, tableRows_hits, ← List.append_assoc, replicate_encodeWord, Nat.add_zero] at h
   exact h
 
-/-- A linear transition budget for this concrete cloud-count subroutine. -/
-def cloudCountInTime (t : GraphTables.Table) (v : Fin t.vertices)
-    (targetSuffix countSuffix : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ)))
-      ⟨some .copyFirst, ((ambient, false), register),
-        memory (GraphTables.tableBits t) [] (encodeWord v.val ++ targetSuffix) []
-          (encodeWord 0 ++ countSuffix) []⟩
-      (some ⟨none, ((ambient, false), none),
-        memory (GraphTables.tableBits t) [] (encodeWord v.val ++ targetSuffix) []
-          (encodeWord (PreprocessingCloudIndex.cloudSize t v) ++ countSuffix) []⟩)
-      (5 * (GraphTables.tableBits t).length + 3) where
-  steps := totalSteps t.vertices t.darts v.val (tableRows t)
-  evals_in_steps := cloudCountTrace t v targetSuffix countSuffix ambient register
-  steps_le_m := by
-    simpa only [tableRows_input] using totalSteps_le t.vertices t.darts v.val (tableRows t)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCloudCount
 

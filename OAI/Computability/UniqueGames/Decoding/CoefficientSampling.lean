@@ -1,6 +1,7 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Foundations.SamplingLemmas
-import OAI.Computability.UniqueGames.Soundness.SubsetIntersectionLemmas
+import OAI.Computability.UniqueGames.Foundations.CoordinateSampling
 import OAI.Computability.UniqueGames.Soundness.ZeroInformationLemmas
 
 namespace OAI
@@ -19,7 +20,6 @@ namespace UniqueGamesTheorem.Clean.CoefficientSampling
 
 open Foundations.Games
 open Soundness.ConditionalIncidences
-open Soundness.PartnerFullSampling
 open scoped BigOperators
 
 noncomputable section
@@ -124,18 +124,6 @@ theorem uniform_selectCoefficients (J : Finset P) (F : RawCoefficients J C → �
   simp_rw [uniform_expectation_eq_expect]
   exact expect_selectCoefficients J F
 
-/-- The fixed-mask identity may be averaged under any independent mask law. -/
-theorem mask_average_selectCoefficients (maskLaw : FiniteDistribution (Finset P))
-    (F : (J : Finset P) → RawCoefficients J C → ℝ) :
-    maskLaw.expectation (fun J =>
-      (FiniteDistribution.uniform (C × (P → C × C))).expectation (fun extra =>
-        (FiniteDistribution.uniform (P → C)).expectation (fun single =>
-          F J (selectCoefficients J extra single)))) =
-      maskLaw.expectation (fun J =>
-        (FiniteDistribution.uniform (RawCoefficients J C)).expectation (F J)) := by
-  apply FiniteDistribution.expectation_congr
-  intro J
-  exact uniform_selectCoefficients J (F J)
 
 end
 end UniqueGamesTheorem.Clean.CoefficientSampling

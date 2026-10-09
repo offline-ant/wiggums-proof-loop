@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Field
 import OAI.Computability.UniqueGames.Decoding.AdviceFibersLemmas
 import OAI.Computability.UniqueGames.Decoding.DimensionSelection
@@ -112,28 +113,6 @@ theorem fiberAcceptance_le_one (S : Source) (k s d : Nat)
   intro l _
   split_ifs <;> norm_num
 
-theorem weighted_fiber_mean_lower (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (label : Fin (vertexCount S k s d) → Fin (2 ^ s))
-    (μ : Question S k → ℝ) (r : Nat)
-    (hμ : ∀ U, 0 ≤ μ U) (hμsum : ∑ U, μ U = 1)
-    (hkernel : ∀ L : Ambient s d →ₗ[F2] ActualHomogeneous.E k,
-      r ≤ Module.finrank F2 (L.comp (alphabetEmbedding s d)).range →
-      Integration.SplitGadget.kernelProbability g L ≤ 7 / 8)
-    (haccept : (99 : ℝ) / 100 ≤ ∑ U, μ U *
-      equalityAcceptance (samplerLaw g.noise)
-        (fun X : Map k s d => unfolded S k s d label (U, X))) :
-    (9 : ℝ) / 10 * ((2 : ℝ) ^ r)⁻¹ ≤
-      ∑ U, μ U * (𝔼 T, fiberAcceptance S k s d label U T) := by
-  have h := matrix_spectral_comparison μ (samplerLaw g.noise) (alphabetEmbedding s d)
-    (fun U (X : Map k s d) => unfolded S k s d label (U, X)) r
-    hμ hμsum (samplerLaw_nonneg g.noise) (samplerLaw_normalized g.noise)
-    (fun L hL => by
-      rw [eigenvalue_eq_kernelProbability]
-      have hc := (Rat.cast_le (K := ℝ)).mpr (hkernel L hL)
-      simpa only [Rat.cast_div, Rat.cast_ofNat] using hc) haccept
-  simpa only [alphabetEmbedding, surrogate_acceptance_eq_fiber_average,
-    fiberAcceptance] using h
-
 theorem actual_fiber_mean_lower (S : Source) (k : Nat) {s d : Nat}
     (g : SplitGadget s d) (label : Fin (vertexCount S k s d) → Fin (2 ^ s)) (r : Nat)
     (hkernel : ∀ L : Ambient s d →ₗ[F2] ActualHomogeneous.E k,
@@ -142,18 +121,23 @@ theorem actual_fiber_mean_lower (S : Source) (k : Nat) {s d : Nat}
     (haccept : (99 : ℚ) / 100 ≤ acceptanceProbability S k g label) :
     (9 : ℝ) / 10 * ((2 : ℝ) ^ r)⁻¹ ≤
       𝔼 U : Question S k, 𝔼 T, fiberAcceptance S k s d label U T := by
-  rw [expect_eq_uniform_sum]
-  apply weighted_fiber_mean_lower S k g label
-    (fun _ => (Fintype.card (Question S k) : ℝ)⁻¹) r
-  · intro U
-    positivity
-  · rw [Finset.sum_const, Finset.card_univ, nsmul_eq_mul]
-    apply mul_inv_cancel₀
-    exact_mod_cast Fintype.card_ne_zero (α := Question S k)
-  · exact hkernel
-  · have hc := (Rat.cast_le (K := ℝ)).mpr haccept
-    rw [acceptance_eq_equality_mean, expect_eq_uniform_sum] at hc
-    simpa only [Rat.cast_div, Rat.cast_ofNat] using hc
+  have haccept' := (Rat.cast_le (K := ℝ)).mpr haccept
+  rw [acceptance_eq_equality_mean, expect_eq_uniform_sum] at haccept'
+  have h := matrix_spectral_comparison
+    (fun _ : Question S k => (Fintype.card (Question S k) : ℝ)⁻¹)
+    (samplerLaw g.noise) (alphabetEmbedding s d)
+    (fun U (X : Map k s d) => unfolded S k s d label (U, X)) r
+    (fun _ => by positivity) (by
+      rw [Finset.sum_const, Finset.card_univ, nsmul_eq_mul]
+      exact mul_inv_cancel₀ (Nat.cast_ne_zero.mpr Fintype.card_ne_zero))
+    (samplerLaw_nonneg g.noise) (samplerLaw_normalized g.noise)
+    (fun L hL => by
+      rw [eigenvalue_eq_kernelProbability]
+      simpa only [Rat.cast_div, Rat.cast_ofNat] using
+        (Rat.cast_le (K := ℝ)).mpr (hkernel L hL))
+    (by simpa only [Rat.cast_div, Rat.cast_ofNat] using haccept')
+  simpa only [alphabetEmbedding, surrogate_acceptance_eq_fiber_average,
+    fiberAcceptance, ← expect_eq_uniform_sum] using h
 
 def eta (r : Nat) : ℝ := ((2 : ℝ) ^ r)⁻¹ / 16
 
@@ -324,39 +308,12 @@ abbrev FullTableSample (S : Source) (k s d r : ℕ) :=
 /-- A bijection merely rearranges the full sampled table and changes its
 matrix coordinates. It never appends the hidden projection to this law. -/
 def fullTableEquiv (S : Source) (k s d r : ℕ) :
-    FullTableSample S k s d r ≃ Sample S k s d r where
-  toFun p := ((p.1.1, (LinearMap.snd F2 (Alphabet s) (Vector d)).comp p.2),
-    (LinearMap.toMatrix' p.1.2,
-      MatrixCoordinates.mapEquiv k s ((LinearMap.fst F2 (Alphabet s) (Vector d)).comp p.2)))
-  invFun q := ((q.1.1, Matrix.toLin' q.2.1),
-    ((MatrixCoordinates.mapEquiv k s).symm q.2.2).prod q.1.2)
-  left_inv p := by
-    rcases p with ⟨⟨U, A⟩, P⟩
-    apply Prod.ext
-    · simp
-    · apply LinearMap.ext
-      intro x
-      simp only [LinearEquiv.symm_apply_apply, LinearMap.prod_apply]
-      rfl
-  right_inv q := by
-    rcases q with ⟨⟨U, T⟩, A, M⟩
-    apply Prod.ext
-    · apply Prod.ext rfl
-      apply LinearMap.ext
-      intro x
-      rfl
-    · apply Prod.ext
-      · exact LinearMap.toMatrix'_toLin' A
-      · change MatrixCoordinates.mapEquiv k s
-          ((LinearMap.fst F2 (Alphabet s) (Vector d)).comp
-            (((MatrixCoordinates.mapEquiv k s).symm M).prod T)) = M
-        have hf : (LinearMap.fst F2 (Alphabet s) (Vector d)).comp
-            (((MatrixCoordinates.mapEquiv k s).symm M).prod T) =
-              (MatrixCoordinates.mapEquiv k s).symm M := by
-          apply LinearMap.ext
-          intro x
-          rfl
-        rw [hf, LinearEquiv.apply_symm_apply]
+    FullTableSample S k s d r ≃ Sample S k s d r :=
+  (Equiv.prodCongr (Equiv.refl _)
+    ((LinearMap.prodEquiv F2).toEquiv.symm.trans (Equiv.prodComm _ _))).trans
+      ((Equiv.prodProdProdComm _ _ _ _).trans
+        (Equiv.prodCongr (Equiv.refl _)
+          (Equiv.prodCongr LinearMap.toMatrix'.toEquiv (MatrixCoordinates.mapEquiv k s).toEquiv)))
 
 def unrestricted (S : Source) (k s d r : ℕ) : FiniteDistribution (Sample S k s d r) :=
   FiniteDistribution.uniform _

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Reduction.MachineTransducer
 
@@ -34,39 +35,6 @@ abbrev tapes (source scratch destination : K) (base : K → List Bool)
     (input scratchWord outputWord : List Bool) : K → List Bool :=
   MachineCopy.forkTapes source scratch destination base input scratchWord outputWord
 
-private theorem update_source (source scratch destination : K)
-    (sourceScratch : source ≠ scratch) (sourceDestination : source ≠ destination)
-    (scratchDestination : scratch ≠ destination) (base : K → List Bool)
-    (input scratchWord outputWord replacement : List Bool) :
-    Function.update (tapes source scratch destination base input scratchWord outputWord)
-      source replacement = tapes source scratch destination base replacement scratchWord outputWord := by
-  funext k
-  by_cases hs : k = source
-  · subst k; simp [tapes, MachineCopy.forkTapes, sourceScratch, sourceDestination]
-  · by_cases ht : k = scratch
-    · subst k; simp [tapes, MachineCopy.forkTapes, Ne.symm sourceScratch, scratchDestination]
-    · by_cases hd : k = destination
-      · subst k; simp [tapes, MachineCopy.forkTapes, Ne.symm sourceDestination]
-      · simp [tapes, MachineCopy.forkTapes, hs, ht, hd]
-
-private theorem update_scratch (source scratch destination : K)
-    (scratchDestination : scratch ≠ destination) (base : K → List Bool)
-    (input scratchWord outputWord replacement : List Bool) :
-    Function.update (tapes source scratch destination base input scratchWord outputWord)
-      scratch replacement = tapes source scratch destination base input replacement outputWord := by
-  funext k
-  by_cases ht : k = scratch
-  · subst k; simp [tapes, MachineCopy.forkTapes, scratchDestination]
-  · by_cases hd : k = destination
-    · subst k; simp [tapes, MachineCopy.forkTapes, Ne.symm scratchDestination]
-    · simp [tapes, MachineCopy.forkTapes, ht, hd]
-
-private theorem update_output (source scratch destination : K) (base : K → List Bool)
-    (input scratchWord outputWord replacement : List Bool) :
-    Function.update (tapes source scratch destination base input scratchWord outputWord)
-      destination replacement = tapes source scratch destination base input scratchWord replacement := by
-  simp [tapes, MachineCopy.forkTapes]
-
 theorem scanStep_empty (source scratch destination : K)
     (sourceScratch : source ≠ scratch) (sourceDestination : source ≠ destination)
     (scratchDestination : scratch ≠ destination)
@@ -83,7 +51,7 @@ theorem scanStep_empty (source scratch destination : K)
     (tapes source scratch destination base [] scratchWord outputWord)) = _
   rw [atScan]
   simp [scanLoop, TM2.stepAux, sourceScratch, sourceDestination, scratchDestination,
-    update_source]
+    MachineCopy.update_fork_source]
 
 theorem scanStep_cons (source scratch destination : K)
     (sourceScratch : source ≠ scratch) (sourceDestination : source ≠ destination)
@@ -101,7 +69,7 @@ theorem scanStep_cons (source scratch destination : K)
     (tapes source scratch destination base (symbol :: input) scratchWord outputWord)) = _
   rw [atScan]
   simp [scanLoop, TM2.stepAux, sourceScratch, sourceDestination, scratchDestination,
-    update_source, update_scratch]
+    MachineCopy.update_fork_source, MachineCopy.update_fork_left]
 
 theorem emitterStep (source scratch destination : K)
     (transition : Q → Bool → Q) (emit : Q → Bool → List Bool)
@@ -122,7 +90,7 @@ theorem emitterStep (source scratch destination : K)
   simp only [emitter, TM2.stepAux]
   rw [stepAux_pushWord]
   simp only [TM2.stepAux, MachineCopy.forkTapes_right]
-  rw [update_output]
+  rw [MachineCopy.update_fork_right]
 
 theorem twoSteps_cons (source scratch destination : K)
     (sourceScratch : source ≠ scratch) (sourceDestination : source ≠ destination)
@@ -249,43 +217,6 @@ theorem transduceCopyTrace (source scratch destination : K)
     Function.iterate_add_apply, scan]
   exact restore
 
-def transduceCopyInTime (source scratch destination : K)
-    (sourceScratch : source ≠ scratch) (sourceDestination : source ≠ destination)
-    (scratchDestination : scratch ≠ destination)
-    (initial : Q) (transition : Q → Bool → Q) (emit : Q → Bool → List Bool)
-    (scanLabel restoreLabel : Λ) (emitterLabel : Q → Bool → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet K) Λ (State σ Q))
-    (atScan : program scanLabel = scanLoop source scratch initial emitterLabel restoreLabel)
-    (atEmitter : ∀ control symbol, program (emitterLabel control symbol) =
-      emitter destination transition emit scanLabel control symbol)
-    (atRestore : program restoreLabel =
-      Reduction.MachineTransfer.loopAt scratch source id false restoreLabel exit)
-    (base : K → List Bool) (scratchEmpty : base scratch = [])
-    (ambient : σ) (control : Q) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some scanLabel, ((ambient, control), register), base⟩
-      (some ⟨exit, ((ambient, initial), none), Function.update base destination
-        ((Reduction.MachineTransducer.output transition emit control (base source)).reverse ++
-          base destination)⟩)
-      (3 * (base source).length + 2) where
-  steps := 3 * (base source).length + 2
-  evals_in_steps := transduceCopyTrace source scratch destination sourceScratch sourceDestination
-    scratchDestination initial transition emit scanLabel restoreLabel emitterLabel exit program
-    atScan atEmitter atRestore base scratchEmpty ambient control register
-  steps_le_m := Nat.le_refl _
-
-omit [DecidableEq K] in
-theorem scanLoop_pushBound (source scratch : K) (initial : Q)
-    (emitterLabel : Q → Bool → Λ) (restoreLabel : Λ) :
-    Runtime.statementPushBound (scanLoop (σ := σ) source scratch initial emitterLabel restoreLabel) = 1 := by
-  simp [scanLoop, Runtime.statementPushBound]
-
-omit [DecidableEq K] in
-theorem emitter_pushBound (destination : K) (transition : Q → Bool → Q)
-    (emit : Q → Bool → List Bool) (scanLabel : Λ) (control : Q) (symbol : Bool) :
-    Runtime.statementPushBound (emitter (σ := σ) destination transition emit scanLabel control symbol) =
-      (emit control symbol).length := by
-  simp [emitter, Runtime.statementPushBound, Reduction.MachineSubstitution.statementPushBound_pushWord]
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineTransducerCopy
 

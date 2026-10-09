@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLogCounter
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
@@ -17,27 +18,6 @@ variable {K Λ σ : Type} [DecidableEq K]
 abbrev Alphabet (_ : K) := Bool
 abbrev State (σ : Type) := (σ × Bool) × Option Bool
 
-/-- A boundary test which inspects the first unary bit without consuming it. -/
-def zeroTest (operand : K) (exit : Option Λ) :
-    TM2.Stmt (Alphabet (K := K)) Λ (State σ) :=
-  .peek operand (fun s head => (s.1, head))
-    (.load (fun s => ((s.1.1, !(s.2.getD false)), none))
-      (Reduction.MachineTransfer.exitAt operand exit))
-
-theorem zeroTestTrace (operand : K) (testLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atTest : program testLabel = zeroTest operand exit)
-    (base : K → List Bool) (n : Nat) (suffix : List Bool)
-    (word : base operand = encodeWord n ++ suffix)
-    (ambient : σ) (flag : Bool) (register : Option Bool) :
-    (advance (TM2.step program))^[1]
-      (some ⟨some testLabel, ((ambient, flag), register), base⟩) =
-      some ⟨exit, ((ambient, decide (n = 0)), none), base⟩ := by
-  change some (TM2.stepAux (program testLabel) _ _) = _
-  rw [atTest]
-  cases n <;> cases exit <;>
-    simp [zeroTest, TM2.stepAux, word, encodeWord, List.replicate_succ,
-      Reduction.MachineTransfer.exitAt]
 
 /-- Slots 0 and 1 are the operands; slots 2 and 3 are their saved prefixes. -/
 def tapes (slots : Fin 4 ↪ K) (base : K → List Bool)
@@ -453,90 +433,6 @@ def machine [Fintype K] [Fintype Λ] [Fintype σ]
   initialState := (initial, none)
   m := program counter entry body
 
-def haltedConfiguration (counter : K) (suffix : List Bool)
-    (ambient : Nat → σ) (base : Nat → K → List Bool) :
-    TM2.Cfg (Alphabet (K := K)) (Labels Λ) (State σ) :=
-  ⟨none, (ambient 0, none), Function.update (base 0) counter suffix⟩
-
-theorem haltStep (counter : K) (entry : Λ)
-    (body : Λ → TM2.Stmt (Alphabet (K := K)) (Labels Λ) (State σ))
-    (suffix : List Bool) (ambient : Nat → σ) (base : Nat → K → List Bool) :
-    TM2.step (program counter entry body)
-      (exitConfiguration counter (.inl true) suffix ambient base) =
-      some (haltedConfiguration counter suffix ambient base) := by
-  change some (TM2.stepAux (.pop counter (fun state _ => (state.1, none)) .halt)
-    (ambient 0, none) (MachineUnaryCounter.counterTapes counter (base 0) 0 suffix)) = _
-  simp [TM2.stepAux, MachineUnaryCounter.counterTapes, encodeWord, haltedConfiguration]
-
-/-- Full loop execution including the final transition that consumes the
-counter delimiter and halts, retaining the unread suffix. The only supplied
-execution hypotheses concern individual body calls in this same program. -/
-theorem iterationTrace (counter : K) (entry : Λ)
-    (body : Λ → TM2.Stmt (Alphabet (K := K)) (Labels Λ) (State σ))
-    (suffix : List Bool) (ambient : Nat → σ) (register : Nat → Option Bool)
-    (base : Nat → K → List Bool) (cost : Nat → Nat) (n : Nat)
-    (bodyTraces : BodyTraces counter (.inl false) (.inr entry)
-      (program counter entry body) suffix ambient register base cost (rounds n)) :
-    (MachineComposition.advance (TM2.step (program counter entry body)))^[
-        totalSteps cost (rounds n) + 1]
-      (some (guardConfiguration counter (.inl false) suffix ambient register base (rounds n))) =
-      some (haltedConfiguration counter suffix ambient base) := by
-  rw [Function.iterate_succ_apply']
-  rw [loopTrace counter (.inl false) (.inr entry) (.inl true)
-    (program counter entry body) (program_guard counter entry body) suffix
-    ambient register base cost (rounds n) bodyTraces]
-  exact haltStep counter entry body suffix ambient base
-
-/-- Actual body costs are bounded through a semantic-size sequence and a
-separate encoding polynomial. Index `rounds n - (r+1)` is the forward round
-corresponding to the unary guard's remaining-count index `r`. -/
-theorem bodyCosts_bound (growth n : Nat) (growthPositive : 0 < growth)
-    (sizes encodedSizes cost : Nat → Nat) (encodingSize bodyTime : Polynomial Nat)
-    (initialBound : sizes 0 ≤ n + 1)
-    (growthBound : ∀ i, i < rounds n → sizes (i + 1) ≤ growth * sizes i)
-    (encodingBound : ∀ r, r < rounds n →
-      encodedSizes r ≤ encodingSize.eval (sizes (rounds n - (r + 1))))
-    (bodyCost : ∀ r, r < rounds n → cost r ≤ bodyTime.eval (encodedSizes r)) :
-    ∀ r, r < rounds n →
-      cost r ≤ bodyTime.eval (encodingSize.eval (sizeEnvelope growth n)) := by
-  intro r hr
-  have hs := semanticSize_bound sizes growth n growthPositive initialBound growthBound
-    (rounds n - (r + 1)) (Nat.sub_le _ _)
-  exact (bodyCost r hr).trans
-    (MachineComposition.natPolynomial_eval_mono bodyTime
-      ((encodingBound r hr).trans
-        (MachineComposition.natPolynomial_eval_mono encodingSize hs)))
-
-/-- Timed execution of the concrete guard/body/halt program. This compositional
-interface is not a certificate for an unprovided graph-transformation body. -/
-def iterationInTime (counter : K) (entry : Λ)
-    (body : Λ → TM2.Stmt (Alphabet (K := K)) (Labels Λ) (State σ))
-    (suffix : List Bool) (ambient : Nat → σ) (register : Nat → Option Bool)
-    (base : Nat → K → List Bool) (cost : Nat → Nat) (growth n : Nat)
-    (growthPositive : 0 < growth)
-    (bodyTraces : BodyTraces counter (.inl false) (.inr entry)
-      (program counter entry body) suffix ambient register base cost (rounds n))
-    (sizes encodedSizes : Nat → Nat) (encodingSize bodyTime : Polynomial Nat)
-    (initialBound : sizes 0 ≤ n + 1)
-    (growthBound : ∀ i, i < rounds n → sizes (i + 1) ≤ growth * sizes i)
-    (encodingBound : ∀ r, r < rounds n →
-      encodedSizes r ≤ encodingSize.eval (sizes (rounds n - (r + 1))))
-    (bodyCost : ∀ r, r < rounds n → cost r ≤ bodyTime.eval (encodedSizes r)) :
-    StateTransition.EvalsToInTime (TM2.step (program counter entry body))
-      (guardConfiguration counter (.inl false) suffix ambient register base (rounds n))
-      (some (haltedConfiguration counter suffix ambient base))
-      ((timePolynomial growth encodingSize bodyTime).eval n) where
-  steps := totalSteps cost (rounds n) + 1
-  evals_in_steps := iterationTrace counter entry body suffix ambient register base cost n bodyTraces
-  steps_le_m := by
-    rw [timePolynomial_eval]
-    have h := totalSteps_le cost (rounds n)
-      (bodyTime.eval (encodingSize.eval (sizeEnvelope growth n)))
-      (bodyCosts_bound growth n growthPositive sizes encodedSizes cost encodingSize bodyTime
-        initialBound growthBound encodingBound bodyCost)
-    have hm := Nat.mul_le_mul_right
-      (bodyTime.eval (encodingSize.eval (sizeEnvelope growth n)) + 1) (rounds_le n)
-    omega
 
 end UniqueGamesTheorem.Foundations.Complexity.PCPIterationMachine
 

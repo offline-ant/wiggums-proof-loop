@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRadixStepLemmas
 import OAI.Computability.UniqueGames.PCP.ClauseVerifierLemmas
 import OAI.Computability.UniqueGames.PCP.FoldedEquationLemmas
@@ -29,71 +30,11 @@ def taggedAssignment {V C I J : Type} (left : V → I) (right : C → J) :
     (left : V → I) (right : C → J) (c : C) (g : Cube J) :
     taggedAssignment left right (.inr (.inl (c, g))) = g (right c) := rfl
 
-/-- Extending a conditioned half-table into padded ambient storage does not
-change its honest bit. Only correctness on valid coordinates is required. -/
-theorem taggedAssignment_right_restriction {V C I J : Type}
-    (left : V → I) (right : C → J) (c : C) (valid : J → Bool)
-    (honest : {j : J // valid j = true}) (hright : right c = honest.val)
-    (extend : Cube {j : J // valid j = true} → Cube J)
-    (hextend : ∀ (g : Cube {j : J // valid j = true})
-      (j : {j : J // valid j = true}), extend g j.val = g j)
-    (j₀ : {j : J // valid j = true}) (h : HalfCube j₀) :
-    taggedAssignment left right (.inr (.inl (c, extend h.val))) = h.val honest := by
-  change extend h.val (right c) = h.val honest
-  rw [hright]
-  exact hextend h.val honest
 
 section Local
 
 variable {I J : Type} [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J]
 
-omit [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J] in
-/-- Each honest emitted equation fails exactly when its selected noise bit is
-true. This is a pointwise statement, before averaging any random tape. -/
-theorem conditioned_equation_honest_satisfied
-    (valid : J → Bool) (π : J → I) (i₀ i : I)
-    (j₀ j : {j : J // valid j = true}) (hπ : π j.val = i)
-    (f : Cube I) (g μ : Cube J) :
-    satisfied (FoldedEquation.conditionedEquation valid π i₀ j₀ f g μ)
-        (FoldedEquation.storedAssignment (fun h => h.val i) (fun h => h.val j)) =
-      !(μ j.val) := by
-  rw [FoldedEquation.conditionedEquation_satisfied, foldedAnswer_dictator,
-    conditionedFoldedAnswer_dictator, conditionedFoldedAnswer_dictator,
-    dictator_test_parity π i j.val hπ]
-
-omit [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J] in
-/-- Local table equalities are enough to reuse the same assignment even when
-different occurrences, contexts, or query positions name the same proof bit. -/
-theorem mapped_conditioned_equation_honest_satisfied {Name : Type}
-    (valid : J → Bool) (π : J → I) (i₀ i : I)
-    (j₀ j : {j : J // valid j = true}) (hπ : π j.val = i)
-    (rename : FoldedEquation.Address i₀ j₀ → Name) (assignment : Name → Bool)
-    (hleft : ∀ h, assignment (rename (.inl h)) = h.val i)
-    (hright : ∀ h, assignment (rename (.inr h)) = h.val j)
-    (f : Cube I) (g μ : Cube J) :
-    satisfied (mapEquation rename
-        (FoldedEquation.conditionedEquation valid π i₀ j₀ f g μ)) assignment =
-      !(μ j.val) := by
-  have hlocal : assignment ∘ rename =
-      FoldedEquation.storedAssignment (fun h => h.val i) (fun h => h.val j) := by
-    funext a
-    cases a with
-    | inl h => exact hleft h
-    | inr h => exact hright h
-  rw [satisfied_mapEquation, hlocal]
-  exact conditioned_equation_honest_satisfied valid π i₀ i j₀ j hπ f g μ
-
-/-- The exact finite noise law gives honest acceptance for a conditioned right
-table and an unconditioned left table, with arbitrary fixed folding bases. -/
-theorem tapeAcceptance_conditioned_dictators {D : ℕ} (positive : 0 < D)
-    (valid : J → Bool) (π : J → I) (i₀ i : I)
-    (j₀ j : {j : J // valid j = true}) (hπ : π j.val = i) :
-    SourceTape.tapeAcceptance D π
-      (foldedAnswer i₀ (fun h => h.val i))
-      (conditionedFoldedAnswer valid j₀ (fun h => h.val j)) =
-        1 - (D : ℝ)⁻¹ := by
-  rw [SourceTape.tapeAcceptance_eq_realizedTestAcceptance]
-  exact realizedTestAcceptance_folded_conditioned_dictators positive π i₀ i valid j₀ j hπ
 
 end Local
 
@@ -103,72 +44,9 @@ open SourceOccurrences
 
 variable {V C I J : Type}
 
-/-- Numbering the global proof and then restricting it to one local table
-recovers exactly the local honest half-tables. -/
-theorem numbered_assignment_restriction
-    (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Encoding J)
-    (left : V → I) (right : C → J) (v : V) (c : C)
-    (valid : J → Bool) (i₀ : I) (j₀ j : {j : J // valid j = true})
-    (hright : right c = j.val) :
-    assignmentOfKey vE cE iE jE (taggedAssignment left right) ∘
-      localAddress vE cE iE jE v c valid i₀ j₀ =
-      FoldedEquation.storedAssignment (fun h => h.val (left v)) (fun h => h.val j) := by
-  funext a
-  cases a with
-  | inl h =>
-    simp only [Function.comp_apply, localAddress, assignmentOfKey_code,
-      taggedAssignment_left, FoldedEquation.storedAssignment, Sum.elim_inl]
-  | inr h =>
-    simp only [Function.comp_apply, localAddress, assignmentOfKey_code,
-      taggedAssignment_right, hright, extendRestricted_valid,
-      FoldedEquation.storedAssignment, Sum.elim_inr]
 
 variable [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J]
 
-omit [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J] in
-/-- The globally numbered honest proof satisfies each actual occurrence
-precisely when the corresponding noise bit is false. -/
-theorem conditionedOccurrence_honest_satisfied
-    (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Encoding J)
-    (left : V → I) (right : C → J) (v : V) (c : C)
-    (valid : J → Bool) (π : J → I) (i₀ : I)
-    (j₀ j : {j : J // valid j = true})
-    (hright : right c = j.val) (hπ : π j.val = left v)
-    (f : Cube I) (g μ : Cube J) :
-    satisfied (conditionedOccurrence vE cE iE jE v c valid π i₀ j₀ f g μ)
-      (assignmentOfKey vE cE iE jE (taggedAssignment left right)) = !(μ j.val) := by
-  rw [conditionedOccurrence, satisfied_mapEquation,
-    numbered_assignment_restriction vE cE iE jE left right v c valid i₀ j₀ j hright]
-  exact conditioned_equation_honest_satisfied valid π i₀ (left v) j₀ j hπ f g μ
-
-/-- Exact normalized accepted count for the actual ordered random-tape list
-at one incidence context. Equal equations remain separate occurrences. -/
-theorem conditionedOccurrenceList_honest_acceptance {D : ℕ} (positive : 0 < D)
-    (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Encoding J)
-    (left : V → I) (right : C → J) (v : V) (c : C)
-    (valid : J → Bool) (π : J → I) (i₀ : I)
-    (j₀ j : {j : J // valid j = true})
-    (hright : right c = j.val) (hπ : π j.val = left v)
-    (tape : Encoding (SourceTape.TestTape I J D)) :
-    let equations := occurrenceList tape (fun t =>
-      conditionedOccurrence vE cE iE jE v c valid π i₀ j₀
-        t.1 t.2.2 (realizedNoise t.2.1))
-    ((equations.countP (fun e => satisfied e
-      (assignmentOfKey vE cE iE jE (taggedAssignment left right)))) : ℝ) /
-        equations.length = 1 - (D : ℝ)⁻¹ := by
-  dsimp only
-  rw [occurrenceList_acceptance]
-  calc
-    _ = SourceTape.tapeAcceptance D π (fun f => f (left v)) (fun g => g j.val) := by
-      unfold SourceTape.tapeAcceptance
-      apply Finset.expect_congr rfl
-      intro t _
-      rw [conditionedOccurrence_honest_satisfied vE cE iE jE left right v c
-        valid π i₀ j₀ j hright hπ, dictator_test_parity π (left v) j.val hπ]
-      cases realizedNoise t.2.1 j.val <;> rfl
-    _ = _ := by
-      rw [SourceTape.tapeAcceptance_eq_realizedTestAcceptance]
-      exact realizedTestAcceptance_dictator positive π (left v) j.val hπ
 
 end NumberedStorage
 
@@ -211,11 +89,6 @@ def honestValidJ (F : Target.Formula) {u : ℕ} (c : ClauseContext F u)
     {j : J u // validJ F c j = true} :=
   ⟨honestJ F c assignment, honestJ_valid F c assignment hs⟩
 
-theorem validJ_nonempty_of_satisfying (F : Target.Formula) {u : ℕ}
-    (c : ClauseContext F u) (assignment : Fin F.variables → Bool)
-    (hs : ∀ clause ∈ F.clauses, clause.eval assignment = true) :
-    Nonempty {j : J u // validJ F c j = true} :=
-  ⟨honestValidJ F c assignment hs⟩
 
 theorem leftResponse_honest (F : Target.Formula) (u : ℕ)
     (assignment : Fin F.variables → Bool) (v : VariableContext F u) :
@@ -248,33 +121,6 @@ theorem rightResponse_honest (F : Target.Formula) (u : ℕ)
     exact conditionedFoldedAnswer_dictator (validJ F c) j₀
       (honestValidJ F c assignment hs) g
 
-/-- Actual sampled incidence contexts attain the same honest finite-noise
-acceptance. Folding bases may be chosen independently of the assignment. -/
-theorem context_tapeAcceptance {D : ℕ} (positive : 0 < D)
-    (F : Target.Formula) {u : ℕ} (c : ClauseContext F u) (s : SlotContext u)
-    (assignment : Fin F.variables → Bool)
-    (hs : ∀ clause ∈ F.clauses, clause.eval assignment = true)
-    (i₀ : I u) (j₀ : {j : J u // validJ F c j = true}) :
-    SourceTape.tapeAcceptance D (pi F c (sampledVariables F c s))
-      (foldedAnswer i₀ (fun h => h.val (honestI F (sampledVariables F c s) assignment)))
-      (conditionedFoldedAnswer (validJ F c) j₀
-        (fun h => h.val (honestValidJ F c assignment hs))) =
-      1 - (D : ℝ)⁻¹ := by
-  exact tapeAcceptance_conditioned_dictators positive (validJ F c)
-    (pi F c (sampledVariables F c s)) i₀ _ j₀ _
-    (pi_honest_sampled F c s assignment)
-
-/-- The emitted equation, under the one global honest assignment, reads the
-noise coordinate corresponding to the honest tuple of clause answers. -/
-theorem sourceEquation_honest_satisfied (F : Target.Formula) (u D : ℕ)
-    (assignment : Fin F.variables → Bool)
-    (hs : ∀ clause ∈ F.clauses, clause.eval assignment = true)
-    (p : SourceIndex F u D) :
-    satisfied (sourceEquation F u D p) (honestBits F u assignment) =
-      !(realizedNoise p.2.2.1 (honestJ F p.1.1 assignment)) := by
-  simp only [sourceEquation, contextEquation_satisfied, leftResponse_honest,
-    rightResponse_honest F u assignment hs]
-  rw [dictator_test_parity _ _ _ (pi_honest_sampled F p.1.1 p.1.2 assignment)]
 
 /-- Every actual occurrence is counted, even when its visible context,
 equation, or one of its three addresses repeats. -/
@@ -332,16 +178,6 @@ theorem sourceList_honest_acceptance_rat (F : Target.Formula) (u D : ℕ)
   simpa only [Rat.cast_sub, Rat.cast_one, Rat.cast_inv, Rat.cast_natCast, Rat.cast_div] using
     sourceList_honest_acceptance F u D hD assignment hs
 
-theorem sourceList_honest_acceptance_nonempty_rat (F : Target.Formula) (u D : ℕ)
-    (hD : 0 < D) (hF : F.clauses ≠ [])
-    (assignment : Fin F.variables → Bool)
-    (hs : ∀ clause ∈ F.clauses, clause.eval assignment = true) :
-    ((sourceList F u D).countP
-      (fun e => satisfied e (honestBits F u assignment)) : ℚ) /
-        (sourceList F u D).length = 1 - (D : ℚ)⁻¹ := by
-  apply Rat.cast_injective (α := ℝ)
-  simpa only [Rat.cast_sub, Rat.cast_one, Rat.cast_inv, Rat.cast_natCast, Rat.cast_div] using
-    sourceList_honest_acceptance_nonempty F u D hD hF assignment hs
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceHonest
 
@@ -360,36 +196,10 @@ def signatureEncoding (u : ℕ) : Encoding (Signature u) :=
     ((position.function (position.function Encoding.bool)).prod (slotContextEncoding u))
   ⟨fields.size, (signatureEquiv u).trans fields.code⟩
 
-def signatureList (u : ℕ) : List (Signature u) := (signatureEncoding u).enumerate
-
-theorem mem_signatureList (u : ℕ) (σ : Signature u) : σ ∈ signatureList u :=
-  (signatureEncoding u).mem_enumerate σ
-
-theorem signatureList_nodup (u : ℕ) : (signatureList u).Nodup :=
-  (signatureEncoding u).nodup_enumerate
-
-theorem signatureList_length (u : ℕ) :
-    (signatureList u).length = (signatureEncoding u).size :=
-  (signatureEncoding u).length_enumerate
 
 def localInputEncoding (u D : ℕ) : Encoding (LocalInput u D) :=
   (signatureEncoding u).prod (testTapeEncoding u D)
 
-def localInputs (u D : ℕ) : List (LocalInput u D) := (localInputEncoding u D).enumerate
-
-theorem mem_localInputs (u D : ℕ) (p : LocalInput u D) : p ∈ localInputs u D :=
-  (localInputEncoding u D).mem_enumerate p
-
-theorem localInputs_nodup (u D : ℕ) : (localInputs u D).Nodup :=
-  (localInputEncoding u D).nodup_enumerate
-
-theorem localInputs_length (u D : ℕ) :
-    (localInputs u D).length = (localInputEncoding u D).size :=
-  (localInputEncoding u D).length_enumerate
-
-def localKeyEncoding (u : ℕ) : Encoding (LocalKey u) :=
-  ((iEncoding u).function Encoding.bool).sum
-    (((jEncoding u).function Encoding.bool).sum Encoding.unit)
 
 def emptyLocalAddress (u : ℕ) : EmptyContext.Address (leftAnchor u) → LocalKey u
   | .inl f => .inl f.val
@@ -528,37 +338,6 @@ theorem realize_descriptor (F : Formula) (u : ℕ) (c : ClauseContext F u)
             show (2 : Fin 3) ≠ 1 by decide, ite_false, Nat.zero_add, addressMap,
             dummy_address]
 
-theorem descriptor_offset_bound (u : ℕ) (key : LocalKey u) :
-    (descriptor u key).2 < 2 ^ (2 ^ u) + 2 ^ (8 ^ u) + 1 := by
-  cases key with
-  | inl f =>
-      have h := (((iEncoding u).function Encoding.bool).code f).isLt
-      change _ < 2 ^ (2 ^ u) at h
-      change (((iEncoding u).function Encoding.bool).code f).val < _
-      calc
-        _ < (2 ^ (2 ^ u) : ℕ) := h
-        _ ≤ 2 ^ (2 ^ u) + 2 ^ (8 ^ u) := Nat.le_add_right _ _
-        _ ≤ _ := Nat.le_add_right _ _
-  | inr key =>
-      cases key with
-      | inl g =>
-          have h := (((jEncoding u).function Encoding.bool).code g).isLt
-          change _ < 2 ^ (8 ^ u) at h
-          change (((jEncoding u).function Encoding.bool).code g).val < _
-          calc
-            _ < (2 ^ (8 ^ u) : ℕ) := h
-            _ ≤ 2 ^ (2 ^ u) + 2 ^ (8 ^ u) := Nat.le_add_left _ _
-            _ ≤ _ := Nat.le_add_right _ _
-      | inr _dummy => simp [descriptor]
-
-theorem sourceEquation_numeric (F : Formula) (u D : ℕ) (p : SourceIndex F u D) :
-    mapEquation Fin.val (sourceEquation F u D p) =
-      mapEquation (realize (baseValue F u p.1.1 (sampledVariables F p.1.1 p.1.2)))
-        (mapEquation (descriptor u) (emit u D (ofContext F p.1.1 p.1.2, p.2))) := by
-  rw [sourceEquation_eq_map_emit, mapEquation_comp, mapEquation_comp]
-  congr 1
-  funext key
-  exact (realize_descriptor F u p.1.1 (sampledVariables F p.1.1 p.1.2) key).symm
 
 theorem sourceEquation_words (F : Formula) (u D : ℕ) (p : SourceIndex F u D) :
     UniqueGamesTheorem.Reduction.SourceEncoding.equationWords (sourceEquation F u D p) =
@@ -739,22 +518,6 @@ theorem affineTrace (slots : Layout ↪ K) (coefficient : Nat) (labels : Label �
   rw [hseed, hhorner]
   exact hclear
 
-def affineInTime (slots : Layout ↪ K) (coefficient : Nat) (labels : Label → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots coefficient labels exit label)
-    (base : K → List Bool) (rank offset : Nat)
-    (rankWord : base (slots (.inl 0)) = encodeWord rank)
-    (offsetWord : base (slots (.inr 1)) = encodeWord offset)
-    (coefficientEmpty : base (slots (.inr 0)) = [])
-    (clean : MachineHorner.Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .seed), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), MachineHorner.resultTapes slots base (coefficient * rank + offset)⟩)
-      (steps coefficient rank offset) where
-  steps := steps coefficient rank offset
-  evals_in_steps := affineTrace slots coefficient labels exit p atLabels base rank offset
-    rankWord offsetWord coefficientEmpty clean ambient register
-  steps_le_m := Nat.le_refl _
 
 def affineInPolynomialTime (slots : Layout ↪ K) (coefficient : Nat) (labels : Label → Λ) (exit : Option Λ)
     (p : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
@@ -773,17 +536,6 @@ def affineInPolynomialTime (slots : Layout ↪ K) (coefficient : Nat) (labels : 
     rankWord offsetWord coefficientEmpty clean ambient register
   steps_le_m := steps_le_timePolynomial coefficient rank offset
 
-def programInTime (slots : Layout ↪ K) (coefficient : Nat) (base : K → List Bool) (rank offset : Nat)
-    (rankWord : base (slots (.inl 0)) = encodeWord rank)
-    (offsetWord : base (slots (.inr 1)) = encodeWord offset)
-    (coefficientEmpty : base (slots (.inr 0)) = [])
-    (clean : MachineHorner.Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ) slots coefficient))
-      ⟨some .seed, ((ambient, ()), register), base⟩
-      (some ⟨none, ((ambient, ()), none), MachineHorner.resultTapes slots base (coefficient * rank + offset)⟩)
-      ((timePolynomial coefficient).eval (operandLength rank offset)) :=
-  affineInPolynomialTime slots coefficient id none (program slots coefficient) (fun _ => rfl)
-    base rank offset rankWord offsetWord coefficientEmpty clean ambient register
 
 /-- Left query-block base from the preserved variable tuple rank and a zero offset field. -/
 def leftBaseInTime (F : Formula) (u : Nat) (c : ClauseContext F u) (v : VariableContext F u)
@@ -828,11 +580,6 @@ def rightBaseInTime (F : Formula) (u : Nat) (c : ClauseContext F u) (v : Variabl
     simp [baseValue, Nat.mul_comm, Nat.add_comm]
   simpa only [hv] using h
 
-/-- The retained dummy register is among the unchanged external tapes. -/
-theorem resultTapes_dummy (slots : Layout ↪ K) (base : K → List Bool) (value : Nat)
-    (dummy : K) (distinct : dummy ≠ slots (.inl 3)) :
-    MachineHorner.resultTapes slots base value dummy = base dummy :=
-  MachineHorner.resultTapes_other slots base value dummy distinct
 
 def machine (coefficient : Nat) : FinTM2 where
   K := Layout
@@ -845,17 +592,6 @@ def machine (coefficient : Nat) : FinTM2 where
   initialState := (((), ()), none)
   m := program (Function.Embedding.refl Layout) coefficient
 
-def machineInTime (coefficient rank offset : Nat) (base : Layout → List Bool)
-    (rankWord : base (.inl 0) = encodeWord rank) (offsetWord : base (.inr 1) = encodeWord offset)
-    (coefficientEmpty : base (.inr 0) = [])
-    (clean : MachineHorner.Clean (Function.Embedding.refl _) base) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine coefficient).step
-      ⟨some Label.seed, (((), ()), register), base⟩
-      (some ⟨none, (((), ()), none),
-        MachineHorner.resultTapes (Function.Embedding.refl _) base (coefficient * rank + offset)⟩)
-      ((timePolynomial coefficient).eval (operandLength rank offset)) :=
-  programInTime (Function.Embedding.refl _) coefficient base rank offset rankWord offsetWord
-    coefficientEmpty clean () register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceBasePhase
 

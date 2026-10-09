@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.NormNum
 import OAI.Computability.UniqueGames.Machines.MachineBinaryNameSearch
@@ -126,10 +127,6 @@ theorem steps_le (tokens : List BinaryNameSearch.Token) (bits : List Bool)
     TM2.stepAux (finish exit) state base = ⟨exit, clean state.1.1.1, base⟩ := by
   cases exit <;> rfl
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 theorem literalTrace (tape : Fin 9 → K) (distinct : Function.Injective tape)
     (labels : Label → Λ) (exit malformed : Option Λ)
     (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
@@ -169,36 +166,10 @@ theorem literalTrace (tape : Fin 9 → K) (distinct : Function.Injective tape)
     rw [atLabels .readSign]
     simp [instruction, readSign, TM2.stepAux, clean, BinaryNameCompare.clean,
       cursor, he 7, hd 0 7 (by decide), s₁]
-  have s₁cursor : s₁ (tape 0) = BinaryNameMachine.frame bits ++ suffix := by simp [s₁]
-  have s₁key : s₁ (tape 2) = [] := by
-    simp [s₁, hd 2 0 (by decide), hd 2 7 (by decide), he 2]
-  have keyRun : (advance (TM2.step program))^[bits.length + 1]
-      (some ⟨some (labels .scanKey), clean ambient sign, s₁⟩) =
-      some ⟨some (labels .copyOut), clean ambient sign, s₂⟩ := by
-    let e := BinaryNameCompare.scanStateEquiv (A × Bool)
-    let back := MachineStateEquiv.program e.symm program
-    have atScan : back (labels .scanKey) =
-        BinaryNameMachine.scan (tape 0) (tape 2) (labels .scanKey)
-          (some (labels .copyOut)) malformed := by
-      change MachineStateEquiv.statement e.symm (program (labels .scanKey)) = _
-      rw [atLabels .scanKey]
-      exact MachineStateEquiv.statement_symm_statement e _
-    have backForward : MachineStateEquiv.program e back = program := by
-      funext l
-      change MachineStateEquiv.statement e (MachineStateEquiv.statement e.symm (program l)) = _
-      exact MachineStateEquiv.statement_symm_statement e.symm _
-    have initial : tapesAt (tape 0) (tape 2) s₁
-        (BinaryNameMachine.frame bits ++ suffix) [] = s₁ := by
-      rw [← s₁cursor, ← s₁key]
-      exact tapesAt_self _ _ _
-    have native := BinaryNameMachine.framedTrace (tape 0) (tape 2) (hd 0 2 (by decide))
-      (labels .scanKey) (some (labels .copyOut)) malformed back atScan s₁
-      ((ambient, sign), false) bits suffix [] none
-    simp only [canonical, ↓reduceIte, initial, List.append_nil] at native
-    have transported := MachineStateEquiv.trace e back _ _ _ native
-    rw [backForward] at transported
-    simpa only [MachineStateEquiv.configuration, e, BinaryNameCompare.scanStateEquiv, Equiv.coe_fn_mk,
-      BinaryNameMachine.clean, clean, BinaryNameCompare.clean, s₂, tapesAt] using transported
+  have keyRun := BinaryNameCompare.scanTrace (tape 0) (tape 2) (hd 0 2 (by decide))
+    (labels .scanKey) (some (labels .copyOut)) malformed program (atLabels .scanKey)
+    s₁ (ambient, sign) bits suffix canonical (by simp [s₁])
+    (by simp [s₁, hd 2 0 (by decide), hd 2 7 (by decide), he 2])
   have s₂permanent : s₂ (tape 1) = BinaryNameSearch.stream tokens := by
     simpa [s₂, s₁, hd 1 0 (by decide), hd 1 2 (by decide), hd 1 7 (by decide)] using permanent
   have s₂empty (i : Fin 9) (hi : i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6) : s₂ (tape i) = [] := by
@@ -276,55 +247,21 @@ theorem literalTrace (tape : Fin 9 → K) (distinct : Function.Injective tape)
     rw [atLabels .emitSign]
     cases sign <;> simp [instruction, emitSign, clean, BinaryNameCompare.clean,
       TM2.stepAux, signWord, encodeWord, s₈, Function.update_idem]
-  have full := joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace
-    (joinTrace signRun keyRun) copyRun) searchRun) drainSearchRun) drainKeyRun) indexRun) emitRun
+  have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
+    (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans signRun keyRun) copyRun) searchRun) drainSearchRun) drainKeyRun) indexRun) emitRun
   have finalTapes : s₈ = Function.update (Function.update base (tape 0) suffix) (tape 8)
       ((outputWord tokens bits sign).reverse ++ base (tape 8)) := by
-    funext k
-    by_cases h8 : k = tape 8
-    · subst k
-      simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, outputWord,
-        List.reverse_append, List.append_assoc, hd]
-    · by_cases h0 : k = tape 0
-      · subst k
-        simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, hd]
-      · by_cases h2 : k = tape 2
-        · subst k
-          simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, hd, he 2]
-        · by_cases h3 : k = tape 3
-          · subst k
-            simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, hd, he 3]
-          · by_cases h7 : k = tape 7
-            · subst k
-              simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, hd, he 7]
-            · simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, h8, h0, h2, h3, h7]
+    have clear (i : Fin 9) (lo : 2 ≤ i.val) (hi : i.val ≤ 7) :
+        Function.update (Function.update base (tape 0) suffix) (tape i) [] =
+          Function.update base (tape 0) suffix := by
+      apply Function.update_eq_self_iff.mpr
+      rw [Function.update_of_ne (hd i 0 (by intro h; subst i; omega)), empty i lo hi]
+    simp [s₈, s₇, s₆, s₅, s₄, s₃, s₂, s₁, tapesAt, outputWord,
+      List.reverse_append, List.append_assoc, hd, Function.update_comm,
+      clear 2 (by decide) (by decide), clear 3 (by decide) (by decide),
+      clear 7 (by decide) (by decide)]
   simpa only [steps, tail, finalTapes] using full
 
-/-- Polynomial resource bound attached to the proved literal execution. -/
-def literalInTime (tape : Fin 9 → K) (distinct : Function.Injective tape)
-    (labels : Label → Λ) (exit malformed : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
-    (atLabels : ∀ l, program (labels l) = instruction tape labels exit malformed l)
-    (base : K → List Bool) (tokens : List BinaryNameSearch.Token)
-    (sign : Bool) (bits suffix : List Bool)
-    (canonical : BinaryNameMachine.canonical bits = true)
-    (tokensCanonical : ∀ token ∈ tokens, BinaryNameMachine.canonical token.2 = true)
-    (present : bits ∈ BinaryNameSearch.payloads tokens)
-    (cursor : base (tape 0) = sign :: (BinaryNameMachine.frame bits ++ suffix))
-    (permanent : base (tape 1) = BinaryNameSearch.stream tokens)
-    (empty : ∀ i : Fin 9, 2 ≤ i.val → i.val ≤ 7 → base (tape i) = [])
-    (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .readSign), clean ambient, base⟩
-      (some ⟨exit, clean ambient,
-        Function.update (Function.update base (tape 0) suffix) (tape 8)
-          ((outputWord tokens bits sign).reverse ++ base (tape 8))⟩)
-      (3 * ((BinaryNameSearch.stream tokens).length + bits.length) ^ 2 +
-        13 * ((BinaryNameSearch.stream tokens).length + bits.length) + 9) where
-  steps := steps tokens bits
-  evals_in_steps := literalTrace tape distinct labels exit malformed program atLabels base
-    tokens sign bits suffix canonical tokensCanonical present cursor permanent empty ambient
-  steps_le_m := steps_le tokens bits present
 
 end UniqueGamesTheorem.BinaryLiteralMachine
 

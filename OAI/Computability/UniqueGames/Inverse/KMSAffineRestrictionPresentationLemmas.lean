@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
 import Mathlib.LinearAlgebra.Isomorphisms
@@ -138,12 +139,7 @@ abbrev localVanishing (D U : Submodule F2 E) : Submodule F2 U :=
 /-- The constrained component of an actual quotient parameter. -/
 def splitLeft (D U : Submodule F2 E) (W : Submodule F2 F)
     (A : Parameter D W) : Parameter (localVanishing D U) W :=
-  (localVanishing D U).liftQ (A.comp (D.mkQ.comp U.subtype)) (by
-    intro x hx
-    change A (D.mkQ (x : E)) = 0
-    have hz : D.mkQ (x : E) = 0 :=
-      (Submodule.Quotient.mk_eq_zero D).mpr hx
-    rw [hz, map_zero])
+  A.comp ((localVanishing D U).mapQ D U.subtype le_rfl)
 
 @[simp] theorem splitLeft_apply (D U : Submodule F2 E) (W : Submodule F2 F)
     (A : Parameter D W) (x : U) :
@@ -254,20 +250,8 @@ def splitEquiv (D U E₀ : Submodule F2 E) (W : Submodule F2 F)
   left_inv := join_split D U E₀ W hDU hc
   right_inv P := Prod.ext (splitLeft_join D U E₀ W hDU hc P.1 P.2)
     (splitRight_join D U E₀ W hDU hc P.1 P.2)
-  map_add' A B := by
-    apply Prod.ext
-    · apply LinearMap.ext
-      intro q
-      obtain ⟨x, rfl⟩ := (localVanishing D U).mkQ_surjective q
-      rfl
-    · rfl
-  map_smul' a A := by
-    apply Prod.ext
-    · apply LinearMap.ext
-      intro q
-      obtain ⟨x, rfl⟩ := (localVanishing D U).mkQ_surjective q
-      rfl
-    · rfl
+  map_add' _ _ := rfl
+  map_smul' _ _ := rfl
 
 @[simp] theorem splitEquiv_symm_apply (D U E₀ : Submodule F2 E)
     (W : Submodule F2 F) (hDU : D ≤ U) (hc : IsCompl U E₀)
@@ -329,6 +313,7 @@ open scoped BigOperators Classical
 open UniqueGamesTheorem.Integration.BinaryLinear (F2)
 open UniqueGamesTheorem.Fourier.MatrixCharacters (linearTraceCharacter)
 open UniqueGamesTheorem.Fourier.MatrixFourier
+open UniqueGamesTheorem.Appendix.Derivatives
 
 variable {E F : Type*}
   [AddCommGroup E] [Module F2 E] [AddCommGroup F] [Module F2 F]
@@ -346,21 +331,10 @@ def synthesis (a : (F →ₗ[F2] E) → ℝ) : (E →ₗ[F2] F) → ℝ :=
   simp only [linearCoeff_smul, linearCoeff_character, mul_ite, mul_one, mul_zero]
   simp
 
-theorem synthesis_coeff (f : (E →ₗ[F2] F) → ℝ) : synthesis (linearCoeff f) = f := by
-  funext X
-  simpa only [synthesis, Finset.sum_apply, Pi.smul_apply, smul_eq_mul] using
-    linear_fourier_inversion f X
-
 theorem eq_of_coeff_eq {f g : (E →ₗ[F2] F) → ℝ}
-    (h : ∀ T, linearCoeff f T = linearCoeff g T) : f = g := by
-  rw [← synthesis_coeff f, ← synthesis_coeff g]
-  exact congrArg synthesis (funext h)
+    (h : ∀ T, linearCoeff f T = linearCoeff g T) : f = g :=
+  function_eq_of_linearCoeff_eq h
 
-/-- Exact inner product of arbitrary synthesized coefficient arrays. -/
-theorem synthesis_inner (a b : (F →ₗ[F2] E) → ℝ) :
-    (𝔼 X, synthesis a X * synthesis b X) = ∑ T, a T * b T := by
-  rw [← linear_parseval_inner]
-  simp
 
 /-- Exact squared norm, used for every restricted KMS component. -/
 theorem synthesis_energy (a : (F →ₗ[F2] E) → ℝ) :
@@ -368,23 +342,20 @@ theorem synthesis_energy (a : (F →ₗ[F2] E) → ℝ) :
   rw [← linear_parseval]
   simp
 
-/-- The component formed by retaining precisely the actual frequencies in P. -/
+/-- KMS components use the common Fourier spectral projector. -/
 def component (P : (F →ₗ[F2] E) → Prop) (f : (E →ₗ[F2] F) → ℝ) :
     (E →ₗ[F2] F) → ℝ :=
-  synthesis fun T => if P T then linearCoeff f T else 0
+  spectralProjector P f
 
 @[simp] theorem coeff_component (P : (F →ₗ[F2] E) → Prop)
     (f : (E →ₗ[F2] F) → ℝ) (T : F →ₗ[F2] E) :
-    linearCoeff (component P f) T = if P T then linearCoeff f T else 0 := by
-  exact coeff_synthesis _ _
+    linearCoeff (component P f) T = if P T then linearCoeff f T else 0 :=
+  linearCoeff_spectralProjector P f T
 
 theorem component_energy (P : (F →ₗ[F2] E) → Prop)
     (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 X, component P f X ^ 2) = ∑ T with P T, linearCoeff f T ^ 2 := by
-  rw [component, synthesis_energy, Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro T _
-  split_ifs <;> simp
+    (𝔼 X, component P f X ^ 2) = ∑ T with P T, linearCoeff f T ^ 2 :=
+  spectralProjector_energy P f
 
 theorem component_energy_le (P : (F →ₗ[F2] E) → Prop)
     (f : (E →ₗ[F2] F) → ℝ) :
@@ -402,26 +373,6 @@ theorem component_inner_self (P : (F →ₗ[F2] E) → Prop)
   rw [coeff_component]
   split_ifs <;> simp [pow_two]
 
-theorem component_comp (P Q : (F →ₗ[F2] E) → Prop)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    component P (component Q f) = component (fun T => P T ∧ Q T) f := by
-  apply eq_of_coeff_eq
-  intro T
-  simp only [coeff_component]
-  by_cases hP : P T <;> by_cases hQ : Q T <;> simp [hP, hQ]
-
-/-- Components of disjoint frequency classes are genuinely orthogonal. -/
-theorem component_orthogonal (P Q : (F →ₗ[F2] E) → Prop)
-    (hPQ : ∀ T, ¬ (P T ∧ Q T)) (f g : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 X, component P f X * component Q g X) = 0 := by
-  rw [← linear_parseval_inner]
-  apply Finset.sum_eq_zero
-  intro T _
-  simp only [coeff_component]
-  by_cases hP : P T
-  · have hQ : ¬ Q T := fun hQ => hPQ T ⟨hP, hQ⟩
-    simp [hP, hQ]
-  · simp [hP]
 
 /-- The rank-level component uses actual image dimension. -/
 def rankComponent (i : ℕ) (f : (E →ₗ[F2] F) → ℝ) : (E →ₗ[F2] F) → ℝ :=
@@ -463,41 +414,10 @@ section FiniteFibers
 
 variable {A B J : Type*} [Fintype A] [Fintype B] [Fintype J]
 
-/-- Exact sum of a function constant on the fibers of a finite map. -/
-theorem sum_comp_eq_fiber_card (p : A → J) (b : J → ℝ) :
-    (∑ x, b (p x)) =
-      ∑ j, ((Finset.univ.filter fun x => p x = j).card : ℝ) * b j := by
-  calc
-    (∑ x, b (p x)) = ∑ x, ∑ j, if p x = j then b j else 0 := by
-      apply Finset.sum_congr rfl
-      intro x _
-      simp
-    _ = ∑ j, ∑ x, if p x = j then b j else 0 := Finset.sum_comm
-    _ = _ := by
-      apply Finset.sum_congr rfl
-      intro j _
-      rw [← Finset.sum_filter]
-      simp
-
-theorem sum_sq_eq_fiber_card (p : A → J) (a : A → ℝ) (b : J → ℝ)
-    (hab : ∀ x, a x = b (p x)) :
-    (∑ x, a x ^ 2) =
-      ∑ j, ((Finset.univ.filter fun x => p x = j).card : ℝ) * b j ^ 2 := by
-  simpa only [hab] using sum_comp_eq_fiber_card p (fun j => b j ^ 2)
-
-/-- If every orbit has the same size, its multiplicity factors out exactly. -/
-theorem sum_sq_eq_uniform_fiber_card (p : A → J) (a : A → ℝ) (b : J → ℝ)
-    (hab : ∀ x, a x = b (p x)) (n : ℕ)
-    (hn : ∀ j, (Finset.univ.filter fun x => p x = j).card = n) :
-    (∑ x, a x ^ 2) = (n : ℝ) * ∑ j, b j ^ 2 := by
-  rw [sum_sq_eq_fiber_card p a b hab, Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro j _
-  rw [hn]
-
 /-- Two coefficient arrays with the same orbit values have exactly the ratio
 of their orbit multiplicities. Cross multiplication includes zero-energy
-functions without dividing by their norm. -/
+functions without dividing by their norm. Count compatible pairs in either
+order, without choosing representatives of the common fibers. -/
 theorem fiber_constant_energy_cross_mul (p : A → J) (q : B → J)
     (hp : Function.Surjective p) (hq : Function.Surjective q)
     (a : A → ℝ) (b : B → ℝ)
@@ -506,18 +426,18 @@ theorem fiber_constant_energy_cross_mul (p : A → J) (q : B → J)
     (hA : ∀ j, (Finset.univ.filter fun x => p x = j).card = nA)
     (hB : ∀ j, (Finset.univ.filter fun y => q y = j).card = nB) :
     (nB : ℝ) * (∑ x, a x ^ 2) = (nA : ℝ) * ∑ y, b y ^ 2 := by
-  let c : J → ℝ := fun j => b (Classical.choose (hq j))
-  have ha : ∀ x, a x = c (p x) := by
-    intro x
-    exact hab x (Classical.choose (hq (p x)))
-      (Classical.choose_spec (hq (p x))).symm
-  have hb : ∀ y, b y = c (q y) := by
-    intro y
-    obtain ⟨x, hx⟩ := hp (q y)
-    exact (hab x y hx).symm.trans (by simpa only [hx] using ha x)
-  rw [sum_sq_eq_uniform_fiber_card p a c ha nA hA,
-    sum_sq_eq_uniform_fiber_card q b c hb nB hB]
-  ring
+  calc
+    _ = ∑ x, ∑ y with q y = p x, a x ^ 2 := by
+      simp [hB, Finset.mul_sum]
+    _ = ∑ y, ∑ x with p x = q y, b y ^ 2 := by
+      simp_rw [Finset.sum_filter]
+      rw [Finset.sum_comm]
+      apply Finset.sum_congr rfl
+      intro y _
+      apply Finset.sum_congr rfl
+      intro x _
+      by_cases h : p x = q y <;> simp [h, eq_comm, hab x y]
+    _ = _ := by simp [hA, Finset.mul_sum]
 
 end FiniteFibers
 
@@ -531,24 +451,6 @@ variable {E F J : Type*}
   [FiniteDimensional F2 E] [FiniteDimensional F2 F]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] [Fintype J]
 
-/-- Parseval grouped by any genuine finite classification of frequencies. -/
-theorem synthesis_energy_grouped (p : (F →ₗ[F2] E) → J)
-    (a : (F →ₗ[F2] E) → ℝ) (b : J → ℝ) (hab : ∀ S, a S = b (p S)) :
-    (𝔼 X, synthesis a X ^ 2) =
-      ∑ j, ((Finset.univ.filter fun S => p S = j).card : ℝ) * b j ^ 2 := by
-  rw [synthesis_energy]
-  exact sum_sq_eq_fiber_card p a b hab
-
-/-- In particular, basis-invariant coefficients may be grouped by their
-actual kernels. The invariance premise is supplied separately by the proved
-change-of-basis theorem, not by any inverse or hypercontractive hypothesis. -/
-theorem synthesis_energy_by_kernel [Fintype (Submodule F2 F)]
-    (a : (F →ₗ[F2] E) → ℝ) (b : Submodule F2 F → ℝ)
-    (hab : ∀ S, a S = b S.ker) :
-    (𝔼 X, synthesis a X ^ 2) =
-      ∑ K : Submodule F2 F,
-        ((Finset.univ.filter fun S : F →ₗ[F2] E => S.ker = K).card : ℝ) * b K ^ 2 :=
-  synthesis_energy_grouped (fun S => S.ker) a b hab
 
 end FourierFibers
 end
@@ -585,14 +487,9 @@ theorem tracePair_prod (S : H →ₗ[F2] U) (T : H →ₗ[F2] V)
     linearTracePair X (S.prod T) =
       linearTracePair (X.comp (LinearMap.inl F2 U V)) S +
       linearTracePair (X.comp (LinearMap.inr F2 U V)) T := by
-  have hc : X.comp (S.prod T) =
-      (X.comp (LinearMap.inl F2 U V)).comp S +
-        (X.comp (LinearMap.inr F2 U V)).comp T := by
-    apply LinearMap.ext
-    intro h
-    change X (S h, T h) = X (S h, 0) + X (0, T h)
-    simpa only [Prod.mk_add_mk, add_zero, zero_add] using
-      X.map_add (S h, 0) (0, T h)
+  have hc := LinearMap.coprod_comp_prod
+    (X.comp (LinearMap.inl F2 U V)) (X.comp (LinearMap.inr F2 U V)) S T
+  rw [LinearMap.coprod_comp_inl_inr] at hc
   simp only [linearTracePair, hc, map_add]
 
 /-- Exact complex-valued phase splitting into two frequency blocks. -/
@@ -630,17 +527,6 @@ variable {A W D B C : Type*}
   [AddCommGroup D] [Module F2 D] [AddCommGroup B] [Module F2 B]
   [AddCommGroup C] [Module F2 C]
 
-/-- The three actual block phases of the assembled Hybrid frequency. -/
-theorem character_assemble {z : B →ₗ[F2] W}
-    (p : Coordinates (A := A) (D := D) (C := C) z)
-    (X : (A × (W × D)) →ₗ[F2] (B × C)) :
-    linearTraceCharacter (assemble p) X =
-      linearTraceCharacter p.alpha (X.comp (LinearMap.inl F2 A (W × D))) *
-        (linearTraceCharacter p.psi
-          ((X.comp (LinearMap.inr F2 A (W × D))).comp (LinearMap.inl F2 W D)) *
-        linearTraceCharacter (p.v.comp (LinearMap.snd F2 B C))
-          ((X.comp (LinearMap.inr F2 A (W × D))).comp (LinearMap.inr F2 W D))) := by
-  simp only [assemble, character_prod]
 
 /-- The real phase factorization used in the coefficient fiber sum. -/
 theorem character_assemble_re {z : B →ₗ[F2] W}
@@ -654,23 +540,6 @@ theorem character_assemble_re {z : B →ₗ[F2] W}
           ((X.comp (LinearMap.inr F2 A (W × D))).comp (LinearMap.inr F2 W D))).re) := by
   simp only [assemble, character_prod_re]
 
-/-- The ambient character is exactly the small character after restricting
-the primal map along the last-block embedding. -/
-theorem character_assemble_eq_fullCoordinates {z : B →ₗ[F2] W}
-    (p : Coordinates (A := A) (D := D) (C := C) z)
-    (X : (A × (W × D)) →ₗ[F2] (B × C)) :
-    linearTraceCharacter (assemble p) X =
-      linearTraceCharacter (fullCoordinates p) (X.comp (embedLast p.v)) := by
-  simp only [assemble_eq_embedLast_comp, linearTraceCharacter_apply,
-    linearTracePair, LinearMap.comp_assoc]
-
-/-- Real-valued form of the exact small-character transport. -/
-theorem character_assemble_eq_fullCoordinates_re {z : B →ₗ[F2] W}
-    (p : Coordinates (A := A) (D := D) (C := C) z)
-    (X : (A × (W × D)) →ₗ[F2] (B × C)) :
-    (linearTraceCharacter (assemble p) X).re =
-      (linearTraceCharacter (fullCoordinates p) (X.comp (embedLast p.v))).re :=
-  congrArg Complex.re (character_assemble_eq_fullCoordinates p X)
 
 end AdaptedCoordinates
 end
@@ -725,18 +594,6 @@ theorem linearCoeff_hybridDerivative
   by_cases hH : LinearIdentities.Hybrid S A B <;>
     by_cases hC : Restriction.compressFrequency A B S = Z <;> simp [hH, hC]
 
-/-- Exact normalized derivative energy, with counting measure on frequencies. -/
-theorem hybridDerivative_energy_eq_coefficients
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    [Fintype (B →ₗ[F2] (E ⧸ A))]
-    (T : E →ₗ[F2] F) (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 N, hybridDerivative A B T f N ^ 2) =
-      ∑ Z : B →ₗ[F2] (E ⧸ A),
-        (∑ S : F →ₗ[F2] E,
-          if LinearIdentities.Hybrid S A B ∧ Restriction.compressFrequency A B S = Z
-          then linearCoeff f S * (linearTraceCharacter S T).re else 0) ^ 2 := by
-  rw [← linear_parseval]
-  simp_rw [linearCoeff_hybridDerivative]
 
 end General
 
@@ -747,51 +604,18 @@ variable {R A U B C : Type*} [Ring R]
   [AddCommGroup B] [Module R B] [AddCommGroup C] [Module R C]
 
 /-- The first factor, regarded as its actual coordinate subspace. -/
-def leftRangeEquiv : B ≃ₗ[R] LinearMap.range (LinearMap.inl R B C) where
-  toFun b := ⟨(b, 0), ⟨b, rfl⟩⟩
-  invFun x := x.val.1
-  left_inv _ := rfl
-  right_inv := by
-    rintro ⟨x, hx⟩
-    obtain ⟨b, rfl⟩ := hx
-    rfl
-  map_add' _ _ := by apply Subtype.ext; simp
-  map_smul' _ _ := by apply Subtype.ext; simp
+def leftRangeEquiv : B ≃ₗ[R] LinearMap.range (LinearMap.inl R B C) :=
+  LinearEquiv.ofInjective (LinearMap.inl R B C) (fun _ _ h => congrArg Prod.fst h)
 
 @[simp] theorem leftRangeEquiv_coe (b : B) :
     (leftRangeEquiv (R := R) (C := C) b : B × C) = (b, 0) := rfl
 
-/-- The second projection descends through the first-factor quotient. -/
-def quotientRightMap :
-    ((A × U) ⧸ LinearMap.range (LinearMap.inl R A U)) →ₗ[R] U :=
-  (LinearMap.range (LinearMap.inl R A U)).liftQ (LinearMap.snd R A U) (by
-    rintro x ⟨a, rfl⟩
-    rfl)
-
-@[simp] theorem quotientRightMap_mkQ (x : A × U) :
-    quotientRightMap (R := R)
-      ((LinearMap.range (LinearMap.inl R A U)).mkQ x) = x.2 := rfl
-
 /-- The quotient by the first coordinate has the second coordinate as a
 canonical linear presentation. -/
 def quotientRightEquiv :
-    ((A × U) ⧸ LinearMap.range (LinearMap.inl R A U)) ≃ₗ[R] U where
-  toLinearMap := quotientRightMap
-  invFun u := (LinearMap.range (LinearMap.inl R A U)).mkQ (0, u)
-  left_inv := by
-    intro q
-    obtain ⟨⟨a, u⟩, rfl⟩ := (LinearMap.range (LinearMap.inl R A U)).mkQ_surjective q
-    change (LinearMap.range (LinearMap.inl R A U)).mkQ (0, u) =
-      (LinearMap.range (LinearMap.inl R A U)).mkQ (a, u)
-    have hz : (LinearMap.range (LinearMap.inl R A U)).mkQ (a, 0) = 0 :=
-      (Submodule.Quotient.mk_eq_zero _).mpr ⟨a, rfl⟩
-    calc
-      _ = (LinearMap.range (LinearMap.inl R A U)).mkQ (a, 0) +
-          (LinearMap.range (LinearMap.inl R A U)).mkQ (0, u) := by rw [hz, zero_add]
-      _ = (LinearMap.range (LinearMap.inl R A U)).mkQ ((a, 0) + (0, u)) :=
-        (map_add _ _ _).symm
-      _ = _ := by simp
-  right_inv _ := rfl
+    ((A × U) ⧸ LinearMap.range (LinearMap.inl R A U)) ≃ₗ[R] U :=
+  (Submodule.quotEquivOfEq _ _ (LinearMap.range_inl R A U)).trans
+    ((LinearMap.snd R A U).quotKerEquivOfSurjective (fun u => ⟨(0, u), rfl⟩))
 
 @[simp] theorem quotientRightEquiv_mkQ (x : A × U) :
     quotientRightEquiv (R := R)
@@ -800,21 +624,9 @@ def quotientRightEquiv :
 /-- The exact change of frequency coordinates for a product restriction. -/
 def productFrequencyEquiv :
     ((LinearMap.range (LinearMap.inl R B C)) →ₗ[R]
-      ((A × U) ⧸ LinearMap.range (LinearMap.inl R A U))) ≃ (B →ₗ[R] U) where
-  toFun Z := (quotientRightEquiv (R := R) (A := A) (U := U)).toLinearMap.comp
-    (Z.comp (leftRangeEquiv (R := R) (B := B) (C := C)).toLinearMap)
-  invFun Z := (quotientRightEquiv (R := R) (A := A) (U := U)).symm.toLinearMap.comp
-    (Z.comp (leftRangeEquiv (R := R) (B := B) (C := C)).symm.toLinearMap)
-  left_inv Z := by
-    apply LinearMap.ext
-    intro b
-    simp only [LinearMap.comp_apply, LinearEquiv.coe_coe,
-      LinearEquiv.apply_symm_apply, LinearEquiv.symm_apply_apply]
-  right_inv Z := by
-    apply LinearMap.ext
-    intro b
-    simp only [LinearMap.comp_apply, LinearEquiv.coe_coe,
-      LinearEquiv.apply_symm_apply, LinearEquiv.symm_apply_apply]
+      ((A × U) ⧸ LinearMap.range (LinearMap.inl R A U))) ≃ (B →ₗ[R] U) :=
+  (LinearEquiv.arrowCongrAddEquiv (leftRangeEquiv (R := R) (B := B) (C := C)).symm
+    (quotientRightEquiv (R := R) (A := A) (U := U))).toEquiv
 
 end ProductEquivalences
 
@@ -850,37 +662,12 @@ theorem compressFrequency_eq_iff_product
       (LinearMap.range (LinearMap.inl F2 B C)) S = Z ↔
     (LinearMap.snd F2 A U).comp (S.comp (LinearMap.inl F2 B C)) =
       productFrequencyEquiv Z := by
-  constructor
-  · intro h
-    rw [← productFrequencyEquiv_compressFrequency S, h]
-  · intro h
-    apply productFrequencyEquiv.injective
-    rw [productFrequencyEquiv_compressFrequency, h]
+  rw [← productFrequencyEquiv_compressFrequency S, Equiv.apply_eq_iff_eq]
 
 variable [Finite A] [Finite U] [Finite B] [Finite C]
   [Fintype ((A × U) →ₗ[F2] (B × C))]
   [Fintype ((B × C) →ₗ[F2] (A × U))] [Fintype (B →ₗ[F2] U)]
 
-/-- The actual Hybrid derivative energy in product coordinates. The sum is
-over ordinary block frequencies, with no quotient or basis multiplicity. -/
-theorem hybridDerivative_product_energy_eq_coefficients
-    (T : (A × U) →ₗ[F2] (B × C))
-    (f : ((A × U) →ₗ[F2] (B × C)) → ℝ) :
-    (𝔼 N, hybridDerivative (LinearMap.range (LinearMap.inl F2 A U))
-      (LinearMap.range (LinearMap.inl F2 B C)) T f N ^ 2) =
-      ∑ Z : B →ₗ[F2] U,
-        (∑ S : (B × C) →ₗ[F2] (A × U),
-          if LinearIdentities.Hybrid S (LinearMap.range (LinearMap.inl F2 A U))
-              (LinearMap.range (LinearMap.inl F2 B C)) ∧
-              (LinearMap.snd F2 A U).comp (S.comp (LinearMap.inl F2 B C)) = Z
-          then linearCoeff f S * (linearTraceCharacter S T).re else 0) ^ 2 := by
-  let : Fintype ((LinearMap.range (LinearMap.inl F2 B C)) →ₗ[F2]
-      ((A × U) ⧸ LinearMap.range (LinearMap.inl F2 A U))) :=
-    Fintype.ofEquiv (B →ₗ[F2] U) productFrequencyEquiv.symm
-  rw [hybridDerivative_energy_eq_coefficients]
-  apply Fintype.sum_equiv productFrequencyEquiv
-  intro Z
-  simp_rw [compressFrequency_eq_iff_product]
 
 end ProductEnergy
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy

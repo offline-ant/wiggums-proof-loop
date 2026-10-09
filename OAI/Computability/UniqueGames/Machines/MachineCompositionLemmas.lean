@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
 import OAI.Computability.UniqueGames.Machines.Runtime
 
@@ -22,6 +23,11 @@ def advance {σ : Type} (step : σ → Option σ) (state : Option σ) : Option �
 
 @[simp] theorem advance_some {σ : Type} (step : σ → Option σ) (state : σ) :
     advance step (some state) = step state := rfl
+
+/-- Concatenate two iterated-transition traces. Shared by every machine proof. -/
+theorem iterate_trans {α : Type*} {f : α → α} {m n : Nat} {a b c : α}
+    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
+  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 @[simp] theorem advance_iterate_none {σ : Type} (step : σ → Option σ) (n : Nat) :
     (advance step)^[n] none = none := by
@@ -118,32 +124,6 @@ theorem compositionBudget_le (first second intermediate : Polynomial Nat)
     Polynomial.eval_C, Polynomial.eval_one, Polynomial.eval_comp]
   omega
 
-def fourPhaseExecution {σ : Type} (step : σ → Option σ)
-    (start afterFirst afterTransfer₁ afterTransfer₂ : σ) (finish : Option σ)
-    (first second intermediate : Polynomial Nat) (inputLength intermediateLength : Nat)
-    (intermediateBound : intermediateLength ≤ intermediate.eval inputLength)
-    (runFirst : StateTransition.EvalsToInTime step start (some afterFirst) (first.eval inputLength))
-    (transfer₁ : StateTransition.EvalsToInTime step afterFirst (some afterTransfer₁)
-      (intermediateLength + 1))
-    (transfer₂ : StateTransition.EvalsToInTime step afterTransfer₁ (some afterTransfer₂)
-      (intermediateLength + 1))
-    (runSecond : StateTransition.EvalsToInTime step afterTransfer₂ finish
-      (second.eval intermediateLength)) :
-    StateTransition.EvalsToInTime step start finish
-      ((compositionPolynomial first second intermediate).eval inputLength) := by
-  let firstTwo := StateTransition.EvalsToInTime.trans step _ _ start afterFirst
-    (some afterTransfer₁) runFirst transfer₁
-  let firstThree := StateTransition.EvalsToInTime.trans step _ _ start afterTransfer₁
-    (some afterTransfer₂) firstTwo transfer₂
-  let allFour := StateTransition.EvalsToInTime.trans step _ _ start afterTransfer₂
-    finish firstThree runSecond
-  refine {
-    toEvalsTo := allFour.toEvalsTo
-    steps_le_m := Nat.le_trans allFour.steps_le_m ?_
-  }
-  have bounded := compositionBudget_le first second intermediate inputLength intermediateLength
-    intermediateBound
-  omega
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineComposition
 
@@ -166,9 +146,6 @@ def configuration (h : Γ = Δ) (source : Cfg Γ Λ σ) : Cfg Δ Λ σ := h ▸ 
 def program (h : Γ = Δ) (source : Λ → Stmt Γ Λ σ) : Λ → Stmt Δ Λ σ :=
   fun label => statement h (source label)
 
-abbrev castStatement (h : Γ = Δ) (source : Stmt Γ Λ σ) : Stmt Δ Λ σ := statement h source
-abbrev castConfiguration (h : Γ = Δ) (source : Cfg Γ Λ σ) : Cfg Δ Λ σ := configuration h source
-abbrev castProgram (h : Γ = Δ) (source : Λ → Stmt Γ Λ σ) : Λ → Stmt Δ Λ σ := program h source
 
 @[simp] theorem tapes_rfl (source : ∀ k, List (Γ k)) : tapes rfl source = source := rfl
 @[simp] theorem statement_rfl (source : Stmt Γ Λ σ) : statement rfl source = source := rfl
@@ -181,26 +158,10 @@ abbrev castProgram (h : Γ = Δ) (source : Λ → Stmt Γ Λ σ) : Λ → Stmt �
 @[simp] theorem statement_roundtrip (h : Γ = Δ) (source : Stmt Δ Λ σ) :
     statement h (statement h.symm source) = source := by cases h; rfl
 
-@[simp] theorem statement_symm_roundtrip (h : Γ = Δ) (source : Stmt Γ Λ σ) :
-    statement h.symm (statement h source) = source := by cases h; rfl
-
-@[simp] theorem configuration_roundtrip (h : Γ = Δ) (source : Cfg Δ Λ σ) :
-    configuration h (configuration h.symm source) = source := by cases h; rfl
-
-@[simp] theorem configuration_symm_roundtrip (h : Γ = Δ) (source : Cfg Γ Λ σ) :
-    configuration h.symm (configuration h source) = source := by cases h; rfl
-
-@[simp] theorem program_roundtrip (h : Γ = Δ) (source : Λ → Stmt Δ Λ σ) :
-    program h (program h.symm source) = source := by cases h; rfl
 
 @[simp] theorem program_symm_roundtrip (h : Γ = Δ) (source : Λ → Stmt Γ Λ σ) :
     program h.symm (program h source) = source := by cases h; rfl
 
-@[simp] theorem tapes_roundtrip (h : Γ = Δ) (source : ∀ k, List (Δ k)) :
-    tapes h (tapes h.symm source) = source := by cases h; rfl
-
-@[simp] theorem tapes_symm_roundtrip (h : Γ = Δ) (source : ∀ k, List (Γ k)) :
-    tapes h.symm (tapes h source) = source := by cases h; rfl
 
 @[simp] theorem configuration_label (h : Γ = Δ) (source : Cfg Γ Λ σ) :
     (configuration h source).l = source.l := by cases h; rfl
@@ -583,21 +544,6 @@ theorem stepAux_blockMapAt (src dst : K) (F : Buffer N → Buffer M)
   rw [blockMapAt, stepAux_blockStmt src dst F _ hne bits suffix state tapes hinput]
   cases exit <;> rfl
 
-/-- Placement in an arbitrary program gives one actual TM2 transition. -/
-theorem step_blockMapAt (src dst : K) (F : Buffer N → Buffer M)
-    (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N))
-    (label : Λ) (hprogram : program label = blockMapAt src dst F exit)
-    (hne : src ≠ dst) (bits : Buffer N) (suffix : List Bool)
-    (state : σ × Buffer N) (tapes : K → List Bool)
-    (hinput : tapes src = List.ofFn bits ++ suffix) :
-    TM2.step program { l := some label, var := state, stk := tapes } =
-      some { l := exit
-             var := (state.1, emptyBuffer N)
-             stk := Function.update (Function.update tapes src suffix) dst
-               (List.ofFn (F bits) ++ tapes dst) } := by
-  simp only [TM2.step, hprogram,
-    stepAux_blockMapAt src dst F exit hne bits suffix state tapes hinput]
 
 end Block
 
@@ -704,32 +650,6 @@ theorem statementPushBound (e : σ ≃ τ) (q : Stmt Γ Λ σ) :
   induction q <;>
     simp_all only [statement, MachineControl.statement, Runtime.statementPushBound]
 
-/-- Exactly the same finite label set supports the translated statement. -/
-theorem supportsStmt_iff (e : σ ≃ τ) (S : Finset Λ) (q : Stmt Γ Λ σ) :
-    SupportsStmt S (statement e q) ↔ SupportsStmt S q := by
-  induction q with
-  | push k f next ih =>
-      simpa only [statement, MachineControl.statement, SupportsStmt] using ih
-  | peek k f next ih =>
-      simpa only [statement, MachineControl.statement, SupportsStmt] using ih
-  | pop k f next ih =>
-      simpa only [statement, MachineControl.statement, SupportsStmt] using ih
-  | load f next ih =>
-      simpa only [statement, MachineControl.statement, SupportsStmt] using ih
-  | branch f yes no ihYes ihNo =>
-      simp only [statement, MachineControl.statement, SupportsStmt, ihYes, ihNo]
-  | goto f =>
-      change (∀ state : τ, f (e.symm state) ∈ S) ↔ ∀ state : σ, f state ∈ S
-      constructor
-      · intro h state
-        simpa only [Equiv.symm_apply_apply] using h (e state)
-      · intro h state
-        exact h (e.symm state)
-  | halt => rfl
-
-theorem supports_iff [Inhabited Λ] (e : σ ≃ τ) (source : Λ → Stmt Γ Λ σ)
-    (S : Finset Λ) : Supports (program e source) S ↔ Supports source S := by
-  simp only [Supports, program, supportsStmt_iff]
 
 variable [DecidableEq K]
 
@@ -762,17 +682,6 @@ theorem step_transport (e : σ ≃ τ) (source : Λ → Stmt Γ Λ σ) (c : Cfg 
           rw [stepAux_transport]
           rfl
 
-theorem step_iff (e : σ ≃ τ) (source : Λ → Stmt Γ Λ σ) (a b : Cfg Γ Λ σ) :
-    step (program e source) (configuration e a) = some (configuration e b) ↔
-      step source a = some b := by
-  rw [step_transport]
-  change (step source a).map (configuration e) = (some b).map (configuration e) ↔ _
-  constructor
-  · intro h
-    apply Option.map_injective (configurationEquiv e).injective
-    change (step source a).map (configuration e) = (some b).map (configuration e)
-    exact h
-  · exact congrArg (Option.map (configuration e))
 
 theorem advance_transport (e : σ ≃ τ) (source : Λ → Stmt Γ Λ σ)
     (c : Option (Cfg Γ Λ σ)) :

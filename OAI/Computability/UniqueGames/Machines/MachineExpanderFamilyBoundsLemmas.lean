@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamilyTapes
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamilyTransferLemmas
 import OAI.Computability.UniqueGames.Machines.MachineExpanderTable
@@ -106,22 +107,10 @@ theorem resizeSum_succ {d : Nat} (H : Table (cloudSize d) d) (level : Nat) :
     resizeSum H (level + 1) = resizeSum H level + resizeCost (family H level) H := by
   simp only [resizeSum, Finset.sum_range_succ]
 
-theorem resizeSum_add {d : Nat} (H : Table (cloudSize d) d) (start count : Nat) :
-    resizeSum H (start + count) = resizeSum H start +
-      ∑ i ∈ Finset.range count, resizeCost (family H (start + i)) H :=
-  Finset.sum_range_add (fun i => resizeCost (family H i) H) start count
 
 noncomputable def familyBudget {d : Nat} (H : Table (cloudSize d) d) (level : Nat) : Nat :=
   resizeSum H level + level + 3
 
-@[simp] theorem familyBudget_zero {d : Nat} (H : Table (cloudSize d) d) :
-    familyBudget H 0 = 3 := by simp [familyBudget]
-
-theorem familyBudget_succ {d : Nat} (H : Table (cloudSize d) d) (level : Nat) :
-    familyBudget H (level + 1) =
-      familyBudget H level + resizeCost (family H level) H + 1 := by
-  simp only [familyBudget, resizeSum_succ]
-  omega
 
 theorem resizeSum_le {d : Nat} (H : Table (cloudSize d) d)
     (growth : 1 < cloudSize d) (level : Nat) :

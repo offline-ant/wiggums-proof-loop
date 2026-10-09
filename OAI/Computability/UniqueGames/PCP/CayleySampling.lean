@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Logic.Equiv.Prod
 import OAI.Computability.UniqueGames.PCP.AssignmentTester
 
@@ -53,10 +54,6 @@ def sampleSplitEquiv (χ : V → Bool) (flip : V → V)
     (hflip : Function.Involutive flip) (hχ : ∀ x, χ (flip x) = !(χ x)) (g : D → V) :
     (sampleSplitEquiv χ flip hflip hχ g).1 = fun d => χ (g d) := rfl
 
-theorem card_boolean_split [Fintype V] (χ : V → Bool) (flip : V → V)
-    (hflip : Function.Involutive flip) (hχ : ∀ x, χ (flip x) = !(χ x)) :
-    Fintype.card V = 2 * Fintype.card (FalseFiber χ) := by
-  simpa using Fintype.card_congr (booleanSplitEquiv χ flip hflip hχ)
 
 theorem expect_boolean_samples [Fintype V] [Nonempty V] [Fintype D] [DecidableEq D]
     (χ : V → Bool) (flip : V → V) (hflip : Function.Involutive flip)
@@ -96,24 +93,9 @@ theorem expect_parity_samples (s : Cube I) (hs : s ≠ fun _ => false)
     (𝔼 g : D → Cube I, F (fun d => AssignmentTester.parity s (g d))) =
       𝔼 b : D → Bool, F b := by
   obtain ⟨i, hi⟩ := exists_true_of_ne_zero s hs
-  exact expect_boolean_samples (AssignmentTester.parity s) (AssignmentTester.flipAt i)
-    (AssignmentTester.flipAt_twice i)
-    (fun x => AssignmentTester.parity_flipAt s i x hi) F
+  exact expect_boolean_samples (AssignmentTester.parity s) (cubeToggle i)
+    (cubeToggle_twice i) (fun x => AssignmentTester.parity_cubeToggle s i x hi) F
 
-/-- The same joint law expressed with the actual real Walsh character values. -/
-theorem expect_walsh_samples (s : Cube I) (hs : s ≠ fun _ => false)
-    (F : (D → ℝ) → ℝ) :
-    (𝔼 g : D → Cube I, F (fun d => walsh s (g d))) =
-      𝔼 b : D → Bool, F (fun d => bitSign (b d)) := by
-  simpa only [AssignmentTester.bitSign_parity] using
-    expect_parity_samples s hs (fun b => F (fun d => bitSign (b d)))
-
-/-- In particular, any test of the empirical Walsh bias has the corresponding
-uniform Boolean-word average. This is the eigenvalue sampling law. -/
-theorem expect_walsh_mean (s : Cube I) (hs : s ≠ fun _ => false) (F : ℝ → ℝ) :
-    (𝔼 g : D → Cube I, F (𝔼 d, walsh s (g d))) =
-      𝔼 b : D → Bool, F (𝔼 d, bitSign (b d)) :=
-  expect_walsh_samples s hs (fun z => F (𝔼 d, z d))
 
 end Walsh
 

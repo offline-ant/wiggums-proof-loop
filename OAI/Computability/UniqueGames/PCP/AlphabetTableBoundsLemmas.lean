@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.NameCompaction
@@ -88,18 +89,6 @@ theorem build_total_le (input : GenericGraphTables.Table q) :
       Nat.add_le_add (Nat.mul_le_mul_left _ hv) (Nat.mul_le_mul_left _ he)
     _ = _ := by ring
 
-theorem build_vertices_le (input : GenericGraphTables.Table q) :
-    (Table.build input).vertices ≤
-      AlphabetGraphBounds.sizeFactor q * (input.vertices + input.darts) :=
-  (Nat.le_add_right _ _).trans (build_total_le input)
-
-theorem build_darts_le (input : GenericGraphTables.Table q) :
-    (Table.build input).darts ≤
-      AlphabetGraphBounds.sizeFactor q * (input.vertices + input.darts) :=
-  (Nat.le_add_left _ _).trans (build_total_le input)
-
-theorem sizeFactor_positive : 0 < AlphabetGraphBounds.sizeFactor q :=
-  AlphabetGraphBounds.sizeFactor_positive q
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTableBounds
 
@@ -673,76 +662,6 @@ theorem twelve_query_clause_count (V : FiniteVerifier 12) :
     (convert V (by decide)).clauses.length = V.events * 40960 := by
   simpa only [twelve_query_factor] using convert_clause_count V (by decide)
 
-def padLiteral {n : Nat} (l : Literal n) : Literal (n + 1) :=
-  ⟨Fin.castAdd 1 l.variableIndex, l.positive⟩
-
-def padClause {n : Nat} (clause : Clause n) : Clause (n + 1) :=
-  #v[padLiteral clause[0], padLiteral clause[1], padLiteral clause[2]]
-
-def padTautology (n : Nat) : Clause (n + 1) :=
-  let v := Fin.natAdd n (0 : Fin 1)
-  #v[⟨v, true⟩, ⟨v, false⟩, ⟨v, true⟩]
-
-def padInput (F : Formula) : Formula where
-  «variables» := F.variables + 1
-  clauses := F.clauses.map padClause ++ [padTautology F.variables]
-
-theorem padClause_eval {n : Nat} (c : Clause n) (B : Fin (n + 1) → Bool) :
-    (padClause c).eval B = c.eval (fun v => B (Fin.castAdd 1 v)) := rfl
-
-theorem padTautology_satisfied (n : Nat) (B : Fin (n + 1) → Bool) :
-    (padTautology n).eval B = true := by
-  simp [padTautology, Clause.eval, Literal.eval]
-
-theorem padInput_satisfiable_iff (F : Formula) : (padInput F).Satisfiable ↔ F.Satisfiable := by
-  change (∃ B : Fin (F.variables + 1) → Bool,
-    ∀ c ∈ F.clauses.map padClause ++ [padTautology F.variables], c.eval B = true) ↔ _
-  constructor
-  · rintro ⟨B, hB⟩
-    refine ⟨fun v => B (Fin.castAdd 1 v), fun c hc => ?_⟩
-    have hmem : padClause c ∈ (padInput F).clauses := by
-      apply List.mem_append.mpr
-      exact Or.inl (List.mem_map.mpr ⟨c, hc, rfl⟩)
-    exact (padClause_eval c B).symm.trans (hB _ hmem)
-  · rintro ⟨A, hA⟩
-    let B : Fin (F.variables + 1) → Bool := Fin.addCases A (fun _ => false)
-    refine ⟨B, fun c hc => ?_⟩
-    rcases List.mem_append.mp hc with original | padding
-    · obtain ⟨d, hd, rfl⟩ := List.mem_map.mp original
-      have h := hA d hd
-      simpa only [padClause_eval, B, Fin.addCases_left] using h
-    · have hc : c = padTautology F.variables := by simpa using padding
-      subst c
-      exact padTautology_satisfied F.variables B
-
-@[simp] theorem padInput_clause_count (F : Formula) :
-    (padInput F).clauses.length = F.clauses.length + 1 := by simp [padInput]
-
-theorem padInput_nonempty (F : Formula) : (padInput F).clauses ≠ [] := by
-  intro empty
-  have size := padInput_clause_count F
-  rw [empty, List.length_nil] at size
-  omega
-
-def prepareInput (F : Formula) : Formula := NameCompaction.compact (padInput F)
-
-theorem prepareInput_satisfiable_iff (F : Formula) :
-    (prepareInput F).Satisfiable ↔ F.Satisfiable :=
-  (NameCompaction.compact_satisfiable_iff (padInput F)).trans (padInput_satisfiable_iff F)
-
-theorem prepareInput_clause_count (F : Formula) :
-    (prepareInput F).clauses.length = F.clauses.length + 1 := by
-  simp only [prepareInput, NameCompaction.compact_clause_count, padInput_clause_count]
-
-theorem prepareInput_nonempty (F : Formula) : (prepareInput F).clauses ≠ [] := by
-  intro empty
-  have h := prepareInput_clause_count F
-  rw [empty, List.length_nil] at h
-  omega
-
-theorem prepareInput_variable_bound (F : Formula) :
-    (prepareInput F).variables ≤ 3 * (F.clauses.length + 1) := by
-  simpa only [prepareInput, padInput_clause_count] using NameCompaction.compact_active_bound (padInput F)
 
 end UniqueGamesTheorem.Foundations.PCP.VerifierToCNF
 

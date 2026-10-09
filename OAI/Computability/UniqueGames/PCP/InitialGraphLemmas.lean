@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Data.Fin.Basic
 import Mathlib.Data.Fin.Tuple.Basic
@@ -42,9 +43,6 @@ instance slotFintype : Fintype Slot where
   elems := {Slot.first, Slot.second, Slot.third}
   complete := by intro s; cases s <;> simp
 
-@[simp] theorem card_slot : Fintype.card Slot = 3 := by decide
-@[simp] theorem card_label : Fintype.card Label = 8 := by
-  simp [Label, Fintype.card_prod]
 
 def variableVertex (F : Formula) (v : Fin F.variables) : Vertex F := .inl (.inl v)
 def clauseVertex (F : Formula) (i : Fin F.clauses.length) : Vertex F := .inl (.inr i)
@@ -108,10 +106,6 @@ def raw (F : Formula) : ConstraintGraph (Vertex F) (Dart F) Label where
     | inl pair => rcases pair with ⟨event, orientation⟩; cases orientation <;> rfl
     | inr u => rfl
 
-theorem raw_forward (F : Formula) (labeling : Vertex F → Label) (event : RandomEvent F) :
-    (raw F).edgeSatisfied labeling (.inl (event, false)) =
-      incidenceAccept F event (labeling (clauseVertex F event.1))
-        (labeling (variableVertex F (nameAt (clauseAt F event.1) event.2))) := rfl
 
 theorem incidenceAccept_true (F : Formula) (event : RandomEvent F) (a b : Label)
     (h : incidenceAccept F event a b = true) :
@@ -173,14 +167,6 @@ theorem raw_reflects (F : Formula) (sat : (raw F).Satisfiable) : F.Satisfiable :
 theorem raw_satisfiable_iff (F : Formula) : (raw F).Satisfiable ↔ F.Satisfiable :=
   ⟨raw_reflects F, raw_completeness F⟩
 
-@[simp] theorem card_vertex (F : Formula) :
-    Fintype.card (Vertex F) = F.variables + F.clauses.length + 1 := by
-  simp [Vertex, Fintype.card_sum]
-
-@[simp] theorem card_dart (F : Formula) :
-    Fintype.card (Dart F) = 6 * F.clauses.length + 1 := by
-  simp [Dart, RandomEvent, Fintype.card_sum, Fintype.card_prod]
-  omega
 
 abbrev CompactVertex (F : Formula) := Vertex (NameCompaction.compact F)
 abbrev CompactDart (F : Formula) := Dart (NameCompaction.compact F)
@@ -188,35 +174,6 @@ abbrev CompactDart (F : Formula) := Dart (NameCompaction.compact F)
 def build (F : Formula) : ConstraintGraph (CompactVertex F) (CompactDart F) Label :=
   raw (NameCompaction.compact F)
 
-theorem build_satisfiable_iff (F : Formula) : (build F).Satisfiable ↔ F.Satisfiable := by
-  exact (raw_satisfiable_iff (NameCompaction.compact F)).trans
-    (NameCompaction.compact_satisfiable_iff F)
-
-theorem build_vertex_bound (F : Formula) :
-    Fintype.card (CompactVertex F) ≤ 4 * F.clauses.length + 1 := by
-  have h := NameCompaction.compact_active_bound F
-  simp only [CompactVertex, card_vertex, NameCompaction.compact_clause_count]
-  omega
-
-theorem build_dart_count (F : Formula) :
-    Fintype.card (CompactDart F) = 6 * F.clauses.length + 1 := by
-  simp only [CompactDart, card_dart, NameCompaction.compact_clause_count]
-
-/-- The initial inverse-size gap follows from the original unsatisfiability,
-without a PCP, bounded-degree, or constant-gap premise. -/
-theorem build_initial_gap (F : Formula) (unsat : ¬ F.Satisfiable)
-    (labeling : CompactVertex F → Label) : 1 ≤ (build F).rejectionCount labeling := by
-  apply ConstraintGraph.rejectionCount_positive
-  intro h
-  exact unsat ((build_satisfiable_iff F).mp h)
-
-theorem build_inverse_size_gap (F : Formula) (unsat : ¬ F.Satisfiable)
-    (labeling : CompactVertex F → Label) :
-    Fintype.card (CompactDart F) ≤
-      (6 * F.clauses.length + 1) * (build F).rejectionCount labeling := by
-  rw [build_dart_count]
-  simpa only [Nat.mul_one] using
-    Nat.mul_le_mul_left (6 * F.clauses.length + 1) (build_initial_gap F unsat labeling)
 
 end UniqueGamesTheorem.Foundations.PCP.InitialGraph
 
@@ -470,20 +427,6 @@ def rotateHead (G : PortGraph V D) (n : Nat) : Walk V D (n + 1) ≃ Walk V D (n 
     (w : Walk V D (n + 1)) (j : Fin n) :
     (rotateHead G n w).2 j.succ = w.2 j.succ := rfl
 
-/-- Relabeling time coordinates is a bijection on actual port words. -/
-def permutePorts {t : Nat} (σ : Fin t ≃ Fin t) : Walk V D t ≃ Walk V D t where
-  toFun w := (w.1, fun j => w.2 (σ j))
-  invFun w := (w.1, fun j => w.2 (σ.symm j))
-  left_inv w := by
-    apply Prod.ext
-    · rfl
-    funext j
-    exact congrArg w.2 (σ.apply_symm_apply j)
-  right_inv w := by
-    apply Prod.ext
-    · rfl
-    funext j
-    exact congrArg w.2 (σ.symm_apply_apply j)
 
 def wordEnd (G : PortGraph V D) : (n : Nat) → V → (Fin n → D) → V
   | 0, v, _ => v
@@ -492,9 +435,6 @@ def wordEnd (G : PortGraph V D) : (n : Nat) → V → (Fin n → D) → V
 def endpoint (G : PortGraph V D) {n : Nat} (w : Walk V D n) : V :=
   wordEnd G n w.1 w.2
 
-theorem natCard_walk [Finite V] [Finite D] (n : Nat) :
-    Nat.card (Walk V D n) = Nat.card V * Nat.card D ^ n := by
-  simp [Walk, Nat.card_prod, Nat.card_fun]
 
 def headTailEquiv (V D : Type*) (n : Nat) :
     Walk V D (n + 1) ≃ (Walk V D n × D) where
@@ -559,9 +499,6 @@ theorem edgeAt_port (G : PortGraph V D) :
     · rfl
     · exact ih (advanceTail G w) j
 
-theorem pivotEquiv_zero_apply (G : PortGraph V D) (n : Nat) (w : Walk V D (n + 1)) :
-    pivotEquiv G n 0 w = ((w.1, w.2 0), fun j => w.2 j.succ) := by
-  cases n <;> rfl
 
 theorem pivotEquiv_succ_apply (G : PortGraph V D)
     (n : Nat) (k : Fin (n + 1)) (w : Walk V D (n + 2)) :
@@ -570,56 +507,6 @@ theorem pivotEquiv_succ_apply (G : PortGraph V D)
        Fin.cases (G.rot (w.1, w.2 0)).2
          (pivotEquiv G n k (advanceTail G w)).2) := rfl
 
-def projectedFiberEquiv {X E R : Type*} (e : X ≃ E × R) (f : X → E)
-    (he : ∀ x, (e x).1 = f x) (a : E) : {x // f x = a} ≃ R where
-  toFun x := (e x.val).2
-  invFun r := ⟨e.symm (a, r), by
-    exact (he _).symm.trans (congrArg Prod.fst (e.apply_symm_apply (a, r)))⟩
-  left_inv x := by
-    apply Subtype.ext
-    apply e.injective
-    rw [e.apply_symm_apply]
-    exact Prod.ext ((he x.val).trans x.property).symm rfl
-  right_inv r := congrArg Prod.snd (e.apply_symm_apply (a, r))
-
-def projectedEventEquiv {X E R : Type*} (e : X ≃ E × R) (f : X → E)
-    (he : ∀ x, (e x).1 = f x) (P : E → Prop) :
-    {x // P (f x)} ≃ ({a // P a} × R) where
-  toFun x := (⟨(e x.val).1, by rw [he]; exact x.property⟩, (e x.val).2)
-  invFun ar := ⟨e.symm (ar.1.val, ar.2), by
-    have h : f (e.symm (ar.1.val, ar.2)) = ar.1.val :=
-      (he _).symm.trans (congrArg Prod.fst (e.apply_symm_apply (ar.1.val, ar.2)))
-    simpa only [h] using ar.1.property⟩
-  left_inv x := by
-    apply Subtype.ext
-    exact e.symm_apply_apply x.val
-  right_inv ar := by
-    apply Prod.ext
-    · apply Subtype.ext
-      exact congrArg Prod.fst (e.apply_symm_apply (ar.1.val, ar.2))
-    · change (e (e.symm (ar.1.val, ar.2))).2 = ar.2
-      exact congrArg Prod.snd (e.apply_symm_apply (ar.1.val, ar.2))
-
-/-- Every fixed dart has exactly the same number of path realizations. -/
-theorem natCard_edgeAt_fiber (G : PortGraph V D) (n : Nat) (k : Fin (n + 1))
-    (a : Edge V D) :
-    Nat.card {w : Walk V D (n + 1) // edgeAt G n w k = a} = Nat.card D ^ n := by
-  calc
-    _ = Nat.card (Fin n → D) := Nat.card_congr
-      (projectedFiberEquiv (pivotEquiv G n k) (fun w => edgeAt G n w k)
-        (pivotEquiv_fst G n k) a)
-    _ = _ := by simp [Nat.card_fun]
-
-/-- The exact event count underlying the uniform-pivot probability law. -/
-theorem natCard_edgeAt_event (G : PortGraph V D) (n : Nat) (k : Fin (n + 1))
-    (P : Edge V D → Prop) :
-    Nat.card {w : Walk V D (n + 1) // P (edgeAt G n w k)} =
-      Nat.card {a : Edge V D // P a} * Nat.card D ^ n := by
-  calc
-    _ = Nat.card ({a : Edge V D // P a} × (Fin n → D)) := Nat.card_congr
-      (projectedEventEquiv (pivotEquiv G n k) (fun w => edgeAt G n w k)
-        (pivotEquiv_fst G n k) P)
-    _ = _ := by simp [Nat.card_prod, Nat.card_fun]
 
 def leftFromPivot (G : PortGraph V D) :
     (n : Nat) → Fin (n + 1) → V → (Fin n → D) → V
@@ -634,14 +521,6 @@ def rightFromPivot (G : PortGraph V D) :
       (wordEnd G (n + 1) (next G e.1 e.2) r)
       (fun j => rightFromPivot G n j e (fun m => r m.succ)) k
 
-theorem leftFromPivot_zero (G : PortGraph V D) (n : Nat)
-    (v : V) (r : Fin n → D) : leftFromPivot G n 0 v r = v := by
-  cases n <;> rfl
-
-theorem rightFromPivot_zero (G : PortGraph V D) (n : Nat)
-    (e : Edge V D) (r : Fin n → D) :
-    rightFromPivot G n 0 e r = wordEnd G n (next G e.1 e.2) r := by
-  cases n <;> rfl
 
 theorem leftFromPivot_actual (G : PortGraph V D) :
     ∀ (n : Nat) (k : Fin (n + 1)) (w : Walk V D (n + 1)),
@@ -836,17 +715,6 @@ theorem rejectionCount_eq_sum [Fintype E] (G : ConstraintGraph V E A)
   simp only [ConstraintGraph.rejectionCount, ConstraintGraph.rejectedDarts,
     Finset.card_eq_sum_ones, Finset.sum_filter]
 
-/-- Lifted labels reject precisely one external dart for each rejected original dart. -/
-theorem replacement_rejectionCount [Fintype E] [Fintype D] [DecidableEq A]
-    (G : ConstraintGraph V E A) (H : ∀ v, PortGraph (Cloud G v) D)
-    (labeling : V → A) :
-    (replacementGraph G H).rejectionCount (liftLabel G labeling) =
-      G.rejectionCount labeling := by
-  classical
-  simp only [rejectionCount_eq_sum, Fintype.sum_prod_type, Fintype.sum_sum_type]
-  simp
-  simp only [Finset.card_eq_sum_ones, Finset.sum_filter]
-  rfl
 
 /-- Additional darts are attached to their specified original vertex. -/
 abbrev PaddedDart (_G : ConstraintGraph V E A) (dummy : V → Type*) :=
@@ -907,11 +775,6 @@ theorem padded_satisfiable (G : ConstraintGraph V E A) (dummy : V → Type*)
   obtain ⟨labeling, hlabeling⟩ := h
   exact ⟨labeling, padded_complete G dummy labeling hlabeling⟩
 
-theorem card_paddedDart [Fintype V] [Fintype E] (G : ConstraintGraph V E A)
-    (dummy : V → Type*) [∀ v, Fintype (dummy v)] :
-    Fintype.card (PaddedDart G dummy) =
-      Fintype.card E + ∑ v, Fintype.card (dummy v) := by
-  rw [Fintype.card_sum, Fintype.card_sigma]
 
 theorem padded_rejectionCount [Fintype V] [Fintype E]
     (G : ConstraintGraph V E A) (dummy : V → Type*) [∀ v, Fintype (dummy v)]
@@ -934,28 +797,6 @@ def paddedReplacementGraph [DecidableEq A]
     ConstraintGraph (PaddedDart G dummy) (PaddedDart G dummy × (D ⊕ Unit)) A :=
   replacementGraph (paddedGraph G dummy) H
 
-theorem paddedReplacement_rejectionCount
-    [Fintype V] [Fintype E] [Fintype D] [DecidableEq A]
-    (G : ConstraintGraph V E A) (dummy : V → Type*) [∀ v, Fintype (dummy v)]
-    (H : ∀ v, PortGraph (Cloud (paddedGraph G dummy) v) D) (labeling : V → A) :
-    (paddedReplacementGraph G dummy H).rejectionCount
-        (liftLabel (paddedGraph G dummy) labeling) = G.rejectionCount labeling :=
-  (replacement_rejectionCount (paddedGraph G dummy) H labeling).trans
-    (padded_rejectionCount G dummy labeling)
-
-/-- Omitting all dummy darts recovers exactly the original dart set. -/
-def noDummyEquiv (G : ConstraintGraph V E A) :
-    PaddedDart G (fun _ : V => Empty) ≃ E where
-  toFun z := match z with
-    | Sum.inl e => e
-    | Sum.inr z => Empty.elim z.2
-  invFun := Sum.inl
-  left_inv := by
-    intro z
-    cases z with
-    | inl e => rfl
-    | inr z => exact Empty.elim z.2
-  right_inv _ := rfl
 
 end UniqueGamesTheorem.Foundations.PCP.DegreeReplacement
 

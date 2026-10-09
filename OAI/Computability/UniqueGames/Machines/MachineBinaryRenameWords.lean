@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryFormulaLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryNameSearch
 import OAI.Computability.UniqueGames.Machines.MachineBinaryParsingLemmas
@@ -80,25 +81,6 @@ theorem payload_index (F : Formula) (name : Nat) :
       (sourceNames F).idxOf name := by
   rw [tokens_payloads, BinaryOccurrenceRename.idxOf_binary_payloads]
 
-theorem token_payload_mem (cs : List Clause) (literal : Literal)
-    (mem : literal ∈ literals cs) :
-    literal.name.bits ∈ BinaryNameSearch.payloads (tokens cs) := by
-  apply List.mem_map.mpr
-  refine ⟨token literal, ?_, rfl⟩
-  exact List.mem_map.mpr ⟨literal, mem, rfl⟩
-
-theorem payloadSize_tokens (cs : List Clause) :
-    BinaryNameSearch.payloadSize (tokens cs) = BinaryEncoding.namesBitSize cs := by
-  induction cs with
-  | nil => rfl
-  | cons c cs ih =>
-      simp only [tokens, literals_cons, List.map_cons,
-        BinaryNameSearch.payloadSize_cons, token, Nat.size_eq_bits_len,
-        BinaryEncoding.namesBitSize_cons] at *
-      simpa only [BinaryEncoding.clauseNameSize, BinaryFormula.clauseNames,
-        List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
-        Nat.add_zero, Nat.add_assoc] using congrArg
-        (fun tail => (c)[0].name.size + ((c)[1].name.size + ((c)[2].name.size + tail))) ih
 
 def outputLiteral (names : List Nat) (literal : Literal) : List Bool :=
   Complexity.encodeWord (names.idxOf literal.name) ++
@@ -115,18 +97,11 @@ theorem encoded_clause (F : Formula) (c : Clause) (mem : c ∈ F.clauses) :
     BinaryOccurrenceRename.nameIndex, clauseLiterals, outputLiteral, List.append_assoc]
   rfl
 
-private theorem encodeWords_flatMap {α : Type} (xs : List α) (f : α → List Nat) :
-    Complexity.encodeWords (xs.flatMap f) =
-      xs.flatMap (fun x => Complexity.encodeWords (f x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, Complexity.encodeWords_append, ih]
-
 /-- The output contains every literal occurrence, including repetitions. -/
 theorem encoded_body (F : Formula) :
     Complexity.encodeWords ((BinaryOccurrenceRename.renamed F).clauses.flatMap
       Complexity.clauseWords) = body F := by
-  rw [encodeWords_flatMap]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   change (F.clauses.attach.map (fun c => BinaryOccurrenceRename.clause F c.val c.property)).flatMap
     (fun c => Complexity.encodeWords (Complexity.clauseWords c)) = body F
   rw [List.flatMap_map]

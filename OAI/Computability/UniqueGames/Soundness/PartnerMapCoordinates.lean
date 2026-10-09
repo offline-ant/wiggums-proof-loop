@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.Basis.Defs
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Soundness.PartnerLinearLemmas
@@ -115,16 +116,6 @@ variable (R : Type) [AddCommGroup R] [Module F2 R]
 def mapEquiv : RawCoefficients J R ≃ₗ[F2] (PartnerPoint rhs (activeOf J) →ₗ[F2] R) :=
   (partnerBasis rhs J).constr F2
 
-def coefficients (Y : PartnerPoint rhs (activeOf J) →ₗ[F2] R) : RawCoefficients J R :=
-  (mapEquiv rhs J R).symm Y
-
-theorem map_coefficients (Y : PartnerPoint rhs (activeOf J) →ₗ[F2] R) :
-    mapEquiv rhs J R (coefficients rhs J R Y) = Y :=
-  (mapEquiv rhs J R).apply_symm_apply Y
-
-theorem coefficients_map (gamma : RawCoefficients J R) :
-    coefficients rhs J R (mapEquiv rhs J R gamma) = gamma :=
-  (mapEquiv rhs J R).symm_apply_apply gamma
 
 theorem mapEquiv_apply (gamma : RawCoefficients J R) (y : PartnerPoint rhs (activeOf J)) :
     mapEquiv rhs J R gamma y = ∑ s, pointEquiv rhs J y s • gamma s := by
@@ -144,10 +135,6 @@ theorem mapEquiv_expansion (gamma : RawCoefficients J R) (y : PartnerPoint rhs (
     pointEquiv_full_second, pointEquiv_single]
   simp only [add_assoc]
 
-theorem every_map_expansion (Y : PartnerPoint rhs (activeOf J) →ₗ[F2] R)
-    (y : PartnerPoint rhs (activeOf J)) :
-    Y y = ∑ s, pointEquiv rhs J y s • coefficients rhs J R Y s := by
-  rw [← mapEquiv_apply, map_coefficients]
 
 theorem pullback_expansion (gamma : RawCoefficients J R) (slot : P → Slot)
     (x : SourcePoint rhs) :
@@ -173,22 +160,6 @@ instance partnerMapsFintype [Fintype R] :
   classical
   exact Fintype.ofEquiv (RawCoefficients J R) (mapEquiv rhs J R).toEquiv
 
-/-- Uniform independent coefficient tuples give exactly the uniform law on all maps. -/
-theorem uniform_coefficients_maps [Fintype R]
-    (H : (PartnerPoint rhs (activeOf J) →ₗ[F2] R) → ℚ) :
-    average (fun gamma : RawCoefficients J R => H (mapEquiv rhs J R gamma)) = average H :=
-  ConditionalIncidences.average_equiv (mapEquiv rhs J R).toEquiv H
-
-/-- For a uniformly sampled actual map, all raw coefficients have the product uniform law. -/
-theorem uniform_map_coefficients_product [Fintype R]
-    (H : RawSlot J → R → ℚ) :
-    average (fun Y : PartnerPoint rhs (activeOf J) →ₗ[F2] R =>
-      ∏ s, H s (coefficients rhs J R Y s)) = ∏ s, average (H s) := by
-  calc
-    _ = average (fun gamma : RawCoefficients J R => ∏ s, H s (gamma s)) :=
-      ConditionalIncidences.average_equiv (mapEquiv rhs J R).symm.toEquiv
-        (fun gamma => ∏ s, H s (gamma s))
-    _ = _ := ConditionalIncidences.average_coordinate_product H
 
 end
 

@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Decoding.CoefficientSampling
 import OAI.Computability.UniqueGames.Decoding.SparseLawLemmas
 import OAI.Computability.UniqueGames.Reduction.ExplicitLemmas
 import OAI.Computability.UniqueGames.Soundness.ActualCanonicalPullbackLemmas
@@ -35,17 +37,25 @@ variable {α B : Type*} [Fintype α]
 def pushforwardWeight (p : α → ℝ) (f : α → B) (y : B) : ℝ :=
   ∑ x, if f x = y then p x else 0
 
-theorem pushforwardWeight_pi (p : α → ℝ) (f : α → B) (k : ℕ)
-    (ys : Fin k → B) :
-    pushforwardWeight (independentWeights p k) (fun xs i => f (xs i)) ys =
-      independentWeights (pushforwardWeight p f) k ys := by
+theorem pushforwardWeight_pi_dep {I B : Type*} [Fintype I]
+    {A : I → Type*} [∀ i, Fintype (A i)]
+    (p : (i : I) → A i → ℝ) (f : (i : I) → A i → B) (ys : I → B) :
+    pushforwardWeight (fun xs : ∀ i, A i => ∏ i, p i (xs i))
+      (fun xs : ∀ i, A i => fun i => f i (xs i)) ys =
+      ∏ i, pushforwardWeight (p i) (f i) (ys i) := by
   classical
-  simp only [pushforwardWeight, independentWeights]
+  simp only [pushforwardWeight]
   rw [Fintype.prod_sum]
   apply Finset.sum_congr rfl
   intro xs _
   simp only [Fintype.prod_ite_zero, funext_iff]
-  split_ifs <;> rfl
+
+theorem pushforwardWeight_pi (p : α → ℝ) (f : α → B) (k : ℕ)
+    (ys : Fin k → B) :
+    pushforwardWeight (independentWeights p k) (fun xs i => f (xs i)) ys =
+      independentWeights (pushforwardWeight p f) k ys := by
+  convert pushforwardWeight_pi_dep (fun _ => p) (fun _ => f) ys using 1 <;>
+    congr 1 <;> exact Subsingleton.elim _ _
 
 theorem pushforwardWeight_joint_uniform_intercept {W : Type*} [Fintype W] [AddGroup W]
     (p : α → ℝ) (f : α → B) (shift : α → W) (z : W) (b : B) :
@@ -175,74 +185,6 @@ theorem uniform_rawMaps [Fintype V] (J : Finset (Fin k))
     (𝔼 gamma : RawCoefficients J V, H (rawMap J V gamma)) = 𝔼 Y, H Y := by
   exact Fintype.expect_equiv (rawMapEquiv J V) _ H (fun _ => rfl)
 
-/-- The conditional coefficient sample, with full pairs and singleton values
-kept at their occurrence-local positions. -/
-abbrev RawTuple (J : Finset (Fin k)) (V : Type) :=
-  V × ((PositionOutside J → V × V) × (PositionInside J → V))
-
-def rawTupleEquiv (J : Finset (Fin k)) : RawTuple J V ≃ RawCoefficients J V where
-  toFun a
-    | none => a.1
-    | some (.inl (j, i)) => if i = 0 then (a.2.1 j).1 else (a.2.1 j).2
-    | some (.inr j) => a.2.2 j
-  invFun gamma := ⟨gamma none,
-    ⟨(fun j => (gamma (some (.inl (j, 0))), gamma (some (.inl (j, 1))))),
-      (fun j => gamma (some (.inr j)))⟩⟩
-  left_inv a := by
-    apply Prod.ext rfl
-    apply Prod.ext
-    · funext j
-      rfl
-    · rfl
-  right_inv gamma := by
-    funext s
-    rcases s with _ | (⟨j, i⟩ | j)
-    · rfl
-    · fin_cases i <;> rfl
-    · rfl
-
-def tupleDraw (J : Finset (Fin k)) (slot : Fin k → Slot) (a : RawTuple J V)
-    (j : Fin k) : BlockDraw V :=
-  if hj : j ∈ J then .inr (ConcreteExtraction.slotIndex (slot j), a.2.2 ⟨j, hj⟩)
-  else .inl (a.2.1 ⟨j, hj⟩)
-
-omit [Module F2 V] in
-theorem tupleDraw_ambient (J : Finset (Fin k)) (slot : Fin k → Slot)
-    (a : RawTuple J V) :
-    (fun j => blockAmbient (tupleDraw J slot a j)) =
-      ambientCoefficients J V (rawTupleEquiv J a) slot := by
-  funext j i
-  by_cases hj : j ∈ J
-  · simp [tupleDraw, hj, blockAmbient, ambientCoefficients, rawTupleEquiv, Pi.single_apply]
-  · fin_cases i <;>
-      simp [tupleDraw, hj, blockAmbient, ambientCoefficients, rawTupleEquiv]
-
-theorem paddedMap_tupleDraw (rhs : Fin k → Bool) (J : Finset (Fin k))
-    (slot : Fin k → Slot) (a : RawTuple J V) :
-    paddedMap rhs (tupleDraw J slot a) a.1 =
-      (rawMap J V (rawTupleEquiv J a)).comp (rawProjection rhs J slot) := by
-  have hr := raw_represents rhs J V (rawTupleEquiv J a) slot
-  rw [← tupleDraw_ambient] at hr
-  have hc := ActualCanonical.extension_coefficients _ _ _ _ hr
-  apply (ActualEnumeration.coefficientEquiv k V).symm.injective
-  change ActualEnumeration.toCoefficients k V _ = ActualEnumeration.toCoefficients k V _
-  rw [paddedMap_toCoefficients, rawMap_pullback, coefficients_rawMap]
-  apply Prod.ext
-  · exact hc.1.symm
-  · funext j
-    exact Prod.ext (hc.2 j).1.symm (hc.2 j).2.symm
-
-/-- Conditional on every fixed mask and position choice, independently
-uniform full pairs/singletons and intercept give the uniform law on genuine
-projected-target maps followed by the actual projection. -/
-theorem uniform_fixed_projection_tuple [Fintype V] (rhs : Fin k → Bool)
-    (J : Finset (Fin k)) (slot : Fin k → Slot)
-    (H : (ActualHomogeneous.E k →ₗ[F2] V) → ℝ) :
-    (𝔼 a : RawTuple J V, H (paddedMap rhs (tupleDraw J slot a) a.1)) =
-      𝔼 Y : RawPoint J →ₗ[F2] V, H (Y.comp (rawProjection rhs J slot)) := by
-  simp_rw [paddedMap_tupleDraw]
-  exact Fintype.expect_equiv ((rawTupleEquiv J).trans (rawMapEquiv J V)) _ _ (fun _ => rfl)
-
 section Law
 
 variable [Fintype V]
@@ -357,15 +299,6 @@ theorem paddedWeights_totalVariation_eq_slope (rhs : Fin k → Bool) (β : ℝ) 
     exact uniformWeights_prod a
   rw [hp, hu, totalVariation_uniform_front]
 
-/-- Full-table bound on the coordinates of the genuine composed maps. It
-includes the affine intercept and averages all projection choices. -/
-theorem paddedWeights_totalVariation (rhs : Fin k → Bool) (β : ℝ)
-    (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    UniqueGamesTheorem.Foundations.Information.totalVariation (paddedWeights (V := V) rhs β)
-      (uniformWeights (ActualEnumeration.Coefficients k V)) ≤
-        Real.sqrt ((1 + β ^ 2 * ((Fintype.card V : ℝ) - 1) / 3) ^ k - 1) / 2 := by
-  rw [paddedWeights_totalVariation_eq_slope]
-  exact paddedSlope_totalVariation V β hβ hβ' k
 
 abbrev ProjectionChoice := Option (Fin 3)
 
@@ -443,70 +376,36 @@ theorem draw_expectation_choice_mixture (β : ℝ)
   intro dz _
   ring
 
-/-- The actual coefficient type after a choice has been fixed. -/
-def ChoiceValue (V : Type) : ProjectionChoice → Type
-  | none => V × V
-  | some _ => V
+/-- Fixed choices select from independent flat full-pair and singleton columns.
+Unused columns are discarded by the existing coefficient sampler. -/
+def flatDraw : ProjectionChoice → ((V × V) × V) → BlockDraw V
+  | none, a => .inl a.1
+  | some i, a => .inr (i, a.2)
 
-instance choiceValueFintype (c : ProjectionChoice) : Fintype (ChoiceValue V c) := by
-  cases c <;> dsimp [ChoiceValue] <;> infer_instance
-
-def choiceEmbed : (c : ProjectionChoice) → ChoiceValue V c → BlockDraw V
-  | none, ab => .inl ab
-  | some i, a => .inr (i, a)
-
-omit [AddCommGroup V] [Module F2 V] in
-theorem blockKernel_uniform_pushforward (c : ProjectionChoice) (d : BlockDraw V) :
+omit [Module F2 V] in
+theorem blockKernel_flat_pushforward (c : ProjectionChoice) (d : BlockDraw V) :
     blockKernel c d =
-      pushforwardWeight (uniformWeights (ChoiceValue V c)) (choiceEmbed c) d := by
-  cases c with
-  | none =>
-      cases d <;> simp [blockKernel, pushforwardWeight, choiceEmbed, ChoiceValue]
-      exact fun h => False.elim (h (Finset.mem_univ _))
-  | some i =>
-      cases d with
-      | inl ab => simp [blockKernel, pushforwardWeight, choiceEmbed, ChoiceValue]
-      | inr ja =>
-          rcases ja with ⟨j, a⟩
-          by_cases h : i = j <;>
-            simp [blockKernel, pushforwardWeight, choiceEmbed, ChoiceValue,
-              Prod.mk.injEq, h]
-          exact fun h => False.elim (h (Finset.mem_univ _))
+      pushforwardWeight (uniformWeights ((V × V) × V)) (flatDraw c) d := by
+  cases c <;> rcases d with (⟨x, y⟩ | ⟨j, a⟩) <;>
+    simp [blockKernel, pushforwardWeight, flatDraw, Fintype.sum_prod_type,
+      uniformWeights, Fintype.card_prod, Nat.cast_mul, Prod.mk.injEq,
+      Fintype.card_ne_zero, ite_and]
+  split_ifs <;> field_simp
 
-theorem pushforwardWeight_pi_dep {I B : Type*} [Fintype I]
-    {A : I → Type*} [∀ i, Fintype (A i)]
-    (p : (i : I) → A i → ℝ) (f : (i : I) → A i → B) (ys : I → B) :
-    pushforwardWeight (fun xs : ∀ i, A i => ∏ i, p i (xs i))
-      (fun xs : ∀ i, A i => fun i => f i (xs i)) ys =
-      ∏ i, pushforwardWeight (p i) (f i) (ys i) := by
-  classical
-  simp only [pushforwardWeight]
-  rw [Fintype.prod_sum]
-  apply Finset.sum_congr rfl
-  intro xs _
-  simp only [Fintype.prod_ite_zero, funext_iff]
-
-theorem uniformWeights_pi {I : Type*} [Fintype I] {A : I → Type*}
-    [∀ i, Fintype (A i)] (x : ∀ i, A i) :
-    uniformWeights (∀ i, A i) x = ∏ i, uniformWeights (A i) (x i) := by
-  simp [uniformWeights, Fintype.card_pi, Nat.cast_prod, one_div,
-    Finset.prod_inv_distrib]
-
-omit [AddCommGroup V] [Module F2 V] in
-theorem kernelTuple_uniform_pushforward (c : Fin k → ProjectionChoice)
+omit [Module F2 V] in
+theorem kernelTuple_flat_pushforward (c : Fin k → ProjectionChoice)
     (d : Fin k → BlockDraw V) :
     kernelTupleWeight c d =
-      pushforwardWeight (uniformWeights (∀ j, ChoiceValue V (c j)))
-        (fun f j => choiceEmbed (c j) (f j)) d := by
+      pushforwardWeight (uniformWeights (Fin k → (V × V) × V))
+        (fun f j => flatDraw (c j) (f j)) d := by
   unfold kernelTupleWeight
-  simp_rw [blockKernel_uniform_pushforward]
+  simp_rw [blockKernel_flat_pushforward]
   rw [← pushforwardWeight_pi_dep]
-  have hp : (fun f : ∀ j, ChoiceValue V (c j) =>
-      ∏ j, uniformWeights (ChoiceValue V (c j)) (f j)) =
-      uniformWeights (∀ j, ChoiceValue V (c j)) := by
+  have hp : (fun f : Fin k → (V × V) × V =>
+      ∏ j, uniformWeights ((V × V) × V) (f j)) =
+      uniformWeights (Fin k → (V × V) × V) := by
     funext f
-    simp [uniformWeights, Fintype.card_pi, Nat.cast_prod, one_div,
-      Finset.prod_inv_distrib]
+    simp [uniformWeights, one_div, mul_assoc, mul_pow]
   rw [hp]
   congr 1
   exact Subsingleton.elim _ _
@@ -537,105 +436,38 @@ def choiceSlot : ProjectionChoice → Slot
 def choiceSlots (c : Fin k → ProjectionChoice) (j : Fin k) : Slot :=
   choiceSlot (c j)
 
-theorem not_mem_choiceMask (c : Fin k → ProjectionChoice) (j : Fin k) :
-    j ∉ choiceMask c ↔ c j = none := by
-  cases h : c j <;> simp [choiceMask, h]
-
-def fullChoiceValue : (c : ProjectionChoice) → ChoiceValue V c → V × V
-  | none, x => x
-  | some _, _ => (0, 0)
-
-def singleChoiceValue : (c : ProjectionChoice) → ChoiceValue V c → V
-  | none, _ => 0
-  | some _, x => x
-
-def readChoiceValue (q : ProjectionChoice) (full : q = none → V × V)
-    (single : q.isSome = true → V) : ChoiceValue V q := by
-  cases q with
-  | none => exact full rfl
-  | some i => exact single rfl
-
-omit [Module F2 V] [Fintype V] in
-theorem readChoiceValue_roundtrip (q : ProjectionChoice) (v : ChoiceValue V q) :
-    readChoiceValue q (fun _ => fullChoiceValue q v)
-      (fun _ => singleChoiceValue q v) = v := by
-  cases q <;> rfl
-
-omit [Module F2 V] [Fintype V] in
-theorem readChoiceValue_full (q : ProjectionChoice) (full : q = none → V × V)
-    (single : q.isSome = true → V) (h : q = none) :
-    fullChoiceValue q (readChoiceValue q full single) = full h := by
-  subst q
-  rfl
-
-omit [Module F2 V] [Fintype V] in
-theorem readChoiceValue_single (q : ProjectionChoice) (full : q = none → V × V)
-    (single : q.isSome = true → V) (h : q.isSome = true) :
-    singleChoiceValue q (readChoiceValue q full single) = single h := by
-  cases q with
-  | none => simp at h
-  | some i => rfl
-
-def choiceValuesToRawTuple (c : Fin k → ProjectionChoice)
-    (fz : (∀ j, ChoiceValue V (c j)) × V) : RawTuple (choiceMask c) V :=
-  (fz.2,
-    (fun j => fullChoiceValue (c j.val) (fz.1 j.val)),
-      fun j => singleChoiceValue (c j.val) (fz.1 j.val))
-
-def rawTupleToChoiceValues (c : Fin k → ProjectionChoice)
-    (a : RawTuple (choiceMask c) V) (j : Fin k) : ChoiceValue V (c j) :=
-  readChoiceValue (c j)
-    (fun h => a.2.1 ⟨j, (not_mem_choiceMask c j).mpr h⟩)
-    (fun h => a.2.2 ⟨j, by simpa [choiceMask] using h⟩)
-
-/-- Choice fibers and the RawTuple model contain exactly the
-same coefficients, with no unused coordinate and no multiplicity. -/
-def choiceValuesRawTupleEquiv (c : Fin k → ProjectionChoice) :
-    ((∀ j, ChoiceValue V (c j)) × V) ≃ RawTuple (choiceMask c) V where
-  toFun := choiceValuesToRawTuple c
-  invFun a := (rawTupleToChoiceValues c a, a.1)
-  left_inv fz := by
-    apply Prod.ext
-    · funext j
-      exact readChoiceValue_roundtrip (c j) (fz.1 j)
-    · rfl
-  right_inv a := by
-    apply Prod.ext
-    · rfl
-    · apply Prod.ext
-      · funext j
-        have hc : c j.val = none := (not_mem_choiceMask c j.val).mp j.property
-        exact readChoiceValue_full (c j.val) _ _ hc
-      · funext j
-        have hc : (c j.val).isSome = true := by
-          simpa [choiceMask] using j.property
-        exact readChoiceValue_single (c j.val) _ _ hc
-
-omit [Module F2 V] [Fintype V] in
-theorem restoreChoiceDraw (q : ProjectionChoice) (v : ChoiceValue V q) :
-    (if q.isSome then
-      Sum.inr (ConcreteExtraction.slotIndex (choiceSlot q),
-          singleChoiceValue q v)
-    else Sum.inl (fullChoiceValue q v)) = choiceEmbed q v := by
-  cases q <;> simp [fullChoiceValue, singleChoiceValue, choiceEmbed, choiceSlot,
-    slotIndex_decodeSlot]
-
-omit [Module F2 V] [Fintype V] in
-theorem tupleDraw_choiceValues (c : Fin k → ProjectionChoice)
-    (fz : (∀ j, ChoiceValue V (c j)) × V) :
-    tupleDraw (choiceMask c) (choiceSlots c) (choiceValuesRawTupleEquiv c fz) =
-      fun j => choiceEmbed (c j) (fz.1 j) := by
-  funext j
-  change (if j ∈ choiceMask c then
-      Sum.inr (ConcreteExtraction.slotIndex (choiceSlot (c j)),
-        singleChoiceValue (c j) (fz.1 j))
-    else Sum.inl (fullChoiceValue (c j) (fz.1 j))) = choiceEmbed (c j) (fz.1 j)
-  simpa only [choiceMask, Finset.mem_filter,
-    Finset.mem_univ, true_and] using restoreChoiceDraw (c j) (fz.1 j)
+omit [Fintype V] in
+theorem paddedMap_flatDraw (rhs : Fin k → Bool) (c : Fin k → ProjectionChoice)
+    (f : Fin k → (V × V) × V) (z : V) :
+    paddedMap rhs (fun j => flatDraw (c j) (f j)) z =
+      (rawMap (choiceMask c) V
+        (Clean.CoefficientSampling.selectCoefficients (choiceMask c)
+          (z, fun j => (f j).1) (fun j => (f j).2))).comp
+        (rawProjection rhs (choiceMask c) (choiceSlots c)) := by
+  let gamma := Clean.CoefficientSampling.selectCoefficients (choiceMask c)
+    (z, fun j => (f j).1) (fun j => (f j).2)
+  have ha : ambientCoefficients (choiceMask c) V gamma (choiceSlots c) =
+      fun j => blockAmbient (flatDraw (c j) (f j)) := by
+    funext j i
+    cases h : c j with
+    | none =>
+      fin_cases i <;> simp [gamma, ambientCoefficients, choiceMask,
+        flatDraw, blockAmbient, h, Clean.CoefficientSampling.selectCoefficients]
+    | some a =>
+      simp [gamma, ambientCoefficients, choiceMask, choiceSlots, choiceSlot,
+        flatDraw, blockAmbient, h, Clean.CoefficientSampling.selectCoefficients,
+        slotIndex_decodeSlot, Pi.single_apply]
+  have hr := raw_represents rhs (choiceMask c) V gamma (choiceSlots c)
+  rw [ha] at hr
+  have hc := ActualCanonical.extension_coefficients _ _ _ _ hr
+  apply (ActualEnumeration.coefficientEquiv k V).symm.injective
+  change ActualEnumeration.toCoefficients k V _ = ActualEnumeration.toCoefficients k V _
+  rw [paddedMap_toCoefficients, rawMap_pullback, coefficients_rawMap]
+  exact Prod.ext hc.1.symm (funext fun j => Prod.ext (hc.2 j).1.symm (hc.2 j).2.symm)
 
 /-- The whole fixed-choice kernel is precisely the uniform actual-map law.
-This lemma closes the gap between an arbitrary fixed-mask sampling experiment
-and the conditioning kernel that actually occurs in drawWeights. -/
+The flat columns are reduced by the shared coefficient-sampling theorem,
+rather than a second dependent-coordinate bijection. -/
 theorem fixed_choice_kernel_map_expectation
     (rhs : Fin k → Bool) (c : Fin k → ProjectionChoice)
     (H : (ActualHomogeneous.E k →ₗ[F2] V) → ℝ) :
@@ -644,38 +476,35 @@ theorem fixed_choice_kernel_map_expectation
         H (paddedMap rhs dz.1 dz.2)) =
       𝔼 Y : RawPoint (choiceMask c) →ₗ[F2] V,
         H (Y.comp (rawProjection rhs (choiceMask c) (choiceSlots c))) := by
+  let F := fun gamma : RawCoefficients (choiceMask c) V =>
+    H ((rawMap (choiceMask c) V gamma).comp
+      (rawProjection rhs (choiceMask c) (choiceSlots c)))
   calc
     _ = ∑ d : Fin k → BlockDraw V, kernelTupleWeight c d *
         ∑ z : V, uniformWeights V z * H (paddedMap rhs d z) := by
-      rw [Fintype.sum_prod_type]
-      apply Finset.sum_congr rfl
-      intro d _
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
-      intro z _
-      ring
-    _ = ∑ f : ∀ j, ChoiceValue V (c j), uniformWeights _ f *
+      simp only [Fintype.sum_prod_type, Finset.mul_sum, mul_assoc]
+    _ = ∑ f : Fin k → (V × V) × V, uniformWeights _ f *
         ∑ z : V, uniformWeights V z *
-          H (paddedMap rhs (fun j => choiceEmbed (c j) (f j)) z) := by
-      simp_rw [kernelTuple_uniform_pushforward]
+          H (paddedMap rhs (fun j => flatDraw (c j) (f j)) z) := by
+      simp_rw [kernelTuple_flat_pushforward]
       exact sum_pushforwardWeight_mul _ _ _
-    _ = 𝔼 fz : (∀ j, ChoiceValue V (c j)) × V,
-        H (paddedMap rhs (fun j => choiceEmbed (c j) (fz.1 j)) fz.2) := by
-      rw [← sum_uniformWeights_mul, Fintype.sum_prod_type]
-      apply Finset.sum_congr rfl
-      intro f _
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
+    _ = 𝔼 z : V, 𝔼 f : Fin k → (V × V) × V,
+        F (Clean.CoefficientSampling.selectCoefficients (choiceMask c)
+          (z, fun j => (f j).1) (fun j => (f j).2)) := by
+      simp_rw [sum_uniformWeights_mul, paddedMap_flatDraw]
+      exact Finset.expect_comm _ _ _
+    _ = 𝔼 extra : V × (Fin k → V × V), 𝔼 single : Fin k → V,
+        F (Clean.CoefficientSampling.selectCoefficients (choiceMask c) extra single) := by
+      rw [← Finset.univ_product_univ, Finset.expect_product]
+      apply Finset.expect_congr rfl
       intro z _
-      rw [uniformWeights_prod]
-      ring
-    _ = 𝔼 a : RawTuple (choiceMask c) V,
-        H (paddedMap rhs (tupleDraw (choiceMask c) (choiceSlots c) a) a.1) := by
-      apply Fintype.expect_equiv (choiceValuesRawTupleEquiv c)
-      intro fz
-      rw [tupleDraw_choiceValues]
-      rfl
-    _ = _ := uniform_fixed_projection_tuple rhs (choiceMask c) (choiceSlots c) H
+      rw [← Finset.expect_product', Finset.univ_product_univ]
+      exact Fintype.expect_equiv
+        (Equiv.arrowProdEquivProdArrow (Fin k) (fun _ => V × V) (fun _ => V)) _ _ (fun _ => rfl)
+    _ = 𝔼 gamma : RawCoefficients (choiceMask c) V, F gamma :=
+      Clean.CoefficientSampling.expect_selectCoefficients (choiceMask c) F
+    _ = _ := uniform_rawMaps (choiceMask c)
+      (fun Y => H (Y.comp (rawProjection rhs (choiceMask c) (choiceSlots c))))
 
 theorem actual_projection_mixture_expectation
     (rhs : Fin k → Bool) (β : ℝ)
@@ -690,15 +519,6 @@ theorem actual_projection_mixture_expectation
   intro c _
   rw [fixed_choice_kernel_map_expectation]
 
-/-- Combining independently uniform `M` and `T` into a map with product
-codomain is exactly uniform; the preceding law may take `V = K × W`. -/
-theorem uniform_rawMap_pair {K W : Type}
-    [AddCommGroup K] [Module F2 K] [Fintype K]
-    [AddCommGroup W] [Module F2 W] [Fintype W]
-    (J : Finset (Fin k)) (H : (RawPoint J →ₗ[F2] K × W) → ℝ) :
-    (𝔼 MT : (RawPoint J →ₗ[F2] K) × (RawPoint J →ₗ[F2] W),
-      H (MT.1.prod MT.2)) = 𝔼 Y : RawPoint J →ₗ[F2] K × W, H Y := by
-  exact Fintype.expect_equiv (LinearMap.prodEquiv F2).toEquiv _ H (fun _ => rfl)
 
 section MapSpace
 
@@ -757,13 +577,6 @@ theorem paddedMapWeights_totalVariation_eq_slope (rhs : Fin k → Bool) (β : �
   rw [heq]
   exact paddedWeights_totalVariation_eq_slope rhs β
 
-theorem paddedMapWeights_totalVariation (rhs : Fin k → Bool) (β : ℝ)
-    (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    UniqueGamesTheorem.Foundations.Information.totalVariation (paddedMapWeights (V := V) rhs β)
-      (uniformWeights (ActualHomogeneous.E k →ₗ[F2] V)) ≤
-        Real.sqrt ((1 + β ^ 2 * ((Fintype.card V : ℝ) - 1) / 3) ^ k - 1) / 2 := by
-  rw [paddedMapWeights_totalVariation_eq_slope]
-  exact paddedSlope_totalVariation V β hβ hβ' k
 
 end MapSpace
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalBody
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
@@ -12,34 +13,18 @@ abbrev Tape := MachineRegularOriginalBody.Tape ⊕ Fin 2
 abbrev State := MachineRegularOriginalBody.State × Option Bool
 abbrev Alphabet (_ : Tape) := Bool
 
-/-- Constructor-by-constructor equality for a fixed sum of tape alphabets. -/
-private def sumDecidableEq {A B : Type} (left : DecidableEq A) (right : DecidableEq B) :
-    DecidableEq (A ⊕ B)
-  | .inl a, .inl b => match left a b with
-      | .isTrue h => .isTrue (congrArg (Sum.inl : A → A ⊕ B) h)
-      | .isFalse h => .isFalse (fun e => h (Sum.inl.inj e))
-  | .inr a, .inr b => match right a b with
-      | .isTrue h => .isTrue (congrArg (Sum.inr : B → A ⊕ B) h)
-      | .isFalse h => .isFalse (fun e => h (Sum.inr.inj e))
-  | .inl _, .inr _ => .isFalse (by intro h; cases h)
-  | .inr _, .inl _ => .isFalse (by intro h; cases h)
-
-/-- Every equality decision is explicitly assembled from fixed finite leaves.
-There is no classical decision or recursive typeclass search on the tape sum. -/
 instance tapeDecidableEq : DecidableEq Tape :=
-  sumDecidableEq
-    (sumDecidableEq (inferInstanceAs (DecidableEq (Fin 27)))
-      (sumDecidableEq (inferInstanceAs (DecidableEq MachineRegularMetadata.Extra))
-        (sumDecidableEq
-          (sumDecidableEq
-            (sumDecidableEq (inferInstanceAs (DecidableEq MachineExpanderRow.Tape))
+  @instDecidableEqSum _ _
+    (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq (Fin 27)))
+      (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq MachineRegularMetadata.Extra))
+        (@instDecidableEqSum _ _
+          (@instDecidableEqSum _ _
+            (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq MachineExpanderRow.Tape))
               (inferInstanceAs (DecidableEq MachineExpanderTable.ExtraTape)))
             (inferInstanceAs (DecidableEq MachineExpanderFamily.ExtraTape)))
           (inferInstanceAs (DecidableEq MachineCeilingPower.Tape)))))
     (inferInstanceAs (DecidableEq (Fin 2)))
 
-/-- List membership uses Boolean equality. These instances are
-the explicit Boolean view of the executable equality procedure above. -/
 instance tapeBEq : BEq Tape where
   beq a b := decide (a = b)
 
@@ -47,12 +32,7 @@ instance tapeLawfulBEq : LawfulBEq Tape where
   eq_of_beq := of_decide_eq_true
   rfl := of_decide_eq_self_eq_true _
 
-instance tapeFintype : Fintype Tape := by
-  change Fintype
-    ((Fin 27 ⊕ (MachineRegularMetadata.Extra ⊕
-      (((MachineExpanderRow.Tape ⊕ MachineExpanderTable.ExtraTape) ⊕
-        MachineExpanderFamily.ExtraTape) ⊕ MachineCeilingPower.Tape))) ⊕ Fin 2)
-  infer_instance
+instance tapeFintype : Fintype Tape := inferInstance
 
 def core (k : Fin 27) : Tape := .inl (.inl k)
 def localRank : Tape := core 3
@@ -106,25 +86,6 @@ theorem finalTapes_apply (base : Tape → List Bool) (d o : Nat) (k : Tape) :
   simp only [finalTapes, MachineDrainMany.finalTapes_apply, afterAddition,
     Function.update_apply]
 
-@[simp] theorem finalTapes_prefix (base : Tape → List Bool) (d o : Nat) :
-    finalTapes base d o prefixTape = encodeWord (d + o) := by
-  simp [finalTapes_apply, cleanupTapes, prefixTape, localRank, count, rotor,
-    padding, level, dummyFuel, core]
-
-theorem finalTapes_empty (base : Tape → List Bool) (d o : Nat) (k : Tape)
-    (hk : k ∈ cleanupTapes) : finalTapes base d o k = [] := by
-  rw [finalTapes_apply, ite_eq_left hk]
-
-theorem finalTapes_other (base : Tape → List Bool) (d o : Nat) (k : Tape)
-    (hk : k ∉ cleanupTapes) (hp : k ≠ prefixTape) :
-    finalTapes base d o k = base k := by
-  rw [finalTapes_apply, ite_eq_right hk, ite_eq_right hp]
-
-@[simp] theorem finalTapes_scratch (base : Tape → List Bool) (d o : Nat) :
-    finalTapes base d o scratch = base scratch := by
-  apply finalTapes_other
-  · simp [cleanupTapes, scratch, localRank, count, rotor, padding, level, dummyFuel, core]
-  · decide
 
 theorem drainSteps_eq (base : Tape → List Bool) (d o : Nat) :
     MachineDrainMany.steps cleanupTapes (afterAddition base d o) =
@@ -179,21 +140,6 @@ theorem traceAt (labels : Label → Λ) (exit : Option Λ)
   rw [Nat.add_comm, Function.iterate_add_apply, first]
   exact second
 
-def executionAt (labels : Label → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt Alphabet Λ State)
-    (code : ∀ l, program (labels l) = instruction labels exit l)
-    (base : Tape → List Bool) (d o : Nat)
-    (paddingWord : base padding = encodeWord d)
-    (prefixWord : base prefixTape = encodeWord o)
-    (scratchEmpty : base scratch = [])
-    (ambient : MachineRegularOriginalBody.State) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels entry), (ambient, register), base⟩
-      (some ⟨exit, (ambient, none), finalTapes base d o⟩) (steps base d) where
-  steps := steps base d
-  evals_in_steps := traceAt labels exit program code base d o
-    paddingWord prefixWord scratchEmpty ambient register
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOwnerCleanup
 

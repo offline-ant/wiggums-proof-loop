@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.PoweringTableSemanticsLemmas
 import OAI.Computability.UniqueGames.PCP.PreprocessingTableSpectral
@@ -18,27 +19,18 @@ open SpectralReturn PoweringSoundness
 
 variable {V D E A : Type*}
 
-def wordEquiv (ports : D ≃ E) (n : Nat) : (Fin n → D) ≃ (Fin n → E) where
-  toFun p := fun i => ports (p i)
-  invFun p := fun i => ports.symm (p i)
-  left_inv p := by funext i; exact ports.symm_apply_apply (p i)
-  right_inv p := by funext i; exact ports.apply_symm_apply (p i)
+def wordEquiv (ports : D ≃ E) (n : Nat) : (Fin n → D) ≃ (Fin n → E) :=
+  (Equiv.refl (Fin n)).arrowCongr ports
 
 def walkEquiv (ports : D ≃ E) (n : Nat) : Walk V D n ≃ Walk V E n :=
   Equiv.prodCongr (Equiv.refl V) (wordEquiv ports n)
 
-def addressEquiv (ports : D ≃ E) (t : Nat) : PortWords D t ≃ PortWords E t where
-  toFun w := ⟨w.1, wordEquiv ports w.1.val w.2⟩
-  invFun w := ⟨w.1, (wordEquiv ports w.1.val).symm w.2⟩
-  left_inv w := by rcases w with ⟨n,p⟩; simp
-  right_inv w := by rcases w with ⟨n,p⟩; simp
+def addressEquiv (ports : D ≃ E) (t : Nat) : PortWords D t ≃ PortWords E t :=
+  Equiv.sigmaCongrRight fun n => wordEquiv ports n.val
 
 /-- Pull target raw labels back to old port coordinates; this is a bijection. -/
-def labelEquiv (ports : D ≃ E) (t : Nat) : PaddedLabel E t A ≃ PaddedLabel D t A where
-  toFun a := fun w => a (addressEquiv ports t w)
-  invFun a := fun w => a ((addressEquiv ports t).symm w)
-  left_inv a := by funext w; simp
-  right_inv a := by funext w; simp
+def labelEquiv (ports : D ≃ E) (t : Nat) : PaddedLabel E t A ≃ PaddedLabel D t A :=
+  (addressEquiv ports t).symm.arrowCongr (Equiv.refl A)
 
 variable (G : PortGraph V D) (H : PortGraph V E) (ports : D ≃ E)
 variable (rotation : ∀ v d, H.rot (v, ports d) =
@@ -51,8 +43,9 @@ theorem wordEnd_map (n : Nat) (v : V) (p : Fin n → D) :
   induction n generalizing v with
   | zero => rfl
   | succ n ih =>
-    simp only [wordEnd, next, wordEquiv, Equiv.coe_fn_mk, rotation]
-    exact ih _ _
+    simp only [wordEnd, next, wordEquiv, Equiv.arrowCongr_apply, Equiv.refl_symm,
+      Equiv.refl_apply, Function.comp_apply, rotation]
+    exact ih (G.rot (v, p 0)).1 (fun j => p j.succ)
 
 theorem endpoint_map (n : Nat) (w : Walk V D n) :
     endpoint H (walkEquiv ports n w) = endpoint G w :=
@@ -106,18 +99,6 @@ theorem decode_transport {t : Nat} (selectors : ∀v, AddressSelector H t v)
   congr 1
   exact Subtype.ext hu
 
-theorem opinionAt_pullSelector (t : Nat) (selectors : ∀v, AddressSelector H t v)
-    (labels : V → PaddedLabel E t A) (fallback : A) (u v : V) :
-    PoweringOpinions.opinionAt G t (fun v => pullSelector G H ports rotation (selectors v))
-      (fun v => labelEquiv ports t (labels v)) fallback u v =
-    PoweringOpinions.opinionAt H t selectors labels fallback u v := by
-  classical
-  unfold PoweringOpinions.opinionAt
-  split_ifs with hG hH hH
-  · exact decode_pullSelector G H ports rotation (selectors v) (labels v) ⟨u,hG⟩
-  · exact False.elim (hH ((reach_iff G H ports rotation t v u).mp hG))
-  · exact False.elim (hG ((reach_iff G H ports rotation t v u).mpr hH))
-  · rfl
 
 theorem advanceTail_map (n : Nat) (w : Walk V D (n+1)) :
     advanceTail H (walkEquiv ports (n+1) w) =
@@ -196,34 +177,10 @@ theorem rejectionCount_map [Fintype V] [Fintype D] [Fintype E]
     (poweredGraph H accepts n selectors).rejectionCount labels := by
   classical
   unfold ConstraintGraph.rejectionCount
-  apply Finset.card_bij (fun e _ => dartEquiv ports n e)
-  · intro e he
-    rw [ConstraintGraph.mem_rejectedDarts, ← edgeSatisfied_map G H ports rotation]
-    exact (ConstraintGraph.mem_rejectedDarts _ _ _).mp he
-  · intro e _ f _ h
-    exact (dartEquiv ports n).injective h
-  · intro e he
-    refine ⟨(dartEquiv ports n).symm e, ?_, (dartEquiv ports n).apply_symm_apply e⟩
-    rw [ConstraintGraph.mem_rejectedDarts, edgeSatisfied_map G H ports rotation,
-      Equiv.apply_symm_apply]
-    exact (ConstraintGraph.mem_rejectedDarts _ _ _).mp he
+  apply Finset.card_equiv (dartEquiv ports n)
+  intro e
+  simp only [ConstraintGraph.mem_rejectedDarts, edgeSatisfied_map G H ports rotation]
 
-theorem satisfiable_iff (n : Nat) (selectors : ∀v, AddressSelector H (n+1) v) :
-    (poweredGraph G (pullAccepts ports accepts) n
-      (fun v => pullSelector G H ports rotation (selectors v))).Satisfiable ↔
-    (poweredGraph H accepts n selectors).Satisfiable := by
-  constructor
-  · rintro ⟨labels,hlabels⟩
-    refine ⟨fun v => (labelEquiv ports (n+1)).symm (labels v), ?_⟩
-    intro e
-    obtain ⟨e,rfl⟩ := (dartEquiv ports n).surjective e
-    rw [← edgeSatisfied_map G H ports rotation]
-    simpa only [Equiv.apply_symm_apply] using hlabels e
-  · rintro ⟨labels,hlabels⟩
-    refine ⟨fun v => labelEquiv ports (n+1) (labels v), ?_⟩
-    intro e
-    rw [edgeSatisfied_map G H ports rotation]
-    exact hlabels _
 
 theorem pullReverse
     (reverse_accepts : ∀ e a b, accepts (H.rot e) b a = accepts e a b)
@@ -248,24 +205,12 @@ theorem base_rejectionCount_map [Fintype V] [Fintype D] [Fintype E]
       (pullReverse G H ports rotation accepts reverse_accepts)).rejectionCount assignment =
     (baseGraph H accepts reverse_accepts).rejectionCount assignment := by
   classical
-  let e : Edge V D ≃ Edge V E := Equiv.prodCongr (Equiv.refl V) ports
-  have edgeEq (x : Edge V D) :=
-    base_edgeSatisfied_map G H ports rotation accepts reverse_accepts assignment x
   unfold ConstraintGraph.rejectionCount
-  apply Finset.card_bij (fun x _ => e x)
-  · intro x hx
-    rw [ConstraintGraph.mem_rejectedDarts]
-    change (baseGraph H accepts reverse_accepts).edgeSatisfied assignment (x.1,ports x.2) = false
-    rw [← edgeEq]
-    exact (ConstraintGraph.mem_rejectedDarts _ _ _).mp hx
-  · intro x _ y _ h
-    exact e.injective h
-  · intro y hy
-    refine ⟨e.symm y, ?_, e.apply_symm_apply y⟩
-    rw [ConstraintGraph.mem_rejectedDarts, edgeEq]
-    change (baseGraph H accepts reverse_accepts).edgeSatisfied assignment (e (e.symm y)) = false
-    rw [e.apply_symm_apply]
-    exact (ConstraintGraph.mem_rejectedDarts _ _ _).mp hy
+  apply Finset.card_equiv (Equiv.prodCongr (Equiv.refl V) ports)
+  intro e
+  simp only [ConstraintGraph.mem_rejectedDarts]
+  exact (congrArg (· = false)
+    (base_edgeSatisfied_map G H ports rotation accepts reverse_accepts assignment e)).to_iff
 
 omit rotation in
 /-- The generic lazy-graph gap survives a genuine rotation-preserving port
@@ -400,10 +345,6 @@ abbrev Port := ExpanderFamily.Port ⊕ Unit
 /-- The degree is one absolute constant, independent of the input graph. -/
 def degree : Nat := Fintype.card Port
 
-theorem degree_eq : degree = Fintype.card ExpanderFamily.Port + 1 := by
-  simp [degree, Port]
-
-theorem degree_positive : 0 < degree := by rw [degree_eq]; omega
 
 /-- A positive padded cloud has exactly the size of one explicit family member. -/
 def cloudEquiv (G : ConstraintGraph V E A) (v : V)
@@ -456,8 +397,6 @@ theorem cloud_expansion (G : ConstraintGraph V E A) (v : V)
       (cloudGraph_certificate_of_pos G v (Nat.pos_of_ne_zero hk))
       ExpanderFamily.port_degree_ge_eight S (by omega)
 
-def portGraph (G : ConstraintGraph V E A) : PortGraph (Vertex G) Port :=
-  paddedReplacementPortGraph G (CloudPadding.dummy G) (cloudGraph G)
 
 /-- The actual constraint graph, with its equality and inherited original tests. -/
 def graph (G : ConstraintGraph V E A) :
@@ -468,56 +407,6 @@ omit [Fintype A] [DecidableEq E] in
 @[simp] theorem graph_tail (G : ConstraintGraph V E A) (e : Vertex G × Port) :
     (graph G).tail e = e.1 := rfl
 
-omit [Fintype A] [DecidableEq E] in
-theorem graph_reverse (G : ConstraintGraph V E A) :
-    (graph G).reverse = (portGraph G).rot := rfl
-
-/-- The outgoing darts at each new vertex are exactly its fixed port alphabet. -/
-def degreeEquiv (G : ConstraintGraph V E A) (v : Vertex G) :
-    Cloud (graph G) v ≃ Port where
-  toFun e := e.val.2
-  invFun d := ⟨(v, d), rfl⟩
-  left_inv := by
-    rintro ⟨⟨w, d⟩, hw⟩
-    change w = v at hw
-    cases hw
-    rfl
-  right_inv _ := rfl
-
-omit [Fintype A] in
-theorem fixed_degree (G : ConstraintGraph V E A) (v : Vertex G) :
-    Fintype.card (Cloud (graph G) v) = degree :=
-  Fintype.card_congr (degreeEquiv G v)
-
-omit [Fintype A] [DecidableEq E] [DecidableEq A] in
-theorem vertex_count_le (G : ConstraintGraph V E A) :
-    Fintype.card (Vertex G) ≤ ExpanderFamily.growth * Fintype.card E :=
-  CloudPadding.card_paddedDart_le G
-
-omit [Fintype A] [DecidableEq E] [DecidableEq A] in
-theorem dart_count (G : ConstraintGraph V E A) :
-    Fintype.card (Vertex G × Port) = Fintype.card (Vertex G) * degree :=
-  Fintype.card_prod _ _
-
-omit [Fintype A] [DecidableEq E] [DecidableEq A] in
-theorem dart_count_le (G : ConstraintGraph V E A) :
-    Fintype.card (Vertex G × Port) ≤
-      (ExpanderFamily.growth * degree) * Fintype.card E := by
-  rw [dart_count]
-  calc
-    Fintype.card (Vertex G) * degree ≤
-        (ExpanderFamily.growth * Fintype.card E) * degree :=
-      Nat.mul_le_mul_right degree (vertex_count_le G)
-    _ = (ExpanderFamily.growth * degree) * Fintype.card E := Nat.mul_right_comm _ _ _
-
-def liftLabel (G : ConstraintGraph V E A) (labeling : V → A) : Vertex G → A :=
-  DegreeReplacement.liftLabel (paddedGraph G (CloudPadding.dummy G)) labeling
-
-omit [Fintype A] [DecidableEq E] in
-/-- Completeness preserves the absolute rejection count exactly. -/
-theorem lift_rejectionCount (G : ConstraintGraph V E A) (labeling : V → A) :
-    (graph G).rejectionCount (liftLabel G labeling) = G.rejectionCount labeling :=
-  paddedReplacement_rejectionCount G (CloudPadding.dummy G) (cloudGraph G) labeling
 
 omit [Fintype A] [DecidableEq E] in
 theorem completeness (G : ConstraintGraph V E A) (h : G.Satisfiable) :
@@ -534,14 +423,6 @@ theorem soundness [Nonempty A] (G : ConstraintGraph V E A) (ell : Vertex G → A
   CloudRounding.padded_replacement_soundness G (CloudPadding.dummy G)
     (cloudGraph G) (cloud_expansion G) ell
 
-theorem exists_rounding [Nonempty A] (G : ConstraintGraph V E A) (ell : Vertex G → A) :
-    ∃ labeling : V → A, G.rejectionCount labeling ≤ (graph G).rejectionCount ell :=
-  ⟨roundLabels G ell, soundness G ell⟩
-
-theorem soundness_of_uniform_lower_bound [Nonempty A] (G : ConstraintGraph V E A)
-    (k : Nat) (lower : ∀ labeling : V → A, k ≤ G.rejectionCount labeling)
-    (ell : Vertex G → A) : k ≤ (graph G).rejectionCount ell :=
-  (lower (roundLabels G ell)).trans (soundness G ell)
 
 end UniqueGamesTheorem.Foundations.PCP.Regularization
 

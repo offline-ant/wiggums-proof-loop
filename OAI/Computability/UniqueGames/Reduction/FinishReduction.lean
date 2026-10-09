@@ -1,22 +1,10 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Games.ProductSoundness
 import OAI.Computability.UniqueGames.Machines.MachineProductRuntime
 import OAI.Computability.UniqueGames.Machines.MachineSubdivisionBodySpecLemmas
-import OAI.Computability.UniqueGames.Machines.MachineUniformRun
 import OAI.Computability.UniqueGames.Reduction.ParameterSelection
 
-namespace OAI
-
-
-/-!
-The concrete final composition, once the matrix reduction has been proved.
-This constructor copies the actual occurrence list, subdivides every occurrence
-into four edges, and runs the full tuple-product machine. Its hypotheses are
-the matrix reduction's actual value bounds and finite-machine computation.
-It is an intermediate composition theorem, not the unconditional endpoint.
--/
-
-namespace UniqueGamesTheorem.FinishReduction
-
+namespace OAI.UniqueGamesTheorem.FinishReduction
 
 open UniqueGamesTheorem.Foundations Target
 open UniqueGamesTheorem.Foundations.Complexity
@@ -25,9 +13,9 @@ open Explicit
 
 noncomputable section
 
-/-- Compose the proved matrix reduction with the explicit three-stage finish.
-All parameters, machines, alphabets, and time polynomials precede the input.
-The original raw binary input codec is retained by sequential composition. -/
+/-- Subdivide the uniform matrix instance to make its endpoints simple and
+bipartite, then repeat. No occurrence copying or rounding stage is necessary.
+All parameters and machines are fixed before the original raw input. -/
 def of_matrix_reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε δ)
     {q s : ℕ} (hq : 2 ≤ q) (hs : 1 ≤ s)
     (coordinates : Fin q ≃ BinaryLinear.Vector s)
@@ -44,28 +32,15 @@ def of_matrix_reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε
     MachineOutputContract.BinaryGapReduction ε δ := by
   classical
   have hqpos : 0 < q := by omega
-  have hC : 0 < P.copies := by have h := P.copies_large; omega
   letI : Nonempty (Fin q) := ⟨⟨0, hqpos⟩⟩
-  let rounded := fun input => UniformTarget.construct P.copies hC (matrix input)
-  have roundedTranslations : ∀ input,
-      TranslationTarget.IsTranslationInstance coordinates (rounded input) := fun input =>
-    UniformTarget.translations P.copies hC (matrix input) coordinates (translations input)
-  let roundedMachine := MachineSequential.composeBits
-    (f := matrix) (g := UniformTarget.construct P.copies hC) computation
-    (MachineUniformRun.computation (q := q) P.copies hC)
-  have roundedFinite : MachineFiniteAlphabet.FiniteAlphabet roundedMachine.tm :=
-    MachineFiniteAlphabet.composeBits
-      (f := matrix) (g := UniformTarget.construct P.copies hC) computation
-      (MachineUniformRun.computation (q := q) P.copies hC) finiteAlphabet
-      (MachineUniformRun.finiteAlphabet (q := q) P.copies hC)
-  let base := fun input => SubdivisionTarget.subdivide (rounded input)
-  let basePresentation := fun input => SubdivisionTarget.simpleBipartite (rounded input)
+  let base := fun input => SubdivisionTarget.subdivide (matrix input)
+  let basePresentation := fun input => SubdivisionTarget.simpleBipartite (matrix input)
   let baseMachine := MachineSubdivisionCompose.translationComputableInPolyTime
-    coordinates roundedMachine roundedTranslations
+    coordinates computation translations
   have baseFinite : MachineFiniteAlphabet.FiniteAlphabet baseMachine.tm :=
-    MachineSubdivisionCompose.finiteAlphabet roundedMachine
+    MachineSubdivisionCompose.finiteAlphabet computation
       (fun input => MachineSubdivisionCorrespondence.translations_involutive
-        coordinates (rounded input) (roundedTranslations input)) roundedFinite
+        coordinates (matrix input) (translations input)) finiteAlphabet
   let output := fun input => ProductPaddedOutput.output (base input)
     (basePresentation input) P.repetitions P.repetitions_pos
   let outputMachine := MachineProductRuntime.compose baseMachine basePresentation
@@ -75,26 +50,8 @@ def of_matrix_reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε
   have hqoutpos : 0 < q ^ P.repetitions := by omega
   have baseValue (input : List Bool) :
       InstanceValue.value (base input) =
-        1 - (1 - InstanceValue.value (matrix input)) / 4 := by
-    dsimp [base, rounded]
-    rw [SubdivisionTarget.value_eq _ hqpos,
-      UniformTarget.value P.copies hC (matrix input) hqpos]
-  have hτ : (0 : ℝ) < (P.pStar : ℝ) := by exact_mod_cast P.pStar_pos
-  have hτsmall : (P.pStar : ℝ) ≤ 1 / 200 := by
-    simpa only [ParameterSelection.OuterParameters.pStar, Rat.cast_div, Rat.cast_ofNat,
-      Rat.cast_one]
-      using ((Rat.cast_le (K := ℝ)).mpr P.reciprocal_small)
-  have hτbudget : (P.pStar : ℝ) ≤ (P.epsilon0 : ℝ) / P.repetitions := by
-    exact_mod_cast P.reciprocal_budget
-  have hdbudget : (d : ℝ) ≤ (P.epsilon0 : ℝ) / P.repetitions := by
-    exact_mod_cast hd
-  have hε0 : (0 : ℝ) ≤ (P.epsilon0 : ℝ) := by
-    exact_mod_cast P.epsilon0_pos.le
-  have roundingError (input : List Bool) :
-      |InstanceValue.value (base input) -
-        (1 - (1 - InstanceValue.value (matrix input)) / 4)| ≤ (P.pStar : ℝ) / 4 := by
-    rw [baseValue input, sub_self, abs_zero]
-    positivity
+        1 - (1 - InstanceValue.value (matrix input)) / 4 :=
+    SubdivisionTarget.value_eq (matrix input) hqpos
   refine {
     alphabet := q ^ P.repetitions
     alphabetAtLeastTwo := hqout
@@ -108,8 +65,8 @@ def of_matrix_reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε
       (base input) (basePresentation input) P.repetitions P.repetitions_pos
     translations := fun input => ProductPaddedOutput.output_translations
       (base input) (basePresentation input) coordinates
-      (SubdivisionTarget.subdivide_translation coordinates (rounded input)
-        (roundedTranslations input)) P.repetitions P.repetitions_pos
+      (SubdivisionTarget.subdivide_translation coordinates (matrix input)
+        (translations input)) P.repetitions P.repetitions_pos
     computation := outputMachine
     finiteAlphabet := MachineProductRuntime.compose_finiteAlphabet
       baseMachine basePresentation P.repetitions P.repetitions_pos baseFinite
@@ -118,22 +75,24 @@ def of_matrix_reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε
   }
   · intro input yes
     apply (InstanceValue.exists_rate_ge_iff (output input) hqoutpos (1 - ε)).mpr
-    have hbase := FinishBounds.subdivision_completeness _ _ (d : ℝ) (P.pStar : ℝ)
-      (complete input yes) (roundingError input)
     have hproduct := ProductPaddedOutput.output_completeness (base input)
       (basePresentation input) P.repetitions P.repetitions_pos
       (error := 1 - InstanceValue.value (base input)) (by linarith)
-    exact FinishBounds.final_completeness _ _ (d : ℝ) (P.pStar : ℝ)
-      (P.epsilon0 : ℝ) ε P.repetitions P.repetitions_pos hbase hproduct
-      hdbudget hτbudget hε0 P.epsilon0_le
+    have ht : (0 : ℝ) < P.repetitions := by exact_mod_cast P.repetitions_pos
+    have hdreal : (d : ℝ) * P.repetitions ≤ (P.epsilon0 : ℝ) := by
+      exact (le_div_iff₀ ht).mp (by exact_mod_cast hd)
+    have hloss := mul_le_mul_of_nonneg_left (complete input yes) ht.le
+    rw [baseValue input] at hproduct
+    have hε0 : (0 : ℝ) ≤ P.epsilon0 := by exact_mod_cast P.epsilon0_pos.le
+    have hε := P.epsilon0_le
+    nlinarith
   · intro input no
     apply (InstanceValue.forall_rate_le_iff (output input) hqoutpos δ).mpr
-    have hbase := FinishBounds.subdivision_soundness _ _ (P.pStar : ℝ)
-      (sound input no) hτsmall (roundingError input)
+    have hbase : InstanceValue.value (base input) ≤ 1 - 1 / 800 := by
+      rw [baseValue input]
+      linarith [sound input no]
     exact (ProductPaddedOutput.output_soundness (base input) (basePresentation input)
       P.repetitions P.repetitions_pos P.soundness_rate hbase).trans P.delta0_le
 
 end
-end UniqueGamesTheorem.FinishReduction
-
-end OAI
+end OAI.UniqueGamesTheorem.FinishReduction

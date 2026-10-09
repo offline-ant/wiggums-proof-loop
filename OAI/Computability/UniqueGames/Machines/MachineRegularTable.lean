@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineAppendAt
 import OAI.Computability.UniqueGames.Machines.MachineCloudPrefix
 import OAI.Computability.UniqueGames.Machines.MachineProductGatherBoundsLemmas
@@ -30,18 +31,10 @@ inductive Extra
   | m | index | work | scratch | vertices | darts | emit | output
   deriving DecidableEq
 
-protected abbrev Extra.enumList : List Extra := [.m, .index, .work, .scratch, .vertices, .darts,
-  .emit, .output]
-
-protected theorem Extra.enumList_getElem?_ctorIdx_eq (x : Extra) :
-    Extra.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Extra.enumList_nodup : Extra.enumList.Nodup := by decide
-
 instance : Fintype Extra where
-  elems := ⟨Extra.enumList, Extra.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.m, .index, .work, .scratch, .vertices, .darts,
+  .emit, .output}
+  complete x := by cases x <;> simp
 
 abbrev Tape := MachineCloudPrefix.Tape ⊕ Extra
 abbrev Alphabet (_ : Tape) := Bool
@@ -103,18 +96,6 @@ def frame (t n v f s m i w a N R e o : List Bool) : Tape → List Bool :=
 @[simp] theorem frame_output (t n v f s m i w a N R e o : List Bool) :
     frame t n v f s m i w a N R e o outputTape = o := rfl
 
-@[simp] theorem update_frame_table (t n v f s m i w a N R e o x : List Bool) :
-    Function.update (frame t n v f s m i w a N R e o) tableTape x =
-      frame x n v f s m i w a N R e o := by
-  funext k
-  cases k with
-  | inl k =>
-      cases k with
-      | inner j => cases j <;> rfl
-      | bound => rfl
-      | remaining => rfl
-      | total => rfl
-  | inr j => cases j <;> rfl
 
 @[simp] theorem update_frame_n (t n v f s m i w a N R e o x : List Bool) :
     Function.update (frame t n v f s m i w a N R e o) nTape x =
@@ -207,18 +188,6 @@ def frame (t n v f s m i w a N R e o : List Bool) : Tape → List Bool :=
       | total => rfl
   | inr j => cases j <;> rfl
 
-@[simp] theorem update_frame_scratch (t n v f s m i w a N R e o x : List Bool) :
-    Function.update (frame t n v f s m i w a N R e o) scratchTape x =
-      frame t n v f s m i w x N R e o := by
-  funext k
-  cases k with
-  | inl k =>
-      cases k with
-      | inner j => cases j <;> rfl
-      | bound => rfl
-      | remaining => rfl
-      | total => rfl
-  | inr j => cases j <;> rfl
 
 @[simp] theorem update_frame_vertices (t n v f s m i w a N R e o x : List Bool) :
     Function.update (frame t n v f s m i w a N R e o) verticesTape x =
@@ -276,33 +245,17 @@ inductive Field
   | vertices | darts
   deriving DecidableEq
 
-protected abbrev Field.enumList : List Field := [.vertices, .darts]
-
-protected theorem Field.enumList_getElem?_ctorIdx_eq (x : Field) :
-    Field.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Field.enumList_nodup : Field.enumList.Nodup := by decide
-
 instance : Fintype Field where
-  elems := ⟨Field.enumList, Field.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.vertices, .darts}
+  complete x := by cases x <;> simp
 
 inductive CopyPhase
   | count | rEmit | nEmit
   deriving DecidableEq
 
-protected abbrev CopyPhase.enumList : List CopyPhase := [.count, .rEmit, .nEmit]
-
-protected theorem CopyPhase.enumList_getElem?_ctorIdx_eq (x : CopyPhase) :
-    CopyPhase.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem CopyPhase.enumList_nodup : CopyPhase.enumList.Nodup := by decide
-
 instance : Fintype CopyPhase where
-  elems := ⟨CopyPhase.enumList, CopyPhase.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.count, .rEmit, .nEmit}
+  complete x := by cases x <;> simp
 
 inductive Label
   | init | seedM | clearIndex
@@ -395,10 +348,6 @@ def program (q : Nat) : Label → TM2.Stmt Alphabet Label (State σ)
   | .clearQuery => MachineLookup.discard queryTape .clearQuery .done
   | .done => .halt
 
-private theorem appendTrace {α : Type} (f : α → α) {a b : Nat} {x y z : α}
-    (hs : f^[a] x = y) (ht : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm a b, Function.iterate_add_apply, hs, ht]
-
 def paddingTotal (t : GraphTables.Table) : Nat :=
   PreprocessingPaddingOffsets.offset (PreprocessingRegularTables.padding t) t.vertices
 
@@ -489,7 +438,7 @@ theorem readTrace (q : Nat) (t : GraphTables.Table) (output : List Bool)
         frame (GraphTables.tableBits t) (encodeWord t.vertices) [] [] []
           (encodeWord t.darts) [] [] [] [] [] [] output⟩ :=
     clearIndexStep q _ _ _ _ ambient none
-  exact appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _ hi hn) hs) hm) hc
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hi hn) hs) hm) hc
 
 /-- The original vertex count is the physical bound supplied to the checked
 padding-prefix machine. Its complement tapes preserve the original dart count. -/
@@ -552,7 +501,7 @@ theorem computeTrace (q : Nat) (t : GraphTables.Table) (output : List Bool)
     (vertexTotal t) [] (by simp) rfl (ambient, false) none
   simp only [frame_darts, List.append_nil, Nat.add_zero, update_frame_darts] at hm
   rw [show (q + 1) * vertexTotal t = dartTotal q t by unfold dartTotal; ac_rfl] at hm
-  exact appendTrace _ (appendTrace _ hc ha) hm
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hc ha) hm
 
 def headerBits (q : Nat) (t : GraphTables.Table) : List Bool :=
   encodeWords [vertexTotal t, dartTotal q t]
@@ -641,7 +590,7 @@ theorem emitTrace (q : Nat) (t : GraphTables.Table) (output : List Bool)
         frame (GraphTables.tableBits t) (encodeWord t.vertices) [] [] [] (encodeWord t.darts)
           [] [] [] (encodeWord (vertexTotal t)) (encodeWord (dartTotal q t)) []
           (output ++ headerBits q t)⟩ := rfl
-  exact appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _ hr hn) ha) hz) hc) hd
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hr hn) ha) hz) hc) hd
 
 def totalTime (q : Nat) (t : GraphTables.Table) (output : List Bool) : Nat :=
   ((readTime t + MachineCloudPrefix.totalTime t t.vertices []) + computeTime t) + emitTime q t output
@@ -655,7 +604,7 @@ theorem trace (q : Nat) (t : GraphTables.Table) (output : List Bool)
         frame (GraphTables.tableBits t) (encodeWord t.vertices) [] [] [] (encodeWord t.darts)
           [] [] [] (encodeWord (vertexTotal t)) (encodeWord (dartTotal q t)) []
           (output ++ headerBits q t)⟩ :=
-  appendTrace _ (appendTrace _ (appendTrace _ (readTrace q t output ambient register)
+  UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (readTrace q t output ambient register)
     (prefixTrace q t output ambient none)) (computeTrace q t output ambient none))
       (emitTrace q t output ambient none)
 
@@ -711,20 +660,6 @@ theorem totalTime_le (q : Nat) (t : GraphTables.Table) (output : List Bool) :
     Polynomial.eval_mul, Polynomial.eval_ofNat, Polynomial.eval_X, Polynomial.eval_one,
     L, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using htotal
 
-/-- A genuine finite-machine execution with a cubic input-length budget. -/
-def inTime (q : Nat) (t : GraphTables.Table) (output : List Bool)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program q))
-      ⟨some .init, ((ambient, false), register),
-        frame (GraphTables.tableBits t) [] [] [] [] [] [] [] [] [] [] [] output⟩
-      (some ⟨none, ((ambient, false), none),
-        frame (GraphTables.tableBits t) (encodeWord t.vertices) [] [] [] (encodeWord t.darts)
-          [] [] [] (encodeWord (vertexTotal t)) (encodeWord (dartTotal q t)) []
-          (output ++ headerBits q t)⟩)
-      ((timePolynomial q).eval ((GraphTables.tableBits t).length + output.length)) where
-  steps := totalTime q t output
-  evals_in_steps := trace q t output ambient register
-  steps_le_m := totalTime_le q t output
 
 end Header
 
@@ -742,29 +677,11 @@ def guard (fuel : K) (body : Λ) (exit : Option Λ) :
       (.load (fun s => (s.1, none))
         (match exit with | some label => .goto fun _ => label | none => .halt)))
 
-theorem guard_succ (fuel : K) (body : Λ) (exit : Option Λ)
-    (base : K → List Bool) (n : Nat) (ambient : σ) (register : Option Bool) :
-    TM2.stepAux (guard fuel body exit) (ambient, register)
-      (Function.update base fuel (encodeWord (n + 1))) =
-      ⟨some body, (ambient, none), Function.update base fuel (encodeWord n)⟩ := by
-  simp [guard, TM2.stepAux, encodeWord, List.replicate_succ]
-
-theorem guard_zero (fuel : K) (body : Λ) (exit : Option Λ)
-    (base : K → List Bool) (ambient : σ) (register : Option Bool) :
-    TM2.stepAux (guard fuel body exit) (ambient, register)
-      (Function.update base fuel (encodeWord 0)) =
-      ⟨exit, (ambient, none), Function.update base fuel []⟩ := by
-  cases exit <;> simp [guard, TM2.stepAux, encodeWord]
 
 /-- Unary successor needs one physical push and no unbounded register. -/
 def increment (counter : K) (next : Λ) : TM2.Stmt (fun _ : K => Bool) Λ σ :=
   .push counter (fun _ => true) (.goto fun _ => next)
 
-theorem increment_step (counter : K) (next : Λ) (base : K → List Bool)
-    (n : Nat) (state : σ) :
-    TM2.stepAux (increment counter next) state (Function.update base counter (encodeWord n)) =
-      ⟨some next, state, Function.update base counter (encodeWord (n + 1))⟩ := by
-  simp [increment, TM2.stepAux, encodeWord, List.replicate_succ]
 
 end Fuel
 
@@ -777,29 +694,18 @@ abbrev State := MachineRegularOriginalBody.State × Option Bool
 abbrev Data := MachineRegularMetadata.Data
 abbrev BaseTable := PreprocessingRegularTables.BaseTable
 
-private def sumDecidableEq {A B : Type} (left : DecidableEq A) (right : DecidableEq B) :
-    DecidableEq (A ⊕ B)
-  | .inl a, .inl b => match left a b with
-      | .isTrue h => .isTrue (congrArg (Sum.inl : A → A ⊕ B) h)
-      | .isFalse h => .isFalse (fun e => h (Sum.inl.inj e))
-  | .inr a, .inr b => match right a b with
-      | .isTrue h => .isTrue (congrArg (Sum.inr : B → A ⊕ B) h)
-      | .isFalse h => .isFalse (fun e => h (Sum.inr.inj e))
-  | .inl _, .inr _ => .isFalse (by intro h; cases h)
-  | .inr _, .inl _ => .isFalse (by intro h; cases h)
-
 instance tapeDecidableEq : DecidableEq Tape :=
-  sumDecidableEq
-    (sumDecidableEq (inferInstanceAs (DecidableEq (Fin 27)))
-      (sumDecidableEq (inferInstanceAs (DecidableEq MachineRegularMetadata.Extra))
-        (sumDecidableEq
-          (sumDecidableEq
-            (sumDecidableEq (inferInstanceAs (DecidableEq MachineExpanderRow.Tape))
+  @instDecidableEqSum _ _
+    (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq (Fin 27)))
+      (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq MachineRegularMetadata.Extra))
+        (@instDecidableEqSum _ _
+          (@instDecidableEqSum _ _
+            (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq MachineExpanderRow.Tape))
               (inferInstanceAs (DecidableEq MachineExpanderTable.ExtraTape)))
             (inferInstanceAs (DecidableEq MachineExpanderFamily.ExtraTape)))
           (inferInstanceAs (DecidableEq MachineCeilingPower.Tape)))))
-    (sumDecidableEq
-      (sumDecidableEq (inferInstanceAs (DecidableEq MachineCloudPrefix.Tape))
+    (@instDecidableEqSum _ _
+      (@instDecidableEqSum _ _ (inferInstanceAs (DecidableEq MachineCloudPrefix.Tape))
         (inferInstanceAs (DecidableEq Header.Extra)))
       (inferInstanceAs (DecidableEq (Fin 4))))
 
@@ -810,13 +716,7 @@ instance tapeLawfulBEq : LawfulBEq Tape where
   eq_of_beq := of_decide_eq_true
   rfl := of_decide_eq_self_eq_true _
 
-instance tapeFintype : Fintype Tape := by
-  change Fintype
-    ((Fin 27 ⊕ (MachineRegularMetadata.Extra ⊕
-      (((MachineExpanderRow.Tape ⊕ MachineExpanderTable.ExtraTape) ⊕
-        MachineExpanderFamily.ExtraTape) ⊕ MachineCeilingPower.Tape))) ⊕
-      ((MachineCloudPrefix.Tape ⊕ Header.Extra) ⊕ Fin 4))
-  infer_instance
+instance tapeFintype : Fintype Tape := inferInstance
 
 def coreTape (i : Fin 27) : Tape := .inl (.inl i)
 def oldFuel : Tape := .inr (.inr 0)
@@ -921,17 +821,9 @@ inductive CopyPhase
   | old | owner
   deriving DecidableEq
 
-protected abbrev CopyPhase.enumList : List CopyPhase := [.old, .owner]
-
-protected theorem CopyPhase.enumList_getElem?_ctorIdx_eq (x : CopyPhase) :
-    CopyPhase.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem CopyPhase.enumList_nodup : CopyPhase.enumList.Nodup := by decide
-
 instance : Fintype CopyPhase where
-  elems := ⟨CopyPhase.enumList, CopyPhase.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.old, .owner}
+  complete x := by cases x <;> simp
 
 def copySource : CopyPhase → Tape
   | .old => coreTape 6
@@ -1232,10 +1124,6 @@ noncomputable def oldElapsed (H : BaseTable) (t : GraphTables.Table) (output : L
         1 + MachineRegularOriginalBody.totalSteps H t ⟨k,h⟩ (output ++ oldPrefix H t k) + 1
       else 0
 
-private theorem joinTrace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
-
 /-- Each actual fuel/body/increment segment appends exactly the next original
 vertex block. This induction is over a specification index, not a register. -/
 theorem oldPrefixTrace (H : BaseTable) (t : GraphTables.Table) (output : List Bool)
@@ -1262,7 +1150,7 @@ theorem oldPrefixTrace (H : BaseTable) (t : GraphTables.Table) (output : List Bo
     have increment := oldIncrementStep H t k
       ((output ++ oldPrefix H t k) ++ MachineRegularOriginalBody.emittedBits H t ⟨k,hlt⟩)
       header (counterStacks (encodeWord (t.darts-(k+1))) [] [] [])
-    have combined := joinTrace (joinTrace (joinTrace previous guard) body) increment
+    have combined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans previous guard) body) increment
     have bits := PreprocessingRegularLoopWords.blocksPrefix_succ
       (MachineRegularOriginalBody.emittedBits H t) k hlt
     change oldPrefix H t (k+1) = oldPrefix H t k ++
@@ -1279,7 +1167,7 @@ theorem oldLoopTrace (H : BaseTable) (t : GraphTables.Table) (output : List Bool
         (counterStacks [] [] [] [])) := by
   have prefixRun := oldPrefixTrace H t output header t.darts (Nat.le_refl _)
   simp only [Nat.sub_self] at prefixRun
-  exact joinTrace prefixRun (oldGuardExit H _ header)
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prefixRun (oldGuardExit H _ header)
 
 @[simp] theorem frame_scratch (data : Data) (header : Header.Tape → List Bool)
     (old owners dummy work : List Bool) :
@@ -1327,7 +1215,7 @@ theorem oldStageTrace (H : BaseTable) (t : GraphTables.Table) (output : List Boo
       some (cfg H (some Label.ownerSeed)
         (oldData t t.darts (output ++ oldPrefix H t t.darts)) header
         (counterStacks [] [] [] [])) :=
-  joinTrace (joinTrace (oldSeedStep H t output header _) (copyOldTrace H t output header))
+  UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (oldSeedStep H t output header _) (copyOldTrace H t output header))
     (oldLoopTrace H t output header)
 
 @[simp] theorem update_frame_offset (data : Data) (header : Header.Tape → List Bool)
@@ -1492,7 +1380,7 @@ theorem ownerPrefixTrace (H : BaseTable) (t : GraphTables.Table) (output : List 
       (encodeWord (t.vertices-(k+1)))
     have increment := ownerIncrementStep H t ⟨k,hlt⟩ (output ++ ownerPrefix H t k) header
       (counterStacks [] (encodeWord (t.vertices-(k+1))) [] [])
-    have combined := joinTrace (joinTrace (joinTrace previous guard) body) increment
+    have combined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans previous guard) body) increment
     have bits := PreprocessingRegularLoopWords.blocksPrefix_succ
       (MachineRegularOwnerBody.ownerBits H t) k hlt
     change ownerPrefix H t (k+1) = ownerPrefix H t k ++
@@ -1509,7 +1397,7 @@ theorem ownerLoopTrace (H : BaseTable) (t : GraphTables.Table) (output : List Bo
         (counterStacks [] [] [] [])) := by
   have prefixRun := ownerPrefixTrace H t output header t.vertices (Nat.le_refl _)
   simp only [Nat.sub_self] at prefixRun
-  exact joinTrace prefixRun (ownerGuardExit H _ header)
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prefixRun (ownerGuardExit H _ header)
 
 theorem ownerStageTrace (H : BaseTable) (t : GraphTables.Table) (output : List Bool) :
     (advance (TM2.step (program H)))^[1+2*(t.vertices+2)+(ownerElapsed H t output t.vertices+1)]
@@ -1518,7 +1406,7 @@ theorem ownerStageTrace (H : BaseTable) (t : GraphTables.Table) (output : List B
       some (cfg H (clearEntry 0)
         (ownerData t t.vertices (output ++ ownerPrefix H t t.vertices)) (headerStacks t)
         (counterStacks [] [] [] [])) :=
-  joinTrace (joinTrace (ownerSeedStep H t output (headerStacks t) _) (copyOwnerTrace H t output))
+  UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (ownerSeedStep H t output (headerStacks t) _) (copyOwnerTrace H t output))
     (ownerLoopTrace H t output (headerStacks t))
 
 theorem owner_output_eq_ownerPrefix (H : BaseTable) (t : GraphTables.Table) (k : Nat) :
@@ -1567,7 +1455,7 @@ theorem cleanupPrefixTrace (H : BaseTable) (base : Tape → List Bool) (k : Nat)
     have second := drainTrace H ⟨k,h⟩ (cleaned base k)
     have atEntry : clearEntry k = some (.clear ⟨k,h⟩) := by simp only [clearEntry, dite_eq_left h]
     rw [atEntry] at first
-    simpa only [cleanupTime, cleaned, dite_eq_left h] using joinTrace first second
+    simpa only [cleanupTime, cleaned, dite_eq_left h] using UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
 
 theorem cleanupTrace (H : BaseTable) (base : Tape → List Bool) :
     (advance (TM2.step (program H)))^[cleanupTime base 7]
@@ -1598,98 +1486,31 @@ theorem cleaned_finalStacks (t : GraphTables.Table) (output : List Bool) :
       | inr k => cases k <;> rfl
     | inr i => fin_cases i <;> rfl
 
-theorem cleaned_length_le (base : Tape → List Bool) (k : Nat) :
-    ∀ j, (cleaned base k j).length ≤ (base j).length := by
-  induction k with
-  | zero => intro j; exact Nat.le_refl _
-  | succ k ih =>
-    intro j
-    simp only [cleaned]
-    split
-    · rename_i hk
-      by_cases hj : j = clearTape ⟨k,hk⟩
-      · simp [hj]
-      · simpa only [Function.update_of_ne hj] using ih j
-    · exact ih j
-
-theorem cleanupTime_le (base : Tape → List Bool) (cap : Nat)
-    (bounded : ∀ i : Fin 7, (base (clearTape i)).length ≤ cap) (k : Nat) :
-    cleanupTime base k ≤ k*(cap+1) := by
-  induction k with
-  | zero => simp [cleanupTime]
-  | succ k ih =>
-    simp only [cleanupTime]
-    split
-    · rename_i hk
-      have hword := (cleaned_length_le base k (clearTape ⟨k,hk⟩)).trans (bounded ⟨k,hk⟩)
-      calc
-        cleanupTime base k + ((cleaned base k (clearTape ⟨k,hk⟩)).length+1) ≤
-            k*(cap+1)+(cap+1) := by omega
-        _ = (k+1)*(cap+1) := by simp only [Nat.add_mul, one_mul]
-    · exact ih.trans (Nat.mul_le_mul_right _ (by omega))
+/-- Each of the seven distinct cleanup tapes is drained once. Its cost is
+therefore the sum of its entry word lengths, not a uniform worst-case cap. -/
+theorem cleanupTime_final (t : GraphTables.Table) (output : List Bool) :
+    cleanupTime (finalStacks t output) 7 =
+      2 * t.darts + 2 * t.vertices +
+      2 * PreprocessingPaddingOffsets.offset (PreprocessingRegularTables.padding t) t.vertices +
+      Header.vertexTotal t + Header.dartTotal PreprocessingRegularTables.internalDegree t + 14 := by
+  simp [cleanupTime, cleaned, clearTape, finalStacks, frame, coreTape, headerTape,
+    ownerData, headerData, MachineRegularOriginalBody.frame, MachineRegularMetadata.frame,
+    headerStacks, headerAux, Header.nTape, Header.verticesTape, Header.dartsTape,
+    Header.tableTape, Header.mTape, Header.outputTape, encodeWord_length]
+  omega
 
 theorem cleanupTime_final_le (t : GraphTables.Table) (output : List Bool) :
     cleanupTime (finalStacks t output) 7 ≤
       (7*(ExpanderFamily.growth*(PreprocessingRegularTables.internalDegree+4)+4)) *
         (PreprocessingMachineBounds.inputLength t+1) := by
-  let L := PreprocessingMachineBounds.inputLength t
-  let g := ExpanderFamily.growth
-  let q := PreprocessingRegularTables.internalDegree
-  let C := g*(q+4)+4
-  have hm : t.darts ≤ L := GraphTables.darts_le_tableBits_length t
-  have hn : t.vertices ≤ L := GraphTables.vertices_le_tableBits_length t
-  have hs : PreprocessingPaddingOffsets.offset (PreprocessingRegularTables.padding t) t.vertices ≤ g*L :=
-    PreprocessingMachineBounds.prefix_le_input t t.vertices
-  have hN : Header.vertexTotal t ≤ g*L := PreprocessingMachineBounds.regularVertices_le_input t
-  have hone : 1 ≤ C := by dsimp [C]; omega
-  have hg : g ≤ C := by
-    have h := Nat.mul_le_mul_left g (show 1 ≤ q+4 by omega)
-    dsimp [C]
-    omega
-  have hgp : g+1 ≤ C := by
-    have h := Nat.mul_le_mul_left g (show 1 ≤ q+4 by omega)
-    dsimp [C]
-    omega
-  have hgq : g*(q+1) ≤ C := by
-    have h := Nat.mul_le_mul_left g (show q+1 ≤ q+4 by omega)
-    dsimp [C]
-    omega
-  have hmC : t.darts ≤ C*L := hm.trans (by simpa using Nat.mul_le_mul_right L hone)
-  have hnC : t.vertices ≤ C*L := hn.trans (by simpa using Nat.mul_le_mul_right L hone)
-  have hsC : PreprocessingPaddingOffsets.offset (PreprocessingRegularTables.padding t) t.vertices ≤ C*L :=
-    hs.trans (Nat.mul_le_mul_right L hg)
-  have hNC : Header.vertexTotal t ≤ C*L := hN.trans (Nat.mul_le_mul_right L hg)
-  have hxC : t.darts +
-      PreprocessingPaddingOffsets.offset (PreprocessingRegularTables.padding t) t.vertices ≤ C*L := by
-    calc
-      _ ≤ L+g*L := Nat.add_le_add hm hs
-      _ = (g+1)*L := by simp only [Nat.add_mul, one_mul, Nat.add_comm]
-      _ ≤ C*L := Nat.mul_le_mul_right L hgp
-  have hRC : Header.dartTotal q t ≤ C*L := by
-    calc
-      _ ≤ (g*L)*(q+1) := Nat.mul_le_mul_right _ hN
-      _ = (g*(q+1))*L := by ac_rfl
-      _ ≤ C*L := Nat.mul_le_mul_right L hgq
-  have bounds : ∀ i : Fin 7, (finalStacks t output (clearTape i)).length ≤ C*L+1 := by
-    intro i
-    fin_cases i
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hxC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hnC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hsC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hmC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hnC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hNC 1
-    · change (encodeWord _).length ≤ _
-      simpa only [encodeWord_length] using Nat.add_le_add_right hRC 1
-  have actual := cleanupTime_le (finalStacks t output) (C*L+1) bounds 7
-  have hC : 2 ≤ C := by dsimp [C]; omega
-  change cleanupTime (finalStacks t output) 7 ≤ (7*C)*(L+1)
+  have hm := GraphTables.darts_le_tableBits_length t
+  have hn := GraphTables.vertices_le_tableBits_length t
+  have hs := PreprocessingMachineBounds.prefix_le_input t t.vertices
+  have hN := PreprocessingMachineBounds.regularVertices_le_input t
+  have hR := Nat.mul_le_mul_right (PreprocessingRegularTables.internalDegree + 1) hN
+  rw [cleanupTime_final]
+  unfold Header.dartTotal Header.vertexTotal
+  dsimp only [PreprocessingMachineBounds.inputLength] at *
   nlinarith
 
 def headerOutput (t : GraphTables.Table) : List Bool :=
@@ -1707,10 +1528,6 @@ noncomputable def totalTime (H : BaseTable) (t : GraphTables.Table) : Nat :=
     (1+2*(t.vertices+2)+(ownerElapsed H t (oldOutput H t) t.vertices+1)) +
     cleanupTime (finalStacks t (finalOutput H t)) 7
 
-theorem old_output_eq_originalPrefix (H : BaseTable) (t : GraphTables.Table) (k : Nat) :
-    Header.headerBits PreprocessingRegularTables.internalDegree t ++ oldPrefix H t k =
-      PreprocessingRegularBounds.originalPrefix t (PreprocessingRegularTables.padding t)
-        (PreprocessingRegularTables.familyCloudTable H t) k := rfl
 
 theorem finalOutput_eq (H : BaseTable) (t : GraphTables.Table) :
     finalOutput H t = PortTables.tableBits (PreprocessingRegularTables.regularize H t) := by

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineClone100Certified
 import OAI.Computability.UniqueGames.Machines.MachineFiniteAlphabet
 import OAI.Computability.UniqueGames.PCP.Clone100
@@ -88,7 +89,6 @@ def computation : TM2ComputableInPolyTime SourceEncoding.inputBits
 theorem finiteAlphabet : MachineFiniteAlphabet.FiniteAlphabet computation.tm :=
   MachineFiniteAlphabet.of_bool _ (fun _ => rfl)
 
-def fullRunInTime (input : SourceEncoding.Input) := computation.outputsFun input
 
 end
 

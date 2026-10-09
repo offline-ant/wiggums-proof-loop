@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.DeriveFintype
 import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachineFiniteTable
@@ -13,7 +14,7 @@ namespace OAI
 section
 
 /-!
-# Prefix and suffix invariants for regular-table row loops
+# Prefix invariants for regular-table row loops
 
 These finite block identities apply to original-vertex blocks, to dummy blocks
 within an owner, and to whole owner blocks. They expose exactly the next emitted
@@ -25,10 +26,6 @@ namespace UniqueGamesTheorem.Foundations.PCP.PreprocessingRegularLoopWords
 /-- Bits emitted by the first `k` blocks. -/
 def blocksPrefix {n : Nat} (f : Fin n → List Bool) (k : Nat) : List Bool :=
   ((List.ofFn f).take k).flatten
-
-/-- Bits remaining after the first `k` blocks. -/
-def blocksSuffix {n : Nat} (f : Fin n → List Bool) (k : Nat) : List Bool :=
-  ((List.ofFn f).drop k).flatten
 
 @[simp] theorem blocksPrefix_zero {n : Nat} (f : Fin n → List Bool) :
     blocksPrefix f 0 = [] := by
@@ -48,28 +45,6 @@ theorem blocksPrefix_succ {n : Nat} (f : Fin n → List Bool) (k : Nat) (h : k <
   simp only [List.flatten_append, List.flatten_cons, List.flatten_nil,
     List.append_nil, List.getElem_ofFn]
 
-@[simp] theorem blocksSuffix_zero {n : Nat} (f : Fin n → List Bool) :
-    blocksSuffix f 0 = (List.ofFn f).flatten := by
-  simp only [blocksSuffix, List.drop_zero]
-
-@[simp] theorem blocksSuffix_all {n : Nat} (f : Fin n → List Bool) :
-    blocksSuffix f n = [] := by
-  have h : (List.ofFn f).drop n = [] := by
-    simpa only [List.length_ofFn] using (List.drop_length (l := List.ofFn f))
-  exact congrArg List.flatten h
-
-theorem blocksSuffix_succ {n : Nat} (f : Fin n → List Bool) (k : Nat) (h : k < n) :
-    blocksSuffix f k = f ⟨k, h⟩ ++ blocksSuffix f (k + 1) := by
-  unfold blocksSuffix
-  rw [List.drop_eq_getElem_cons
-    (show k < (List.ofFn f).length by simpa only [List.length_ofFn] using h)]
-  simp only [List.flatten_cons, List.getElem_ofFn]
-
-/-- The completed and remaining portions partition the original bitstream. -/
-theorem blocksPrefix_append_suffix {n : Nat} (f : Fin n → List Bool) (k : Nat) :
-    blocksPrefix f k ++ blocksSuffix f k = (List.ofFn f).flatten := by
-  unfold blocksPrefix blocksSuffix
-  rw [← List.flatten_append, List.take_append_drop]
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingRegularLoopWords
 
@@ -96,9 +71,7 @@ theorem offset_succ {n : Nat} (p : Fin n → Nat) (k : Nat) (h : k < n) :
 
 theorem blocksPrefix_length_le {n : Nat} (f : Fin n → List Bool) (k : Nat) :
     (blocksPrefix f k).length ≤ (List.ofFn f).flatten.length := by
-  have h := congrArg List.length (blocksPrefix_append_suffix f k)
-  simp only [List.length_append] at h
-  omega
+  exact (List.take_sublist k (List.ofFn f)).flatten.length_le
 
 def header (t : GraphTables.Table) (p : Fin t.vertices → Nat) (q : Nat) : List Bool :=
   encodeWords [vertexCount t p, vertexCount t p * (q + 1)]
@@ -181,42 +154,6 @@ theorem regular_dummyPrefix_le (H : BaseTable) (v : Fin t.vertices) (k : Nat) :
   (dummyPrefix_length_le t (padding t) (familyCloudTable H t) v k).trans
     (PreprocessingMachineBounds.regularBits_le H t)
 
-/-- The number of original and dummy vertex visits is exactly the constructed
-vertex count; adding owner visits still gives a linear bound in input bits. -/
-theorem visits_le_input :
-    t.darts + t.vertices + (∑ v, padding t v) + 1 ≤
-      (ExpanderFamily.growth + 1) * PreprocessingMachineBounds.inputLength t + 1 := by
-  have hv := PreprocessingMachineBounds.regularVertices_le_input t
-  have hn := GraphTables.vertices_le_tableBits_length t
-  change t.vertices ≤ PreprocessingMachineBounds.inputLength t at hn
-  unfold vertexCount at hv
-  rw [Nat.add_mul, one_mul]
-  omega
-
-/-- An elementary budget aggregation for the actual three finite loops. The
-per-call bounds must be supplied from the separately checked subprogram runs. -/
-theorem sum_body_costs_le (old : Fin t.darts → Nat) (owners : Fin t.vertices → Nat)
-    (dummy : ∀ v : Fin t.vertices, Fin (padding t v) → Nat) (setup cap : Nat)
-    (hs : setup ≤ cap) (ho : ∀ e, old e ≤ cap) (hv : ∀ v, owners v ≤ cap)
-    (hd : ∀ v j, dummy v j ≤ cap) :
-    setup + (∑ e, old e) + (∑ v, owners v) + (∑ v, ∑ j, dummy v j) ≤
-      ((ExpanderFamily.growth + 1) * PreprocessingMachineBounds.inputLength t + 1) * cap := by
-  have hOld : (∑ e, old e) ≤ t.darts * cap := by
-    simpa using Finset.sum_le_sum (fun e (_ : e ∈ Finset.univ) => ho e)
-  have hOwners : (∑ v, owners v) ≤ t.vertices * cap := by
-    simpa using Finset.sum_le_sum (fun v (_ : v ∈ Finset.univ) => hv v)
-  have hDummy : (∑ v, ∑ j, dummy v j) ≤ (∑ v, padding t v) * cap := by
-    calc
-      _ ≤ ∑ v, padding t v * cap := by
-        apply Finset.sum_le_sum
-        intro v _
-        simpa using Finset.sum_le_sum (fun j (_ : j ∈ Finset.univ) => hd v j)
-      _ = _ := (Finset.sum_mul ..).symm
-  calc
-    _ ≤ (t.darts + t.vertices + (∑ v, padding t v) + 1) * cap := by
-      rw [Nat.add_mul, Nat.add_mul, Nat.add_mul, one_mul]
-      omega
-    _ ≤ _ := Nat.mul_le_mul_right cap (visits_le_input t)
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingRegularBounds
 

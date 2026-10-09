@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.Dimension.Free
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticHybridCoordinatesRankLemmas
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticHybridEnergyImageTransportCoreLemmas
@@ -41,25 +42,14 @@ theorem image_fiber_coefficient_transport (W D : Submodule F2 U) (h : IsCompl W 
         (linearTraceCharacter S T).re else 0) =
       adaptedFiberCoefficient z (imagePullback W D h f) (imageTranslate W D h T) := by
   rw [image_coefficient_sum_transport W D h z f T (Module.finrank F2 (A × (W × C)))]
-  let weight : ((B × C) →ₗ[F2] (A × (W × D))) → ℝ := fun S =>
-    (if LinearIdentities.Hybrid S (LinearMap.range (LinearMap.inl F2 A (W × D)))
-      (LinearMap.range (LinearMap.inl F2 B C)) then
-        linearCoeff (rankComponent (Module.finrank F2 (A × (W × C)))
-          (imagePullback W D h f)) S else 0) *
-      (linearTraceCharacter S (imageTranslate W D h T)).re
-  have hs : (∑ S with compressBlock S = z.prod (0 : B →ₗ[F2] D), weight S) =
-      adaptedFiberCoefficient z (imagePullback W D h f) (imageTranslate W D h T) := by
-    exact Finset.sum_subtype
-      (Finset.univ.filter fun S : (B × C) →ₗ[F2] (A × (W × D)) =>
-        compressBlock S = z.prod (0 : B →ₗ[F2] D)) (by simp) weight
-  rw [← hs, Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro S _
-  by_cases hh : LinearIdentities.Hybrid S
-      (LinearMap.range (LinearMap.inl F2 A (W × D)))
-      (LinearMap.range (LinearMap.inl F2 B C)) <;>
-    by_cases hc : compressBlock S = z.prod (0 : B →ₗ[F2] D) <;>
-    simp [weight, hh, hc]
+  unfold adaptedFiberCoefficient
+  apply Finset.sum_congr_set
+  · intro S hS
+    change compressBlock S = z.prod (0 : B →ₗ[F2] D) at hS
+    simp [hS, ite_mul]
+  · intro S hS
+    change compressBlock S ≠ z.prod (0 : B →ₗ[F2] D) at hS
+    simp [hS]
 
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy
 
@@ -161,13 +151,8 @@ theorem product_energy_eq_filter_coefficient
         Module.finrank F2 Z.range = i - (Module.finrank F2 A + Module.finrank F2 C),
         productFiberCoefficient i f T Z ^ 2 := by
   rw [hybridDerivative_rankComponent_product_energy_eq_rank_fibers]
-  apply Finset.sum_congr rfl
-  intro frequency _
-  congr 1
   unfold productFiberCoefficient
-  apply Finset.sum_congr rfl
-  intro dualMap _
-  split_ifs <;> rfl
+  congr!
 
 /-- One actual compressed-image contribution follows from the uniform
 mixed-slice premise, retaining the exact finite-coordinate cost. -/

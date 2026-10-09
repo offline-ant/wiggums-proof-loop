@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.FiberEnergyLemmas
 import OAI.Computability.UniqueGames.Inverse.KMSAffineRestrictionPresentationLemmas
 
@@ -80,21 +81,6 @@ theorem hybridDerivative_rankComponent_eq_zero_of_lt_order
   rw [linearCoeff_hybridDerivative_rankComponent_eq_zero A B T f i Z (by omega)]
   simp [linearCoeff]
 
-/-- Parseval restricted to the exact rank-loss equality. -/
-theorem hybridDerivative_rankComponent_energy_eq_support
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    [Fintype (B →ₗ[F2] (E ⧸ A))]
-    (T : E →ₗ[F2] F) (f : (E →ₗ[F2] F) → ℝ) (i : ℕ) :
-    (𝔼 N, hybridDerivative A B T (rankComponent i f) N ^ 2) =
-      ∑ Z : B →ₗ[F2] (E ⧸ A) with Module.finrank F2 Z.range + order A B = i,
-        linearCoeff (hybridDerivative A B T (rankComponent i f)) Z ^ 2 := by
-  rw [← linear_parseval, Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro Z _
-  by_cases hZ : Module.finrank F2 Z.range + order A B = i
-  · rw [ite_eq_left hZ]
-  · rw [ite_eq_right hZ, linearCoeff_hybridDerivative_rankComponent_eq_zero A B T f i Z hZ]
-    norm_num
 
 /-- Exact normalized energy is supported on compressed frequencies of rank
 `i - order A B`. This also holds above the order cutoff since every

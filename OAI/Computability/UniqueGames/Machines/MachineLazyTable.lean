@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
@@ -22,19 +23,11 @@ inductive Tape
   | tail | old | relation | scratch | divided | quotient | newReverse | rowBuffer
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.input, .output, .source, .vertices, .darts, .fuel,
-  .vertex, .reverse, .tail, .old, .relation, .scratch, .divided, .quotient, .newReverse,
-  .rowBuffer]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .output, .source, .vertices, .darts, .fuel,
+  .vertex, .reverse, .tail, .old, .relation, .scratch, .divided, .quotient, .newReverse,
+  .rowBuffer}
+  complete x := by cases x <;> simp
 
 abbrev State (d : Nat) := MachineLazyRows.StreamState Unit d
 
@@ -132,10 +125,6 @@ def loopTapes (d : Nat) (input : List Bool) (n m left v : Nat)
     (encodeWord v) (encodeWord (2 * d * v))
 
 def finalTapes (input output : List Bool) : Tape → List Bool := frame input [] output [] [] [] [] []
-
-private theorem joinTrace {X : Type} {f : X → X} {a b c : X} {s t : Nat}
-    (first : f^[s] a = b) (second : f^[t] b = c) : f^[s + t] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Lift the actual dummy-block routine into the full program and account for
 the exact preserved frame. The tail and relation are cleared in the next phase. -/
@@ -277,7 +266,7 @@ theorem prefixTrace (d : Nat) (positive : 0 < d) (n m : Nat) (rows : List Bool) 
     simp only [Function.iterate_one, advance_some, TM2.step, program, TM2.stepAux]
     apply congrArg some
     exact congrArg (TM2.Cfg.mk _ _) ht
-  have all := joinTrace (joinTrace (joinTrace (joinTrace c₀ c₁) c₂) c₃) c₄
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans c₀ c₁) c₂) c₃) c₄
   have hc : MachineTableSplit.exactSteps n m rows + (2 * (m + 1) + 1) +
       (2 * (n + 1) + 1) + 2 * (n + 2) + 1 = prefixSteps n m rows := by
     dsimp [MachineTableSplit.exactSteps, prefixSteps]
@@ -412,7 +401,7 @@ theorem bodyTrace {n m : Nat} (d : Nat) (positive : 0 < d) (input : List Bool)
       stepAux_pushWord, TM2.stepAux]
     apply congrArg some
     exact congrArg (TM2.Cfg.mk _ _) ht
-  have all := joinTrace (joinTrace (joinTrace (joinTrace (joinTrace c₀ c₁) c₂) c₃) c₄) c₅
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans c₀ c₁) c₂) c₃) c₄) c₅
   exact all
 
 theorem drainPhase (d : Nat) (positive : 0 < d) (tape : Tape) (label : Label d)
@@ -477,7 +466,7 @@ theorem finishTrace (d : Nat) (positive : 0 < d) (input output : List Bool) (n m
       simp [b₄, b₃, b₂, b₁, b₀, loopTapes, frame]
     simpa only [hv, encodeWord_length, Nat.add_assoc, hend] using
       drainPhase d positive .reverse .clearReverse none rfl b₄
-  have all := joinTrace (joinTrace (joinTrace (joinTrace (joinTrace c₀ c₁) c₂) c₃) c₄) c₅
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans c₀ c₁) c₂) c₃) c₄) c₅
   have hc : 1 + (n + 2) + (m + 2) + 2 + (v + 2) + (2 * d * v + 2) =
       finishSteps d n m v := by dsimp [finishSteps]; omega
   rw [hc] at all
@@ -506,23 +495,17 @@ theorem vertexBlock_codec {n d : Nat} (table : PortTables.Table n d) (v : Fin n)
   rw [vertexBlock, MachineLazyCodec.rowsBits_stay, MachineLazyRows.recordsOutput_lazy,
     PreprocessingLazyWords.vertexRows, List.flatMap_append, encodeWords_append]
 
-private theorem encodeWords_flatMap {α : Type} (xs : List α) (f : α → List Nat) :
-    encodeWords (xs.flatMap f) = xs.flatMap (fun x => encodeWords (f x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 theorem inputBlocks_codec {n d : Nat} (table : PortTables.Table n d) (events : List (Fin n)) :
     inputBlocks table events = encodeWords
       ((events.flatMap (fun v => List.ofFn (PreprocessingLazyWords.row table v))).flatMap
         GraphTables.rowWords) := by
-  rw [List.flatMap_assoc, encodeWords_flatMap]
+  rw [List.flatMap_assoc, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [inputBlocks, MachineLazyRows.recordsInput_eq_codec]
 
 theorem outputBlocks_codec {n d : Nat} (table : PortTables.Table n d) (events : List (Fin n)) :
     outputBlocks table events = encodeWords
       ((events.flatMap (PreprocessingLazyWords.vertexRows table)).flatMap GraphTables.rowWords) := by
-  rw [List.flatMap_assoc, encodeWords_flatMap]
+  rw [List.flatMap_assoc, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [outputBlocks, vertexBlock_codec]
 
 theorem input_table_codec {n d : Nat} (table : PortTables.Table n d) :
@@ -588,7 +571,7 @@ theorem loopTrace {n d : Nat} (table : PortTables.Table n d) (positive : 0 < d)
       simpa only [hguard, clean_pair] using guard
     have c₁ := bodyTrace d positive input count r rows rest output
     have c₂ := ih (r + 1) (by omega) (output ++ vertexBlock d r rows)
-    have all := joinTrace (joinTrace c₀ c₁) c₂
+    have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans c₀ c₁) c₂
     have hi : inputBlocks table (remaining n r) = source := by
       rw [remaining_cons n r hr]
       rfl
@@ -615,7 +598,7 @@ theorem tableTrace {n d : Nat} (table : PortTables.Table n d) (positive : 0 < d)
   have loop := loopTrace table positive (PortTables.tableBits table) n 0 (by omega)
     (encodeWords [n, 2 * (n * d)])
   simp only [remaining_zero] at loop
-  have all := joinTrace prefixRun loop
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prefixRun loop
   rw [← output_table_codec table] at all
   exact all
 
@@ -851,11 +834,6 @@ def machine (d : Nat) (positive : 0 < d) : FinTM2 where
   initialState := clean d positive
   m := program d positive
 
-theorem machine_alphabet_finite (d : Nat) (positive : 0 < d) :
-    ∀ k, Finite ((machine d positive).Γ k) := by
-  intro k
-  change Finite Bool
-  infer_instance
 
 theorem initial_configuration (d : Nat) (positive : 0 < d) (input : List Bool) :
     initList (machine d positive) input =
@@ -869,9 +847,6 @@ theorem initial_configuration (d : Nat) (positive : 0 < d) (input : List Bool) :
 @[simp] theorem finalTapes_input (input output : List Bool) : finalTapes input output .input = input := rfl
 @[simp] theorem finalTapes_output (input output : List Bool) : finalTapes input output .output = output := rfl
 
-theorem finalTapes_work_empty (input output : List Bool) (t : Tape)
-    (hi : t ≠ .input) (ho : t ≠ .output) : finalTapes input output t = [] := by
-  cases t <;> simp_all [finalTapes, frame]
 
 /-- A full actual finite-machine execution with a fixed-degree polynomial
 budget, the exact lazy-table output, preserved original input, and clean work. -/

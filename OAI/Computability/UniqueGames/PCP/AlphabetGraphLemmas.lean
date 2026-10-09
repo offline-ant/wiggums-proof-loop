@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Expect
@@ -172,15 +173,6 @@ def average [Fintype E] (G : ConstraintGraph V E A)
     (assignment : Address V E A → Bool) : ℝ :=
   𝔼 event : Event E A, eventReject G assignment event
 
-omit [Nonempty A] in
-theorem average_eq_testers [Fintype E] (G : ConstraintGraph V E A)
-    (assignment : Address V E A → Bool) :
-    average G assignment = 𝔼 e : E, AlphabetReduction.edgeTesterReject (G.accepts e)
-      (vertexBlock assignment (G.tail e)) (vertexBlock assignment (G.head e))
-      (edgeOracle G assignment e) := by
-  unfold average
-  rw [expect_prod]
-  exact Finset.expect_congr rfl (fun e _ => localAverage_eq_tester G assignment e)
 
 def decodedLabeling (assignment : Address V E A → Bool) : V → A :=
   fun v => CodeComposition.nearest (vertexBlock assignment v)
@@ -234,20 +226,6 @@ omit [Nonempty A] in
     Fintype.card (Event E A) = Fintype.card E * Fintype.card (LocalEvent A) :=
   Fintype.card_prod _ _
 
-omit [Nonempty A] in
-/-- This factor depends only on the old alphabet, never on a dart predicate. -/
-theorem card_localEvent :
-    Fintype.card (LocalEvent A) =
-      4 * (2 * 2 ^ Fintype.card A) * (2 ^ (Fintype.card A * Fintype.card A)) ^ 5 := by
-  simp [LocalEvent, AlphabetReduction.InputCoordinate, Cube, Fintype.card_prod,
-    pow_succ, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm]
-
-omit [Nonempty A] in
-theorem card_address [Fintype V] [Fintype E] :
-    Fintype.card (Address V E A) =
-      Fintype.card V * 2 ^ Fintype.card A +
-        Fintype.card E * 2 ^ (Fintype.card A * Fintype.card A) := by
-  simp [Address, Cube, Fintype.card_sum, Fintype.card_prod]
 
 /-- The actual event count has a uniform loss of 2048, with no edge-dependent
 sample multiplicities. This count statement also permits an empty dart type. -/
@@ -319,34 +297,6 @@ theorem perfect_completeness [DecidableEq V] [DecidableEq E] (G : ConstraintGrap
   exact QueryIncidence.satisfiable_of_verifier_satisfiable (verifier G) (by omega)
     ⟨honestAssignment G labeling, honest_event G labeling h⟩
 
-/-- The combined tester and incidence losses are 2048 × 6 = 12288. -/
-theorem gap_transfer [Fintype E] [DecidableEq V] [DecidableEq E]
-    (G : ConstraintGraph V E A) (a b : Nat)
-    (source : ∀ labeling : V → A,
-      a * Fintype.card E ≤ b * G.rejectionCount labeling)
-    (labeling : QueryIncidence.Vertex (Event E A) (Address V E A) → QueryIncidence.Label 6) :
-    a * Fintype.card (QueryIncidence.Dart (Event E A) 6) ≤
-      (b * 12288) * (graph G).rejectionCount labeling := by
-  have verifierGap (assignment : Address V E A → Bool) :
-      a * Fintype.card (Event E A) ≤
-        (b * 2048) * QueryIncidence.verifierRejectionCount (verifier G) assignment := by
-    rw [card_event]
-    calc
-      a * (Fintype.card E * Fintype.card (LocalEvent A)) =
-          Fintype.card (LocalEvent A) * (a * Fintype.card E) := by ac_rfl
-      _ ≤ Fintype.card (LocalEvent A) * (b * G.rejectionCount (decodedLabeling assignment)) :=
-        Nat.mul_le_mul_left _ (source (decodedLabeling assignment))
-      _ = b * (Fintype.card (LocalEvent A) * G.rejectionCount (decodedLabeling assignment)) := by
-        ac_rfl
-      _ ≤ b * (2048 * QueryIncidence.verifierRejectionCount (verifier G) assignment) :=
-        Nat.mul_le_mul_left _ (rejection_count_bound G assignment)
-      _ = (b * 2048) * QueryIncidence.verifierRejectionCount (verifier G) assignment := by ac_rfl
-  have h := QueryIncidence.gap_transfer (verifier G) (by omega) a (b * 2048) verifierGap labeling
-  have hcoef : b * 2048 * 6 = b * 12288 := by omega
-  rw [hcoef] at h
-  exact h
-
-theorem alphabet_card : Fintype.card (QueryIncidence.Label 6) = 64 := QueryIncidence.six_query_alphabet
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetGraph
 
@@ -427,56 +377,6 @@ omit [Nonempty A]
 
 variable [Fintype V] [Fintype E]
 
-theorem card_output_vertex :
-    Fintype.card (OutputVertex V E A) =
-      Fintype.card V * 2 ^ Fintype.card A +
-        Fintype.card E * vertexFactor (Fintype.card A) := by
-  rw [QueryIncidence.card_vertex, AlphabetGraph.card_event,
-    AlphabetGraph.card_address, AlphabetGraph.card_localEvent]
-  unfold vertexFactor localEventFactor
-  ring
-
-theorem card_output_dart :
-    Fintype.card (OutputDart E A) = Fintype.card E * dartFactor (Fintype.card A) := by
-  rw [QueryIncidence.card_dart, AlphabetGraph.card_event, AlphabetGraph.card_localEvent]
-  unfold dartFactor localEventFactor
-  ring
-
-theorem card_output_total :
-    Fintype.card (OutputVertex V E A) + Fintype.card (OutputDart E A) =
-      Fintype.card V * 2 ^ Fintype.card A +
-        Fintype.card E * (vertexFactor (Fintype.card A) + dartFactor (Fintype.card A)) := by
-  rw [card_output_vertex, card_output_dart]
-  ring
-
-/-- One coefficient depending only on the alphabet bounds the actual total
-number of output vertices and darts. -/
-theorem card_output_total_le :
-    Fintype.card (OutputVertex V E A) + Fintype.card (OutputDart E A) ≤
-      sizeFactor (Fintype.card A) * (Fintype.card V + Fintype.card E) := by
-  rw [card_output_total]
-  have hv : 2 ^ Fintype.card A ≤ sizeFactor (Fintype.card A) := by
-    unfold sizeFactor
-    omega
-  have he : vertexFactor (Fintype.card A) + dartFactor (Fintype.card A) ≤
-      sizeFactor (Fintype.card A) := by
-    unfold sizeFactor
-    exact Nat.add_le_add_right (Nat.le_add_left _ _) _
-  calc
-    _ ≤ Fintype.card V * sizeFactor (Fintype.card A) +
-        Fintype.card E * sizeFactor (Fintype.card A) :=
-      Nat.add_le_add (Nat.mul_le_mul_left _ hv) (Nat.mul_le_mul_left _ he)
-    _ = _ := by ring
-
-theorem card_output_vertex_le :
-    Fintype.card (OutputVertex V E A) ≤
-      sizeFactor (Fintype.card A) * (Fintype.card V + Fintype.card E) :=
-  (Nat.le_add_right _ _).trans card_output_total_le
-
-theorem card_output_dart_le :
-    Fintype.card (OutputDart E A) ≤
-      sizeFactor (Fintype.card A) * (Fintype.card V + Fintype.card E) :=
-  (Nat.le_add_left _ _).trans card_output_total_le
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetGraphBounds
 
@@ -508,11 +408,6 @@ def productEquiv {A B : Type*} {a b : Nat} (left : A ≃ Fin a) (right : B ≃ F
     A × B ≃ Fin (a * b) :=
   (Equiv.prodCongr left right).trans finProdFinEquiv
 
-@[simp] theorem productEquiv_val {A B : Type*} {a b : Nat}
-    (left : A ≃ Fin a) (right : B ≃ Fin b) (x : A) (y : B) :
-    (productEquiv left right (x, y)).val = (left x).val * b + (right y).val := by
-  change (right y).val + b * (left x).val = _
-  simp [Nat.mul_comm, Nat.add_comm]
 
 /-- The complete left block precedes the complete right block. -/
 def sumEquiv {A B : Type*} {a b : Nat} (left : A ≃ Fin a) (right : B ≃ Fin b) :
@@ -541,56 +436,13 @@ remainder, as supplied by the executable `finFunctionFinEquiv`. -/
 def cubeEquiv (q : Nat) : Cube (Fin q) ≃ Fin (tapeCount q) :=
   (Equiv.arrowCongr (Equiv.refl (Fin q)) boolEquiv).trans finFunctionFinEquiv
 
-def cubeRank {q : Nat} (tape : Cube (Fin q)) : Fin (tapeCount q) := cubeEquiv q tape
-def cubeUnrank {q : Nat} (index : Fin (tapeCount q)) : Cube (Fin q) :=
-  (cubeEquiv q).symm index
-
-@[simp] theorem cubeUnrank_cubeRank {q : Nat} (tape : Cube (Fin q)) :
-    cubeUnrank (cubeRank tape) = tape := (cubeEquiv q).symm_apply_apply tape
-
-@[simp] theorem cubeRank_cubeUnrank {q : Nat} (index : Fin (tapeCount q)) :
-    cubeRank (cubeUnrank index) = index := (cubeEquiv q).apply_symm_apply index
-
-theorem cubeUnrank_digit {q : Nat} (index : Fin (tapeCount q)) (i : Fin q) :
-    bitValue (cubeUnrank index i) = index.val / 2 ^ i.val % 2 := by
-  have digit : boolEquiv (cubeUnrank index i) =
-      (⟨index.val / 2 ^ i.val % 2, Nat.mod_lt _ (by decide)⟩ : Fin 2) := by
-    change boolEquiv (boolEquiv.symm _) = _
-    exact boolEquiv.apply_symm_apply _
-  simpa only [boolEquiv_val] using congrArg Fin.val digit
-
-theorem cubeEquiv_val (q : Nat) (tape : Cube (Fin q)) :
-    (cubeEquiv q tape).val = ∑ i : Fin q, bitValue (tape i) * 2 ^ i.val := by
-  change (finFunctionFinEquiv (fun i => boolEquiv (tape i))).val = _
-  rw [finFunctionFinEquiv_apply]
-  simp only [boolEquiv_val]
 
 def pairIndex (q : Nat) : Fin q × Fin q ≃ Fin (q * q) := finProdFinEquiv
 
-theorem pairIndex_val (q : Nat) (i j : Fin q) :
-    (pairIndex q (i, j)).val = i.val * q + j.val := by
-  change j.val + q * i.val = _
-  simp [Nat.mul_comm, Nat.add_comm]
 
 def pairCubeEquiv (q : Nat) : Cube (Fin q × Fin q) ≃ Fin (pairTapeCount q) :=
   (Equiv.arrowCongr (pairIndex q) (Equiv.refl Bool)).trans (cubeEquiv (q * q))
 
-def pairCubeRank {q : Nat} (tape : Cube (Fin q × Fin q)) : Fin (pairTapeCount q) :=
-  pairCubeEquiv q tape
-
-def pairCubeUnrank {q : Nat} (index : Fin (pairTapeCount q)) : Cube (Fin q × Fin q) :=
-  (pairCubeEquiv q).symm index
-
-@[simp] theorem pairCubeUnrank_pairCubeRank {q : Nat} (tape : Cube (Fin q × Fin q)) :
-    pairCubeUnrank (pairCubeRank tape) = tape := (pairCubeEquiv q).symm_apply_apply tape
-
-@[simp] theorem pairCubeRank_pairCubeUnrank {q : Nat} (index : Fin (pairTapeCount q)) :
-    pairCubeRank (pairCubeUnrank index) = index := (pairCubeEquiv q).apply_symm_apply index
-
-theorem pairCubeEquiv_val (q : Nat) (tape : Cube (Fin q × Fin q)) :
-    (pairCubeEquiv q tape).val =
-      ∑ i : Fin (q * q), bitValue (tape ((pairIndex q).symm i)) * 2 ^ i.val :=
-  cubeEquiv_val (q * q) _
 
 def inputCoordinateEquiv (q : Nat) :
     AlphabetReduction.InputCoordinate (Fin q) ≃ Fin (2 * tapeCount q) :=
@@ -631,31 +483,6 @@ def dartEquiv (m q : Nat) :
 
 def labelEquiv : QueryIncidence.Label 6 ≃ Fin 64 := cubeEquiv 6
 
-theorem labelEquiv_val (label : QueryIncidence.Label 6) :
-    (labelEquiv label).val = ∑ i : Fin 6, bitValue (label i) * 2 ^ i.val :=
-  cubeEquiv_val 6 label
-
-@[simp] theorem inputCoordinateEquiv_val (q : Nat) (side : Bool) (tape : Cube (Fin q)) :
-    (inputCoordinateEquiv q (side, tape)).val =
-      bitValue side * tapeCount q + (cubeEquiv q tape).val := by
-  simp [inputCoordinateEquiv]
-
-theorem fivePairTapesEquiv_val (q : Nat) (f g r₀ r₁ r₂ : Cube (Fin q × Fin q)) :
-    (fivePairTapesEquiv q (f, g, r₀, r₁, r₂)).val =
-      (pairCubeEquiv q f).val * pairTapeCount q ^ 4 +
-        (pairCubeEquiv q g).val * pairTapeCount q ^ 3 +
-        (pairCubeEquiv q r₀).val * pairTapeCount q ^ 2 +
-        (pairCubeEquiv q r₁).val * pairTapeCount q + (pairCubeEquiv q r₂).val := by
-  simp [fivePairTapesEquiv, productEquiv_val, pow_succ, Nat.mul_assoc, Nat.add_assoc]
-
-theorem localEventEquiv_val (q : Nat) (kind : Fin 4)
-    (coordinate : AlphabetReduction.InputCoordinate (Fin q))
-    (f g r₀ r₁ r₂ : Cube (Fin q × Fin q)) :
-    (localEventEquiv q (kind, coordinate, f, g, r₀, r₁, r₂)).val =
-      kind.val * (2 * tapeCount q * fiveTapeCount q) +
-        (inputCoordinateEquiv q coordinate).val * fiveTapeCount q +
-        (fivePairTapesEquiv q (f, g, r₀, r₁, r₂)).val := by
-  simp [localEventEquiv, productEquiv_val, Nat.add_assoc]
 
 @[simp] theorem eventEquiv_val (m q : Nat) (edge : Fin m)
     (sample : AlphabetGraph.LocalEvent (Fin q)) :
@@ -718,15 +545,6 @@ def ordered {A : Type*} {count : Nat} (order : A ≃ Fin count) : List A :=
 @[simp] theorem ordered_length {A : Type*} {count : Nat} (order : A ≃ Fin count) :
     (ordered order).length = count := by simp [ordered]
 
-theorem mem_ordered {A : Type*} {count : Nat} (order : A ≃ Fin count) (x : A) :
-    x ∈ ordered order := by
-  simp only [ordered, List.mem_ofFn]
-  exact ⟨order x, order.symm_apply_apply x⟩
-
-theorem ordered_nodup {A : Type*} {count : Nat} (order : A ≃ Fin count) :
-    (ordered order).Nodup := by
-  rw [ordered, List.nodup_ofFn]
-  exact order.symm.injective
 
 @[simp] theorem ordered_refl (n : Nat) : ordered (Equiv.refl (Fin n)) = List.finRange n := rfl
 
@@ -755,26 +573,6 @@ theorem ordered_product {A B : Type*} {a b : Nat}
   rw [List.ofFn_mul]
   simp only [atIndex, List.flatMap_def, List.map_ofFn, Function.comp_def]
 
-/-- Sum enumeration puts the whole left block before the whole right block. -/
-theorem ordered_sum {A B : Type*} {a b : Nat}
-    (left : A ≃ Fin a) (right : B ≃ Fin b) :
-    ordered (sumEquiv left right) =
-      (ordered left).map Sum.inl ++ (ordered right).map Sum.inr := by
-  have atLeft (i : Fin a) :
-      (sumEquiv left right).symm (i.castLE (Nat.le_add_right a b)) =
-        Sum.inl (left.symm i) := by
-    change (Equiv.sumCongr left right).symm
-      (finSumFinEquiv.symm (Fin.castAdd b i)) = _
-    rw [finSumFinEquiv_symm_apply_castAdd]
-    rfl
-  have atRight (j : Fin b) :
-      (sumEquiv left right).symm (j.natAdd a) = Sum.inr (right.symm j) := by
-    change (Equiv.sumCongr left right).symm (finSumFinEquiv.symm (j.natAdd a)) = _
-    rw [finSumFinEquiv_symm_apply_natAdd]
-    rfl
-  unfold ordered
-  rw [List.ofFn_add]
-  simp only [atLeft, atRight, List.map_ofFn, Function.comp_def]
 
 def localEvents (q : Nat) : List (AlphabetGraph.LocalEvent (Fin q)) :=
   ordered (localEventEquiv q)
@@ -803,29 +601,11 @@ theorem ordered_dart (m q : Nat) :
   simp only [ordered_refl, ordered_bool, List.flatMap_assoc, List.flatMap_map,
     List.map_cons, List.map_nil]
 
-@[simp] theorem card_cube (q : Nat) : Fintype.card (Cube (Fin q)) = tapeCount q := by
-  simpa using Fintype.card_congr (cubeEquiv q)
-
-@[simp] theorem card_pairCube (q : Nat) :
-    Fintype.card (Cube (Fin q × Fin q)) = pairTapeCount q := by
-  simpa using Fintype.card_congr (pairCubeEquiv q)
-
-@[simp] theorem card_localEvent (q : Nat) :
-    Fintype.card (AlphabetGraph.LocalEvent (Fin q)) = localCount q := by
-  simpa using Fintype.card_congr (localEventEquiv q)
 
 @[simp] theorem card_event (m q : Nat) :
     Fintype.card (AlphabetGraph.Event (Fin m) (Fin q)) = eventCount m q := by
   simpa using Fintype.card_congr (eventEquiv m q)
 
-@[simp] theorem card_address (n m q : Nat) :
-    Fintype.card (AlphabetGraph.Address (Fin n) (Fin m) (Fin q)) = addressCount n m q := by
-  simpa using Fintype.card_congr (addressEquiv n m q)
-
-@[simp] theorem card_vertex (n m q : Nat) :
-    Fintype.card (QueryIncidence.Vertex (AlphabetGraph.Event (Fin m) (Fin q))
-      (AlphabetGraph.Address (Fin n) (Fin m) (Fin q))) = vertexCount n m q := by
-  simpa using Fintype.card_congr (vertexEquiv n m q)
 
 @[simp] theorem card_dart (m q : Nat) :
     Fintype.card (QueryIncidence.Dart (AlphabetGraph.Event (Fin m) (Fin q)) 6) =

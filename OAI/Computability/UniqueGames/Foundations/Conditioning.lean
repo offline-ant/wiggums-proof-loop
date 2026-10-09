@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.FiniteTrialsLemmas
 
 namespace OAI
@@ -74,11 +75,6 @@ theorem probability_and_eq_zero_of_probability_eq_zero (μ : FiniteDistribution 
   · exact (μ.probability_and_le_left given event).trans_eq zero
   · exact μ.probability_nonnegative _
 
-@[simp] theorem probability_condition_given (μ : FiniteDistribution Ω)
-    (given : Ω → Bool) (positive : 0 < μ.probability given) :
-    (μ.condition given positive).probability given = 1 := by
-  rw [μ.probability_condition]
-  simpa only [Bool.and_self] using div_self (ne_of_gt positive)
 
 end FiniteDistribution
 
@@ -145,14 +141,6 @@ theorem selectedSuccess_insert (G : Game Q₁ Q₂ A₁ A₂)
   rw [G.selectedWins_insert]
   exact (G.repetition n).questions.probability_inter_eq_mul_conditional _ _ positive
 
-theorem selectedSuccess_insert_eq_zero (G : Game Q₁ Q₂ A₁ A₂)
-    (strategy : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂))
-    (selected : Finset (Fin n)) (coordinate : Fin n)
-    (zero : G.selectedSuccess strategy selected = 0) :
-    G.selectedSuccess strategy (insert coordinate selected) = 0 := by
-  apply le_antisymm
-  · exact (G.selectedSuccess_antitone strategy (Finset.subset_insert coordinate selected)).trans_eq zero
-  · exact G.selectedSuccess_nonnegative _ _
 
 end Game
 

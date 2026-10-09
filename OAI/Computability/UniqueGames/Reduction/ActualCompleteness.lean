@@ -1,5 +1,7 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Order.BigOperators.Expect
+import OAI.Computability.UniqueGames.Gadgets.ConcatenationLemmas
 import OAI.Computability.UniqueGames.Reduction.ActualCanonicalLemmas
 import OAI.Computability.UniqueGames.Reduction.ActualGame
 import OAI.Computability.UniqueGames.Reduction.ActualSourceLemmas
@@ -26,31 +28,11 @@ theorem expect_linear_eval (τ : E →ₗ[F2] F2) (x : E) (hx : τ x = 1)
     (g : R → ℚ) :
     (𝔼 X : E →ₗ[F2] R, g (X x)) = 𝔼 r : R, g r := by
   classical
-  have hinv (r : R) : (𝔼 X : E →ₗ[F2] R, g (X x + r)) =
-      𝔼 X : E →ₗ[F2] R, g (X x) := by
-    let e : (E →ₗ[F2] R) ≃ (E →ₗ[F2] R) := Equiv.addRight (τ.smulRight r)
-    apply Fintype.expect_equiv e
-    intro X
-    simp [e, hx]
-  calc
-    (𝔼 X : E →ₗ[F2] R, g (X x)) =
-        𝔼 r : R, 𝔼 X : E →ₗ[F2] R, g (X x + r) := by simp only [hinv, Fintype.expect_const]
-    _ = 𝔼 X : E →ₗ[F2] R, 𝔼 r : R, g (X x + r) := Finset.expect_comm _ _ _
-    _ = 𝔼 r : R, g r := by
-      have hshift (a : R) : (𝔼 r : R, g (a + r)) = 𝔼 r : R, g r := by
-        apply Fintype.expect_equiv (Equiv.addLeft a)
-        intro r
-        rfl
-      simp only [hshift, Fintype.expect_const]
+  refine Gadget.EmbeddedConditional.expect_linear_surjective
+    (LinearMap.applyₗ (R := F2) (M₂ := R) x) ?_ g
+  intro r
+  exact ⟨τ.smulRight r, by simp [hx]⟩
 
-/-- Independent uniform linear maps retain independence after evaluating the
-same `h = 1` point. In particular the second coordinate is a uniform binary bit. -/
-theorem expect_independent_linear_evals [Fintype (E →ₗ[F2] F2)]
-    (τ : E →ₗ[F2] F2) (x : E) (hx : τ x = 1) (g : R → F2 → ℚ) :
-    (𝔼 X : E →ₗ[F2] R, 𝔼 ell : E →ₗ[F2] F2, g (X x) (ell x)) =
-      𝔼 r : R, 𝔼 b : F2, g r b := by
-  simp_rw [expect_linear_eval τ x hx]
-  exact expect_linear_eval τ x hx (fun r => 𝔼 b : F2, g r b)
 
 end Evaluation
 
@@ -96,12 +78,6 @@ theorem localNoiseFailure_eq_half (g : SplitGadget s d)
   simp only [div_eq_mul_inv]
   simp_rw [Finset.expect_mul]
 
-theorem localNoiseFailure_le (g : SplitGadget s d)
-    (τ : E →ₗ[F2] F2) (x : E) (hx : τ x = 1) :
-    localNoiseFailure g x ≤ g.stabilityError := by
-  rw [localNoiseFailure_eq_half g τ x hx]
-  have := g.stabilityError_nonneg
-  linarith
 
 end Noise
 
@@ -133,8 +109,7 @@ theorem tupleFailure_le (S : Source) (A : Fin S.variables → Bool) (k : Nat) :
         ∑ j : Fin k, if S.satisfied A (U j) then (0 : ℚ) else 1 := by
     by_cases hgood : ∀ j, S.satisfied A (U j) = true
     · simp [hgood]
-    · have hex : ∃ j, S.satisfied A (U j) ≠ true := not_forall.mp hgood
-      obtain ⟨j, hj⟩ := hex
+    · obtain ⟨j, hj⟩ := not_forall.mp hgood
       have hsum := Finset.single_le_sum
         (f := fun j : Fin k => if S.satisfied A (U j) then (0 : ℚ) else 1)
         (s := Finset.univ) (a := j) (by intro i _; split <;> norm_num)
@@ -309,17 +284,17 @@ theorem honest_acceptance_bound (S : Source) (k : Nat) {s d : Nat}
         ω.2.2 (sourcePoint S k A ω.1.1) • g.noise ω.2.1) =
       g.f (ω.1.2 (sourcePoint S k A ω.1.1)) then 0 else 1
   have hpoint (ω : ActualGame.Outcome S k g) :
-      (if P ω then (0 : ℚ) else 1) ≤ bad ω + noiseBad ω := by
+      1 - bad ω - noiseBad ω ≤ (if P ω then (1 : ℚ) else 0) := by
     by_cases hgood : ∀ j, S.satisfied A (ω.1.1 j) = true
     · have hL := honest_unfolded_valid S k g A false (ActualGame.leftQuery S k g ω) hgood
       have hR := honest_unfolded_valid S k g A true (ActualGame.rightQuery S k g ω) hgood
-      simp only [P, hL, hR, bad, ite_eq_left hgood, zero_add]
+      simp only [P, hL, hR, bad, ite_eq_left hgood, sub_zero]
       simp [noiseBad, ActualGame.leftQuery, ActualGame.rightQuery,
         LinearMap.add_apply, LinearMap.smulRight_apply, eq_comm]
-      exact le_rfl
+      split <;> simp_all
     · have hn : 0 ≤ noiseBad ω := by dsimp [noiseBad]; split <;> norm_num
-      have hf : (if P ω then (0 : ℚ) else 1) ≤ 1 := by split <;> norm_num
-      simpa only [bad, ite_eq_right hgood] using hf.trans (le_add_of_nonneg_right hn)
+      simp only [bad, ite_eq_right hgood, sub_self, zero_sub]
+      split <;> linarith
   have hbad : (𝔼 ω : ActualGame.Outcome S k g, bad ω) = tupleFailure S A k := by
     simp only [expect_pair, bad]
     change (𝔼 U : ActualGame.Question S k, 𝔼 _X : ActualGame.Map k s d,
@@ -333,59 +308,12 @@ theorem honest_acceptance_bound (S : Source) (k : Nat) {s d : Nat}
     have hu (U : ActualGame.Question S k) := localNoiseFailure_eq_half g
       ActualHomogeneous.tau (sourcePoint S k A U) (sourcePoint_tau S k A U)
     simp only [hu, Fintype.expect_const]
-  have hfailure : (𝔼 ω : ActualGame.Outcome S k g, if P ω then (0 : ℚ) else 1) ≤
-      tupleFailure S A k + g.stabilityError / 2 := by
-    calc
-      _ ≤ 𝔼 ω : ActualGame.Outcome S k g, (bad ω + noiseBad ω) :=
-        Finset.expect_le_expect (fun ω _ => hpoint ω)
-      _ = _ := by rw [Finset.expect_add_distrib, hbad, hnoise]
-  have hsum : ActualGame.acceptanceProbability S k g (honestLabeling S k g A) +
-      (𝔼 ω : ActualGame.Outcome S k g, if P ω then (0 : ℚ) else 1) = 1 := by
-    rw [ActualGame.acceptanceProbability_eq_test]
-    change (𝔼 ω : ActualGame.Outcome S k g, if P ω then (1 : ℚ) else 0) + _ = _
-    rw [← Finset.expect_add_distrib]
-    have hp (ω : ActualGame.Outcome S k g) :
-        (if P ω then (1 : ℚ) else 0) + (if P ω then (0 : ℚ) else 1) = 1 := by
-      split <;> norm_num
-    simp only [hp, Fintype.expect_const]
-  have htuple := tupleFailure_le S A k
-  linarith
+  have hmean := Finset.expect_le_expect (s := Finset.univ) (fun ω _ => hpoint ω)
+  rw [Finset.expect_sub_distrib, Finset.expect_sub_distrib, Fintype.expect_const,
+    hbad, hnoise] at hmean
+  rw [ActualGame.acceptanceProbability_eq_test]
+  exact (sub_le_sub_right (sub_le_sub_left (tupleFailure_le S A k) 1) _).trans hmean
 
-theorem honest_acceptance_of_bounds (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) (γ η ε : ℚ)
-    (hsource : S.failure A ≤ γ) (hstable : g.stabilityError ≤ η)
-    (hbudget : (k : ℚ) * γ + η / 2 ≤ ε) :
-    1 - ε ≤ ActualGame.acceptanceProbability S k g (honestLabeling S k g A) := by
-  have hm := mul_le_mul_of_nonneg_left hsource (show (0 : ℚ) ≤ k by positivity)
-  have hactual := honest_acceptance_bound S k g A
-  linarith
-
-/-- The probability bound is exactly a bound on the generated unweighted list. -/
-theorem honest_satisfied_fraction_bound (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) :
-    1 - (k : ℚ) * S.failure A - g.stabilityError / 2 ≤
-      (Foundations.Target.countSatisfied (honestLabeling S k g A)
-        (ActualGame.outputInstance S k g).constraints : ℚ) /
-        (ActualGame.outputInstance S k g).constraints.length := by
-  rw [← ActualGame.acceptanceProbability_eq_count]
-  exact honest_acceptance_bound S k g A
-
-/-- The honest labeling witnesses the formal target completeness predicate for
-the actual generated instance whenever its actual error budget fits the target. -/
-theorem actual_completeAt (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool)
-    (error : Foundations.Target.RationalError)
-    (hbudget : (k : ℚ) * S.failure A + g.stabilityError / 2 ≤
-      Integration.GapSemantics.errorValue error) :
-    Foundations.Target.CompleteAt error (ActualGame.outputInstance S k g) := by
-  apply (Integration.GapSemantics.completeAt_iff error _).2
-  refine ⟨honestLabeling S k g A, ?_⟩
-  change 1 - Integration.GapSemantics.errorValue error ≤
-    (Foundations.Target.countSatisfied (honestLabeling S k g A)
-      (ActualGame.outputInstance S k g).constraints : ℚ) /
-      (ActualGame.outputInstance S k g).constraints.length
-  have h := honest_satisfied_fraction_bound S k g A
-  linarith
 
 end
 end ActualLabeling

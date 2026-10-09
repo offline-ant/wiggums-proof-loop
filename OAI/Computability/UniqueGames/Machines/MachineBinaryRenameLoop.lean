@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryLiteralMachine
 
 namespace OAI
@@ -107,21 +108,6 @@ theorem steps_le (tokens input : List Token) (included : ∀ token ∈ input, to
       simp only [steps, List.length_cons]
       nlinarith
 
-theorem steps_le_cubic (tokens input : List Token)
-    (included : ∀ token ∈ input, token ∈ tokens)
-    (countBound : input.length ≤ (BinaryNameSearch.stream tokens).length) :
-    steps tokens input ≤
-      12 * (BinaryNameSearch.stream tokens).length ^ 3 +
-      26 * (BinaryNameSearch.stream tokens).length ^ 2 +
-      11 * (BinaryNameSearch.stream tokens).length + 1 := by
-  calc
-    steps tokens input ≤
-        perLiteralBound (BinaryNameSearch.stream tokens).length * input.length + 1 :=
-      steps_le tokens input included
-    _ ≤ perLiteralBound (BinaryNameSearch.stream tokens).length *
-        (BinaryNameSearch.stream tokens).length + 1 :=
-      Nat.add_le_add_right (Nat.mul_le_mul_left _ countBound) _
-    _ = _ := by unfold perLiteralBound; ring
 
 variable {K Λ A : Type} [DecidableEq K]
 
@@ -183,11 +169,6 @@ theorem loopTapes_cursor (tape : Fin 11 → K) (distinct : Function.Injective ta
   have hd (i j : Fin 11) (hne : i ≠ j) : tape i ≠ tape j := fun h => hne (distinct h)
   simp [loopTapes, hd]
 
-theorem loopTapes_output (tape : Fin 11 → K) (distinct : Function.Injective tape)
-    (base : K → List Bool) (cursor output variableCounter clauses : List Bool) :
-    loopTapes tape base cursor output variableCounter clauses (tape 8) = output := by
-  have hd (i j : Fin 11) (hne : i ≠ j) : tape i ≠ tape j := fun h => hne (distinct h)
-  simp [loopTapes, hd]
 
 theorem loopTapes_variables (tape : Fin 11 → K) (distinct : Function.Injective tape)
     (base : K → List Bool) (cursor output variableCounter clauses : List Bool) :
@@ -205,30 +186,21 @@ private theorem update_cursor (tape : Fin 11 → K) (distinct : Function.Injecti
     Function.update (loopTapes tape base cursor output variableCounter clauses) (tape 0) replacement =
       loopTapes tape base replacement output variableCounter clauses := by
   have hd (i j : Fin 11) (hne : i ≠ j) : tape i ≠ tape j := fun h => hne (distinct h)
-  funext k
-  by_cases h : k = tape 0
-  · subst k; simp [loopTapes, hd]
-  · simp [loopTapes, h, Function.update_apply]
+  simp [loopTapes, Function.update_comm, hd]
 
 private theorem update_output (tape : Fin 11 → K) (distinct : Function.Injective tape)
     (base : K → List Bool) (cursor output variableCounter clauses replacement : List Bool) :
     Function.update (loopTapes tape base cursor output variableCounter clauses) (tape 8) replacement =
       loopTapes tape base cursor replacement variableCounter clauses := by
   have hd (i j : Fin 11) (hne : i ≠ j) : tape i ≠ tape j := fun h => hne (distinct h)
-  funext k
-  by_cases h : k = tape 8
-  · subst k; simp [loopTapes, hd]
-  · simp [loopTapes, h, Function.update_apply]
+  simp [loopTapes, Function.update_comm, hd]
 
 private theorem update_variables (tape : Fin 11 → K) (distinct : Function.Injective tape)
     (base : K → List Bool) (cursor output variableCounter clauses replacement : List Bool) :
     Function.update (loopTapes tape base cursor output variableCounter clauses) (tape 9) replacement =
       loopTapes tape base cursor output replacement clauses := by
   have hd (i j : Fin 11) (hne : i ≠ j) : tape i ≠ tape j := fun h => hne (distinct h)
-  funext k
-  by_cases h : k = tape 9
-  · subst k; simp [loopTapes, hd]
-  · simp [loopTapes, h, Function.update_apply]
+  simp [loopTapes, Function.update_comm, hd]
 
 private theorem update_clauses (tape : Fin 11 → K)
     (base : K → List Bool) (cursor output variableCounter clauses replacement : List Bool) :
@@ -236,20 +208,11 @@ private theorem update_clauses (tape : Fin 11 → K)
       loopTapes tape base cursor output variableCounter replacement := by
   simp [loopTapes]
 
-theorem loopTapes_other (tape : Fin 11 → K) (base : K → List Bool)
-    (cursor output variableCounter clauses : List Bool) (k : K)
-    (h0 : k ≠ tape 0) (h8 : k ≠ tape 8) (h9 : k ≠ tape 9) (h10 : k ≠ tape 10) :
-    loopTapes tape base cursor output variableCounter clauses k = base k := by
-  simp [loopTapes, h0, h8, h9, h10]
 
 @[simp] theorem stepAux_finish (exit : Option Λ) (state : State A) (base : K → List Bool) :
     TM2.stepAux (finish exit) state base =
       ⟨exit, clean state.1.1.1.1 state.1.1.1.2, base⟩ := by
   cases exit <;> rfl
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 variable (tape : Fin 11 → K) (distinct : Function.Injective tape)
 variable (labels : Label → Λ) (done malformed : Option Λ)
@@ -366,7 +329,7 @@ theorem bodyTrace (tokens : List Token) (token : Token) (slot : Fin 3)
       tallyStep tape distinct labels done malformed program atLabels base ambient slot suffix
         ((BinaryLiteralMachine.outputWord tokens token.2 token.1).reverse ++ output)
         variableCounter clauses
-  have full := joinTrace (joinTrace first literal) tally
+  have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first literal) tally
   simpa only [show 1 + BinaryLiteralMachine.steps tokens token.2 + 1 =
     BinaryLiteralMachine.steps tokens token.2 + 2 by omega] using full
 
@@ -402,7 +365,7 @@ theorem loopTrace (tokens input : List Token) (slot : Fin 3)
         ((BinaryLiteralMachine.outputWord tokens token.2 token.1).reverse ++ output)
         (true :: variableCounter) (List.replicate (clauseIncrement slot) true ++ clauses)
         (fun t ht => included t (by simp [ht]))
-      have full := joinTrace first rest
+      have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first rest
       have variableEq : List.replicate input.length true ++ (true :: variableCounter) =
           List.replicate (input.length + 1) true ++ variableCounter := by
         rw [List.replicate_succ']
@@ -433,25 +396,6 @@ theorem triplesTrace (tokens input : List Token) (count : Nat)
     tokens input 0 output variableCounter clauses tokensCanonical included permanent empty
   simpa only [length_eq, finalSlot_triples, completedClauses_triples] using h
 
-/-- The machine's bit-length bound includes every peek, literal run, and tally. -/
-def triplesInTime (tokens input : List Token) (count : Nat)
-    (length_eq : input.length = 3 * count) (output variableCounter clauses : List Bool)
-    (tokensCanonical : ∀ t ∈ tokens, BinaryNameMachine.canonical t.2 = true)
-    (included : ∀ t ∈ input, t ∈ tokens)
-    (permanent : base (tape 1) = BinaryNameSearch.stream tokens)
-    (empty : ∀ i : Fin 11, 2 ≤ i.val → i.val ≤ 7 → base (tape i) = []) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .entry), clean ambient 0,
-        loopTapes tape base (BinaryNameSearch.stream input) output variableCounter clauses⟩
-      (some ⟨done, clean ambient 0,
-        loopTapes tape base [] ((outputBody tokens input).reverse ++ output)
-          (List.replicate (3 * count) true ++ variableCounter)
-          (List.replicate count true ++ clauses)⟩)
-      (perLiteralBound (BinaryNameSearch.stream tokens).length * input.length + 1) where
-  steps := steps tokens input
-  evals_in_steps := triplesTrace tape distinct labels done malformed program atLabels base ambient
-    tokens input count length_eq output variableCounter clauses tokensCanonical included permanent empty
-  steps_le_m := steps_le tokens input included
 
 end UniqueGamesTheorem.BinaryRenameLoop
 

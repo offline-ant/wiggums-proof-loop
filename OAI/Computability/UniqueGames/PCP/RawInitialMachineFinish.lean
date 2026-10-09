@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.RawInitialMachinePhases
 import OAI.Computability.UniqueGames.PCP.RawInitialTablesLemmas
 
@@ -22,10 +23,6 @@ private def tapes (varsWord counter index reversed output : List Bool) : Tape �
 def finishTapes (n m : Nat) (rev : List Bool) : Tape → List Bool :=
   tapes (encodeWord n) [false] (encodeWord m) rev []
 
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 theorem trueRelationWords :
     GraphTables.relationWords (GraphTables.relationOf (fun _ _ => true)) =
       List.replicate 4096 1 := by
@@ -33,13 +30,6 @@ theorem trueRelationWords :
   rw [GraphTables.relationOf, Vector.toList_ofFn, List.map_ofFn]
   exact List.ofFn_const 4096 1
 
-theorem dummyBits_length (n m : Nat) :
-    (encodeWords (RawInitialRows.dummyWords n m)).length = n + 7 * m + 8194 := by
-  rw [encodeWords_length]
-  simp only [RawInitialRows.dummyWords, List.sum_append, List.sum_cons,
-    List.sum_nil, List.length_append, List.length_cons, List.length_nil,
-    List.sum_replicate, List.length_replicate, nsmul_eq_mul, Nat.mul_one]
-  omega
 
 private theorem update_reversed (varsWord counter index rev out word : List Bool) :
     Function.update (tapes varsWord counter index rev out) .reversed word =
@@ -93,7 +83,7 @@ private theorem cleanupTrace (n m : Nat) (rev : List Bool) (state : State) :
     some ⟨some .reset, (state.1, none),
       Function.update (tapes [] [] (encodeWord m) rev []) .index []⟩ at h2
   rw [f2] at h2
-  have total := trace_trans _ (trace_trans _ h0 h1) h2
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h0 h1) h2
   simpa only [show (n + 2) + 2 + (m + 2) = n + m + 6 by omega] using total
 
 private theorem resetReverseTrace (rev : List Bool) (state : State) :
@@ -120,7 +110,7 @@ private theorem resetReverseTrace (rev : List Bool) (state : State) :
     some ⟨none, initialState, Reduction.MachineTransfer.tapesAt .reversed .output
       (tapes [] [] [] rev []) [] (rev.reverse.map id ++ [])⟩ at transfer
   rw [frame] at transfer
-  have total := trace_trans _ reset transfer
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans reset transfer
   rw [show 1 + (rev.length + 1) = rev.length + 2 by omega] at total
   change (MachineComposition.advance (TM2.step program))^[rev.length + 2]
     (some ⟨some .reset, state, tapes [] [] [] rev []⟩) =
@@ -196,8 +186,7 @@ theorem dummyTrace (n m : Nat) (rev : List Bool) (state : State) :
   simp only [copyScale, copyNext] at h3
   have h4 := closeDummyReverseTrace n m d (state.1, none)
   have h5 := dummyRelationTrace n m e (state.1, none)
-  have total := trace_trans _ (trace_trans _ (trace_trans _
-    (trace_trans _ (trace_trans _ h0 h1) h2) h3) h4) h5
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h0 h1) h2) h3) h4) h5
   have output : (encodeWords (List.replicate 4096 1)).reverse ++ e =
       (encodeWords (RawInitialRows.dummyWords n m)).reverse ++ rev := by
     have rep : List.replicate m true ++ (List.replicate n true ++ rev) =
@@ -221,7 +210,7 @@ theorem finishTrace (n m : Nat) (rev : List Bool) (state : State) :
       (some ⟨some (.scan .dummyVariables), state, finishTapes n m rev⟩) =
       some (haltList machine (rev.reverse ++ encodeWords (RawInitialRows.dummyWords n m))) := by
   let emitted := (encodeWords (RawInitialRows.dummyWords n m)).reverse ++ rev
-  have total := trace_trans _ (trace_trans _ (dummyTrace n m rev state)
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (dummyTrace n m rev state)
     (cleanupTrace n m emitted (state.1, none)))
     (resetReverseTrace emitted (state.1, none))
   have hout : emitted.reverse = rev.reverse ++ encodeWords (RawInitialRows.dummyWords n m) := by
@@ -233,19 +222,6 @@ theorem finishTrace (n m : Nat) (rev : List Bool) (state : State) :
     omega
   rwa [htime] at total
 
-def finishInTime (n m : Nat) (rev : List Bool) (state : State) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (.scan .dummyVariables), state, finishTapes n m rev⟩
-      (some (haltList machine (rev.reverse ++ encodeWords (RawInitialRows.dummyWords n m))))
-      (4 * n + 12 * m + 8211 + rev.length) where
-  steps := 4 * n + 12 * m + 8211 + rev.length
-  evals_in_steps := by
-    have h := finishTrace n m rev state
-    rw [dummyBits_length] at h
-    rw [show 3 * n + 5 * m + 17 + (n + 7 * m + 8194) + rev.length =
-      4 * n + 12 * m + 8211 + rev.length by omega] at h
-    exact h
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineFinish
 

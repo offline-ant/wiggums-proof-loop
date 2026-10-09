@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Analysis.Real.Sqrt
 import Mathlib.Data.Fintype.Sum
 import OAI.Computability.UniqueGames.Foundations.FiniteTrialsLemmas
@@ -65,18 +66,6 @@ def pairOverlap (ν : FiniteDistribution E) (left right : E → V)
     if R e (a (left e) ω) (a (right e) ω)
       then min ((f (left e) ω) ^ 2) ((f (right e) ω) ^ 2) else 0
 
-omit [Fintype V] in
-theorem pairEnergy_nonnegative (ν : FiniteDistribution E) (left right : E → V)
-    (R : E → A → A → Bool) (a : V → Ω → A) (f : V → Ω → ℝ)
-    (hf : ∀ v ω, 0 ≤ f v ω) : 0 ≤ pairEnergy ν left right R a f := by
-  apply Finset.sum_nonneg
-  intro e _
-  apply mul_nonneg (ν.nonnegative e)
-  apply Finset.sum_nonneg
-  intro ω _
-  split
-  · exact mul_nonneg (hf (left e) ω) (hf (right e) ω)
-  · exact le_rfl
 
 theorem pairEnergy_le_padded [DecidableEq V] (ν : FiniteDistribution E)
     (left right : E → V) (R : E → A → A → Bool)
@@ -233,21 +222,8 @@ def symmetricDistribution (K : ProjectionKernel Q₁ Q₂ A₁ A₂) :
     (mul_nonneg (K.outer.nonnegative _) ((K.inner _).nonnegative _))
     ((K.inner _).nonnegative _)
   normalized := by
-    rw [Fintype.sum_prod_type]
-    calc
-      _ = ∑ y, K.outer.weight y := by
-        apply Finset.sum_congr rfl
-        intro y _
-        rw [Fintype.sum_prod_type]
-        calc
-          _ = ∑ x, K.outer.weight y * (K.inner y).weight x := by
-            apply Finset.sum_congr rfl
-            intro x _
-            dsimp only
-            rw [← Finset.mul_sum, (K.inner y).normalized, mul_one]
-          _ = K.outer.weight y := by
-            rw [← Finset.mul_sum, (K.inner y).normalized, mul_one]
-      _ = 1 := K.outer.normalized
+    simp only [Fintype.sum_prod_type, ← Finset.mul_sum,
+      FiniteDistribution.normalized, mul_one]
 
 def symmetricAccept (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (e : SymmetricEdge Q₁ Q₂) (a a' : A₁) : Bool := by
@@ -290,26 +266,6 @@ theorem sum_projection_gates (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     · have hb' : K.accepts x' y a' b ≠ true := fun hb' => hex ⟨b, hb, hb'⟩
       simp [hb']
     · simp [hb]
-
-theorem apply_single_label (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (labels : Q₁ → A₁) (f : Q₁ → ℝ) (y : Q₂) (b : A₂) :
-    K.apply (fun x a => if labels x = a then f x else 0) y b =
-      ∑ x, (K.inner y).weight x * (if K.accepts x y (labels x) b then f x else 0) := by
-  classical
-  unfold apply
-  apply Finset.sum_congr rfl
-  intro x _
-  congr 1
-  calc
-    _ = ∑ a, if labels x = a then
-        (if K.accepts x y (labels x) b then f x else 0) else 0 := by
-      apply Finset.sum_congr rfl
-      intro a _
-      by_cases ha : labels x = a
-      · subst a
-        simp
-      · simp [ha]
-    _ = _ := by simp
 
 theorem energy_single_label (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (labels : Q₁ → A₁) (f : Q₁ → ℝ) :
@@ -464,33 +420,12 @@ theorem exists_vectorEnergy_le_singleLabelVector [Nonempty A₁]
     ∃ labels : Q₁ → Ω → A₁,
       K.vectorEnergy h ≤ K.vectorEnergy (singleLabelVector labels (vectorAmplitude h)) := by
   classical
-  have hex (ω : Ω) := K.exists_energy_le_deterministicVector (h ω) (hh ω)
-  let labels (ω : Ω) : Q₁ → A₁ := Classical.choose (hex ω)
-  have hlabels (ω : Ω) : K.energy (h ω) ≤
-      K.energy (deterministicVector (h ω) (labels ω)) := Classical.choose_spec (hex ω)
-  refine ⟨fun x ω => labels ω x, ?_⟩
-  apply Finset.sum_le_sum
-  intro ω _
-  have heq : deterministicVector (h ω) (labels ω) =
-      singleLabelVector (fun x ω => labels ω x) (vectorAmplitude h) ω := by
-    funext x a
-    by_cases ha : a = labels ω x
-    · simp [deterministicVector, singleLabelVector, vectorAmplitude, ha]
-    · simp [deterministicVector, singleLabelVector, ha, Ne.symm ha]
-  exact heq ▸ hlabels ω
+  choose labels hlabels using fun ω => K.exists_energy_le_deterministicVector (h ω) (hh ω)
+  refine ⟨fun x ω => labels ω x, Finset.sum_le_sum fun ω _ => ?_⟩
+  unfold deterministicVector at hlabels
+  unfold singleLabelVector vectorAmplitude
+  simpa only [eq_comm] using hlabels ω
 
-/-- Package the deterministic labels, amplitudes, exact mass preservation, and
-energy inequality for use by the finite threshold-rounding construction. -/
-theorem exists_mass_preserving_singleLabelVector [Nonempty A₁]
-    (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
-    (h : Ω → Q₁ → A₁ → ℝ) (hh : ∀ ω x a, 0 ≤ h ω x a) :
-    ∃ (labels : Q₁ → Ω → A₁) (f : Q₁ → Ω → ℝ),
-      (∀ x ω, 0 ≤ f x ω) ∧
-      (∀ x, rowSquareMass f x = vectorMass h x) ∧
-      K.vectorEnergy h ≤ K.vectorEnergy (singleLabelVector labels f) := by
-  obtain ⟨labels, hlabels⟩ := K.exists_vectorEnergy_le_singleLabelVector h hh
-  exact ⟨labels, vectorAmplitude h, vectorAmplitude_nonnegative h hh,
-    rowSquareMass_vectorAmplitude h, hlabels⟩
 
 end
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Tactic.FieldSimp
 import Mathlib.Tactic.Ring
@@ -42,15 +43,6 @@ likelihood-ratio definition. -/
 def uniformChiSquare (p : α → ℝ) : ℝ :=
   (Fintype.card α : ℝ) * ∑ a, (p a - uniformWeights α a) ^ 2
 
-theorem uniformChiSquare_eq_pearson [Nonempty α] (p : α → ℝ) :
-    uniformChiSquare p =
-      ∑ a, uniformWeights α a * (p a / uniformWeights α a - 1) ^ 2 := by
-  rw [uniformChiSquare, Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro a _
-  have hn : (Fintype.card α : ℝ) ≠ 0 := by exact_mod_cast Fintype.card_ne_zero
-  simp only [uniformWeights]
-  field_simp [hn]
 
 theorem uniformChiSquare_eq_secondMoment [Nonempty α] (p : α → ℝ)
     (hp : IsProbability p) :
@@ -68,9 +60,6 @@ theorem uniformChiSquare_eq_secondMoment [Nonempty α] (p : α → ℝ)
     (uniformWeights_isProbability (α := α)).2]
   ring
 
-theorem uniformChiSquare_nonneg (p : α → ℝ) : 0 ≤ uniformChiSquare p := by
-  unfold uniformChiSquare
-  positivity
 
 def mixture (β : ℝ) (p : α → ℝ) : α → ℝ :=
   fun a => (1 - β) * uniformWeights α a + β * p a
@@ -181,40 +170,13 @@ theorem singletonSamplerWeights_eq (z : V × V) :
     singletonSamplerWeights V z = singletonPairWeights V z := by
   classical
   rcases z with ⟨x, y⟩
-  have hleft : (∑ a : V, if (a, 0) = (x, y) then uniformWeights V a else 0) =
-      if y = 0 then 1 / (Fintype.card V : ℝ) else 0 := by
-    by_cases hy : y = 0
-    · simp [hy, uniformWeights]
-    · simp [Prod.mk.injEq, Ne.symm hy, hy]
-  have hright : (∑ a : V, if (0, a) = (x, y) then uniformWeights V a else 0) =
-      if x = 0 then 1 / (Fintype.card V : ℝ) else 0 := by
-    by_cases hx : x = 0
-    · simp [hx, uniformWeights]
-    · simp [Prod.mk.injEq, Ne.symm hx, hx]
-  have hdiag : (∑ a : V, if (a, a) = (x, y) then uniformWeights V a else 0) =
-      if x = y then 1 / (Fintype.card V : ℝ) else 0 := by
-    by_cases hxy : x = y
-    · simp [hxy, uniformWeights]
-    · have hnone (a : V) : (a, a) ≠ (x, y) := by
-        intro ha
-        have he := Prod.mk.inj ha
-        exact hxy (he.1.symm.trans he.2)
-      simp [hnone, hxy]
-  simp only [singletonSamplerWeights, hleft, hright, hdiag,
-    singletonPairWeights, lineCount]
+  simp [singletonSamplerWeights, singletonPairWeights, lineCount,
+    uniformWeights, Prod.mk.injEq, ite_and, Finset.sum_ite_irrel, eq_comm]
   split_ifs <;> ring
 
 theorem lineCount_sum : ∑ z : V × V, lineCount V z = 3 * Fintype.card V := by
-  have h₁ : (∑ z : V × V, if z.2 = 0 then (1 : ℝ) else 0) = Fintype.card V := by
-    rw [Fintype.sum_prod_type]
-    simp
-  have h₂ : (∑ z : V × V, if z.1 = 0 then (1 : ℝ) else 0) = Fintype.card V := by
-    rw [Fintype.sum_prod_type, Finset.sum_comm]
-    simp
-  have h₃ : (∑ z : V × V, if z.1 = z.2 then (1 : ℝ) else 0) = Fintype.card V := by
-    rw [Fintype.sum_prod_type]
-    simp
-  simp only [lineCount, Finset.sum_add_distrib, h₁, h₂, h₃]
+  simp only [lineCount, Finset.sum_add_distrib, Fintype.sum_prod_type]
+  simp [apply_ite]
   ring
 
 omit [Fintype V] in
@@ -227,13 +189,7 @@ theorem lineCount_sq (z : V × V) :
 theorem lineCount_sq_sum :
     ∑ z : V × V, lineCount V z ^ 2 = 3 * Fintype.card V + 6 := by
   simp only [lineCount_sq, Finset.sum_add_distrib, lineCount_sum]
-  congr 1
-  rw [Fintype.sum_prod_type]
-  rw [Finset.sum_eq_single (0 : V)]
-  · simp
-  · intro x _ hx
-    simp [hx]
-  · simp
+  simp [Fintype.sum_prod_type, ite_and]
 
 theorem singletonPairWeights_isProbability : IsProbability (singletonPairWeights V) := by
   have hn : (0 : ℝ) < Fintype.card V := Nat.cast_pos.mpr Fintype.card_pos
@@ -348,11 +304,6 @@ theorem exists_cubeSlope_totalVariation_le (η : ℝ) (hη : 0 < η) (N : ℕ) :
   apply (div_le_iff₀ (by positivity : (0 : ℝ) < 3 * m)).2
   nlinarith
 
-theorem cube_expected_singletons (m : ℕ) (hm : 0 < m) :
-    ((m ^ 3 : ℕ) : ℝ) * (1 / (m : ℝ) ^ 2) = m := by
-  have hm' : (m : ℝ) ≠ 0 := by exact_mod_cast (Nat.ne_of_gt hm)
-  push_cast
-  field_simp [hm']
 
 end Singleton
 
@@ -360,12 +311,6 @@ section Intercept
 
 variable {V : Type*} [Fintype V] [AddGroup V] [DecidableEq V]
 
-omit [Fintype α] [DecidableEq V] in
-/-- Pulling back an independent uniform intercept through any translation,
-even one depending on all slopes and projection choices, leaves its joint law
-unchanged. No independence of that translation from the slopes is assumed. -/
-theorem translated_uniform_intercept (p : α → ℝ) (shift : α → V) (a : α) (z : V) :
-    p a * uniformWeights V (z - shift a) = p a * uniformWeights V z := rfl
 
 theorem uniform_intercept_pushforward (shift z : V) :
     (∑ t : V, if t + shift = z then uniformWeights V t else 0) =
@@ -377,21 +322,9 @@ omit [Fintype α] in
 theorem joint_intercept_pushforward (p : α → ℝ) (shift : α → V) (a : α) (z : V) :
     (∑ t : V, if t + shift a = z then p a * uniformWeights V t else 0) =
       p a * uniformWeights V z := by
-  classical
-  calc
-    _ = p a * (∑ t : V, if t + shift a = z then uniformWeights V t else 0) := by
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
-      intro t _
-      split <;> simp_all
-    _ = _ := by rw [uniform_intercept_pushforward]
+  simpa only [Finset.mul_sum, mul_ite, mul_zero] using
+    congrArg (p a * ·) (uniform_intercept_pushforward (shift a) z)
 
-omit [DecidableEq V] in
-theorem totalVariation_append_uniform_intercept (p q : α → ℝ) :
-    totalVariation (fun az : α × V => p az.1 * uniformWeights V az.2)
-      (fun az : α × V => q az.1 * uniformWeights V az.2) = totalVariation p q := by
-  exact UniqueGamesTheorem.Foundations.Repetition.totalVariation_append_kernel p q
-    (fun _ => uniformWeights V) (fun _ => uniformWeights_isProbability)
 
 end Intercept
 

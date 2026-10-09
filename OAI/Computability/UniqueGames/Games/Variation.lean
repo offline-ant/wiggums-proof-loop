@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Tactic.Positivity
 import OAI.Computability.UniqueGames.Foundations.SamplingLemmas
@@ -30,72 +31,6 @@ theorem totalVariation_triangle (p q r : α → ℝ) :
   unfold totalVariation
   linarith
 
-/-- The actual weights obtained by restricting to an event and normalizing. -/
-noncomputable def conditionWeights (p : α → ℝ) (event : α → Bool) (z : ℝ) : α → ℝ :=
-  fun a => if event a then p a / z else 0
-
-theorem conditionWeights_isProbability (p : α → ℝ) (hp : IsProbability p)
-    (event : α → Bool) {z : ℝ} (hz : 0 < z)
-    (hmass : ∑ a, (if event a then p a else 0) = z) :
-    IsProbability (conditionWeights p event z) := by
-  constructor
-  · intro a
-    dsimp [conditionWeights]
-    split
-    · exact div_nonneg (hp.1 a) hz.le
-    · exact le_rfl
-  · have hpoint : ∀ a, conditionWeights p event z a =
-        (if event a then p a else 0) / z := by
-      intro a
-      simp only [conditionWeights]
-      split <;> simp
-    simp only [hpoint, div_eq_mul_inv, ← Finset.sum_mul, hmass, mul_inv_cancel₀ hz.ne']
-
-/-- Conditioning two laws on the same event of equal positive mass costs at
-most the inverse mass. The algebraic estimate itself needs no normalization. -/
-theorem totalVariation_condition_le (p q : α → ℝ) (event : α → Bool)
-    {z : ℝ} (hz : 0 < z) :
-    totalVariation (conditionWeights p event z) (conditionWeights q event z) ≤
-      totalVariation p q / z := by
-  have hpoint : ∀ a,
-      |conditionWeights p event z a - conditionWeights q event z a| ≤
-        |p a - q a| / z := by
-    intro a
-    dsimp [conditionWeights]
-    split
-    · rw [← sub_div, abs_div, abs_of_pos hz]
-    · simp only [sub_self, abs_zero]
-      positivity
-  have hsum := Finset.sum_le_sum (fun a (_ : a ∈ (Finset.univ : Finset α)) => hpoint a)
-  simp only [div_eq_mul_inv, ← Finset.sum_mul] at hsum
-  have hsum' : (∑ a, |conditionWeights p event z a - conditionWeights q event z a|) ≤
-      (∑ a, |p a - q a|) / z := by
-    simpa only [div_eq_mul_inv] using hsum
-  unfold totalVariation
-  calc
-    _ ≤ (∑ a, |p a - q a|) / z / 2 := div_le_div_of_nonneg_right hsum' (by norm_num)
-    _ = _ := by ring
-
-theorem totalVariation_condition_half_le (p q : α → ℝ) (event : α → Bool) :
-    totalVariation (conditionWeights p event (1 / 2))
-      (conditionWeights q event (1 / 2)) ≤ 2 * totalVariation p q := by
-  have h := totalVariation_condition_le p q event (z := 1 / 2) (by norm_num)
-  convert h using 1
-  ring
-
-/-- Appending the same conditional kernel preserves total variation exactly. -/
-theorem totalVariation_append_kernel (p q : α → ℝ) (kernel : α → β → ℝ)
-    (hk : ∀ a, IsProbability (kernel a)) :
-    totalVariation (fun ab : α × β => p ab.1 * kernel ab.1 ab.2)
-      (fun ab : α × β => q ab.1 * kernel ab.1 ab.2) = totalVariation p q := by
-  unfold totalVariation
-  congr 1
-  rw [Fintype.sum_prod_type]
-  apply Finset.sum_congr rfl
-  intro a _
-  have habs : ∀ b, |kernel a b| = kernel a b := fun b => abs_of_nonneg ((hk a).1 b)
-  simp only [← sub_mul, abs_mul, habs, ← Finset.mul_sum, (hk a).2,
-    mul_one]
 
 /-- Applying a finite stochastic kernel, forgetting its input. -/
 noncomputable def kernelPushforward (p : α → ℝ) (kernel : α → β → ℝ) : β → ℝ :=

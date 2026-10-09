@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Order.Archimedean.Basic
 import Mathlib.Algebra.Order.Archimedean.Real.Basic
@@ -33,8 +34,6 @@ variable {n q t : ℕ}
 def tupleBasis (q t : ℕ) : Module.Basis (Fin q ⊕ Fin t) F2 (Ambient (q + t)) :=
   (Pi.basisFun F2 (Fin (q + t))).reindex finSumFinEquiv.symm
 
-def tupleMapEquiv : ((Fin q ⊕ Fin t) → Ambient n) ≃ BasisMap n (q + t) :=
-  ((tupleBasis q t).constr F2).toEquiv
 
 def tupleMap (x : (Fin q ⊕ Fin t) → Ambient n) : BasisMap n (q + t) :=
   (tupleBasis q t).constr F2 x
@@ -83,15 +82,6 @@ theorem restrictedLiftDensity_eq_expect (S : Finset (Vertex n (q + t)))
   rw [Finset.sum_boole]
   simp only [restrictedLiftDensity, Nat.card_eq_fintype_card, Fintype.card_subtype]
 
-/-- KMS Lemma 2.8 in the actual linear-map coordinates, with the stronger ε
-bound supplied by exact equal-size completion fibers. -/
-theorem grassmann_pseudorandom_lift_expect {r : ℕ} {ε : ℝ}
-    (S : Finset (Vertex n (q + t))) (hS : GrassmannPseudorandom S r ε)
-    (hε : 0 ≤ ε) (Q : Fin q → Ambient n) (W : Submodule F2 (Ambient n))
-    (hbudget : q + (n - Module.finrank F2 W) ≤ r) :
-    (𝔼 z : Fin t → W, liftedIndicator S (tupleMap (joinedTuple Q W z))) ≤ ε := by
-  rw [← restrictedLiftDensity_eq_expect]
-  exact grassmann_pseudorandom_restricted S hS hε Q W hbudget
 
 end
 end UniqueGamesTheorem.Inverse.KMSBasisComparisonPseudorandom
@@ -113,23 +103,6 @@ open KMS KMSBasisComparison KMSBasisComparisonPseudorandom
 
 variable {n ell q t r : ℕ} {ε : ℝ}
 
-/-- The independent tuple law has the same bound in every basis of the domain.
-The indicator depends only on the actual range of the constructed map. -/
-theorem lifted_expect_in_basis (S : Finset (Vertex n ell))
-    (hS : GrassmannPseudorandom S r ε) (hε : 0 ≤ ε)
-    (b : Module.Basis (Fin q ⊕ Fin t) F2 (Ambient ell))
-    (Q : Fin q → Ambient n) (W : Submodule F2 (Ambient n))
-    (hbudget : q + (n - Module.finrank F2 W) ≤ r) :
-    (𝔼 z : Fin t → W, liftedIndicator S (b.constr F2 (joinedTuple Q W z))) ≤ ε := by
-  have hdim : ell = q + t := by
-    simpa [Ambient] using Module.finrank_eq_card_basis b
-  subst ell
-  have hc := grassmann_pseudorandom_lift_expect S hS hε Q W hbudget
-  convert hc using 1
-  apply Finset.expect_congr rfl
-  intro z _
-  unfold liftedIndicator InLift
-  rw [b.constr_range F2, tupleMap_range]
 
 /-- Coordinates of a uniform linear map, translated by a fixed linear map,
 are still exactly uniform. This also covers zero-dimensional free domains. -/
@@ -144,25 +117,6 @@ def affineCoordinates {E W : Type*}
     (b : Module.Basis (Fin t) F2 E) (T H : E →ₗ[F2] W) (i : Fin t) :
     affineCoordinates b T H i = T (b i) + H (b i) := rfl
 
-/-- Actual uniform affine free-coordinate noise satisfies the tuple bound. -/
-theorem lifted_expect_shifted_basis {E0 : Type*}
-    [AddCommGroup E0] [Module F2 E0]
-    (S : Finset (Vertex n ell)) (hS : GrassmannPseudorandom S r ε) (hε : 0 ≤ ε)
-    (b : Module.Basis (Fin q ⊕ Fin t) F2 (Ambient ell))
-    (Q : Fin q → Ambient n) (W : Submodule F2 (Ambient n))
-    [Fintype (E0 →ₗ[F2] W)]
-    (b0 : Module.Basis (Fin t) F2 E0) (T0 : E0 →ₗ[F2] W)
-    (hbudget : q + (n - Module.finrank F2 W) ≤ r) :
-    (𝔼 H : E0 →ₗ[F2] W, liftedIndicator S
-      (b.constr F2 (joinedTuple Q W (fun i => T0 (b0 i) + H (b0 i))))) ≤ ε := by
-  have heq : (𝔼 H : E0 →ₗ[F2] W, liftedIndicator S
-      (b.constr F2 (joinedTuple Q W (fun i => T0 (b0 i) + H (b0 i))))) =
-      𝔼 z : Fin t → W, liftedIndicator S (b.constr F2 (joinedTuple Q W z)) := by
-    apply Fintype.expect_equiv (affineCoordinates b0 T0)
-    intro H
-    rfl
-  rw [heq]
-  exact lifted_expect_in_basis S hS hε b Q W hbudget
 
 end
 end UniqueGamesTheorem.Inverse.KMSAffineRestriction
@@ -243,71 +197,6 @@ theorem translate_join_eq_constr
       rw [join_embed_apply_right]
       rfl
 
-/-- A bounded adapted prefix controls the entire affine restriction law. -/
-theorem affine_expect_of_complement {r : ℕ} {ε : ℝ}
-    (S : Finset (Vertex n ell)) (hS : GrassmannPseudorandom S r ε) (hε : 0 ≤ ε)
-    (D U E0 : Submodule F2 (Ambient ell)) (W : Submodule F2 (Ambient n))
-    (hDU : D ≤ U) (hc : IsCompl U E0) (T : BasisMap n ell)
-    (hE0 : E0 ≤ LinearMap.ker (W.mkQ.comp T))
-    (hbudget : Module.finrank F2 U + (n - Module.finrank F2 W) ≤ r) :
-    (𝔼 A : Parameter D W, restrict (liftedIndicator S) D W T A) ≤ ε := by
-  rw [expect_restrict D U E0 W hDU hc T]
-  apply Finset.expect_le Finset.univ_nonempty
-  intro B _
-  let bU := Module.finBasis F2 U
-  let b0 := Module.finBasis F2 E0
-  have heq :
-      (𝔼 C : E0 →ₗ[F2] W,
-        liftedIndicator S (translate D W T (join D U E0 W hDU hc B C))) =
-      𝔼 C : E0 →ₗ[F2] W,
-        liftedIndicator S ((complementBasis U E0 hc bU b0).constr F2
-          (joinedTuple
-            (fun i => T (bU i) + (B ((localVanishing D U).mkQ (bU i)) : Ambient n)) W
-            (fun i => freeCenter E0 W T hE0 (b0 i) + C (b0 i)))) := by
-    apply Finset.expect_congr rfl
-    intro C _
-    rw [translate_join_eq_constr D U E0 W hDU hc T hE0 bU b0 B C]
-  rw [heq]
-  exact lifted_expect_shifted_basis S hS hε (complementBasis U E0 hc bU b0)
-    _ W b0 (freeCenter E0 W T hE0) hbudget
-
-/-- Every actual affine restriction of order d is sparse if all Grassmann
-intervals of complexity at most 2d are sparse. Both sampling factors remain
-uniform on their full finite spaces. -/
-theorem affine_expect_bound {d : ℕ} {ε : ℝ}
-    (S : Finset (Vertex n ell)) (hS : GrassmannPseudorandom S (2 * d) ε)
-    (hε : 0 ≤ ε) (D : Submodule F2 (Ambient ell))
-    (W : Submodule F2 (Ambient n)) (T : BasisMap n ell)
-    (horder : order D W ≤ d) :
-    (𝔼 A : Parameter D W, restrict (liftedIndicator S) D W T A) ≤ ε := by
-  obtain ⟨U, E0, hDU, hE0, hc, hdim⟩ :=
-    KMSAffineRestrictionComplement.exists_bounded_complement D W T
-  have hcodim : n - Module.finrank F2 W = Module.finrank F2 (KMS.Ambient n ⧸ W) := by
-    have hd := W.finrank_quotient_add_finrank
-    have hn : Module.finrank F2 (KMS.Ambient n) = n := by simp [KMS.Ambient]
-    rw [hn] at hd
-    omega
-  apply affine_expect_of_complement S hS hε D U E0 W hDU hc T hE0
-  rw [hcodim]
-  change Module.finrank F2 D + Module.finrank F2 (KMS.Ambient n ⧸ W) ≤ d at horder
-  omega
-
-/-- The normalized squared restriction norm is exactly the same sparse
-probability because the full-rank lift is Boolean. -/
-theorem affine_squared_expect_bound {d : ℕ} {ε : ℝ}
-    (S : Finset (Vertex n ell)) (hS : GrassmannPseudorandom S (2 * d) ε)
-    (hε : 0 ≤ ε) (D : Submodule F2 (Ambient ell))
-    (W : Submodule F2 (Ambient n)) (T : BasisMap n ell)
-    (horder : order D W ≤ d) :
-    (𝔼 A : Parameter D W, (restrict (liftedIndicator S) D W T A) ^ 2) ≤ ε := by
-  have heq : (𝔼 A : Parameter D W, (restrict (liftedIndicator S) D W T A) ^ 2) =
-      𝔼 A : Parameter D W, restrict (liftedIndicator S) D W T A := by
-    apply Finset.expect_congr rfl
-    intro A _
-    unfold restrict liftedIndicator
-    split <;> norm_num
-  rw [heq]
-  exact affine_expect_bound S hS hε D W T horder
 
 end
 end UniqueGamesTheorem.Inverse.KMSAffineRestriction
@@ -343,13 +232,10 @@ def liftRetention {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) : ℝ :=
 
 /-- Equivalence of the two explicit presentations of the good sampling event. -/
 def goodParametersEquiv {n ell : ℕ} (X : BasisMap n ell) :
-    goodParameters X ≃ OutsideNeighborFactors X where
-  toFun p := ⟨⟨p.val.1, ((mem_goodParameters X p.val).mp p.property).1⟩,
-    ⟨p.val.2, ((mem_goodParameters X p.val).mp p.property).2⟩⟩
-  invFun p := ⟨(p.1.val, p.2.val),
-    (mem_goodParameters X _).mpr ⟨p.1.property, p.2.property⟩⟩
-  left_inv _ := rfl
-  right_inv _ := rfl
+    goodParameters X ≃ OutsideNeighborFactors X :=
+  (Equiv.subtypeEquivRight (mem_goodParameters X)).trans
+    (Equiv.subtypeProdEquivProd (p := fun a : Functional ell => a ≠ 0)
+      (q := fun y : KMS.Ambient n => y ∉ X.range))
 
 /-- Good-event conditioning is the exact full-neighbor Grassmann retention. -/
 theorem goodParameters_expect {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
@@ -387,11 +273,9 @@ theorem liftRange_retention_expect {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
     ⟨LinearEquiv.refl _ _⟩
   rw [expect_eq_of_uniform_fibers (liftRange S) (liftRangeFiberAut S)
     (fun L : S => KMS.relativeDensity S (KMS.neighbors L.val))]
-  simp only [Finset.expect_eq_sum_div_card, Finset.card_univ,
-    Fintype.card_coe, KMS.retention]
-  congr 1
-  exact (Finset.sum_subtype S (fun _ => Iff.rfl)
-    (fun L => KMS.relativeDensity S (KMS.neighbors L))).symm
+  rw [expect_coe_eq S (fun L => KMS.relativeDensity S (KMS.neighbors L)),
+    Finset.expect_eq_sum_div_card]
+  rfl
 
 /-- The actual full sampling-law comparison for the lifted Grassmann set. -/
 theorem liftRetention_compare {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
@@ -408,14 +292,6 @@ theorem liftRetention_compare {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
   exact fullStepRetention_compare S X.val
     (injective_of_inLift ((mem_lift S X.val).mp X.property))
 
-/-- The bound in the primary statement, with ordinary quotient notation
-instead of an integer exponent `ell - n`. -/
-theorem liftRetention_compare_kms {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
-    (hS : S.Nonempty) :
-    |liftRetention S - KMS.retention S| ≤
-      ((2 : ℝ) ^ ell)⁻¹ + 2 * ((2 : ℝ) ^ ell / (2 : ℝ) ^ n) := by
-  have hratio : 0 ≤ (2 : ℝ) ^ ell / (2 : ℝ) ^ n := by positivity
-  exact (liftRetention_compare S hS).trans (by linarith)
 
 /-- The indicator's density in the full linear-map space. -/
 def liftDensity {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) : ℝ :=
@@ -568,93 +444,21 @@ def familyLinearEquiv (n : ℕ) (ι : Type*) [Fintype ι] :
     (ι → KMS.Ambient n) ≃ₗ[KMS.F2] ((ι → KMS.F2) →ₗ[KMS.F2] KMS.Ambient n) :=
   (Pi.basisFun KMS.F2 ι).constr KMS.F2
 
-@[simp] theorem familyLinearEquiv_apply_basis (n : ℕ) (ι : Type*) [Fintype ι]
-    (v : ι → KMS.Ambient n) (i : ι) :
-    familyLinearEquiv n ι v (Pi.basisFun KMS.F2 ι i) = v i :=
-  (Pi.basisFun KMS.F2 ι).constr_basis KMS.F2 v i
 
 @[simp] theorem familyLinearEquiv_symm_apply (n : ℕ) (ι : Type*) [Fintype ι]
     (X : (ι → KMS.F2) →ₗ[KMS.F2] KMS.Ambient n) (i : ι) :
     (familyLinearEquiv n ι).symm X i = X (Pi.basisFun KMS.F2 ι i) := rfl
 
-theorem familyLinearEquiv_range (n : ℕ) (ι : Type*) [Fintype ι]
-    (v : ι → KMS.Ambient n) :
-    LinearMap.range (familyLinearEquiv n ι v) = Submodule.span KMS.F2 (Set.range v) :=
-  (Pi.basisFun KMS.F2 ι).constr_range KMS.F2
-
-/-- Full rank of the corresponding map is exactly independence of the tuple. -/
-theorem familyLinearEquiv_injective_iff (n : ℕ) (ι : Type*) [Fintype ι]
-    (v : ι → KMS.Ambient n) :
-    Function.Injective (familyLinearEquiv n ι v) ↔ LinearIndependent KMS.F2 v := by
-  constructor
-  · intro h
-    have hv := (Pi.basisFun KMS.F2 ι).linearIndependent.map'
-      (familyLinearEquiv n ι v) (LinearMap.ker_eq_bot.mpr h)
-    simpa only [Function.comp_def, familyLinearEquiv_apply_basis] using hv
-  · intro h
-    exact (Pi.basisFun KMS.F2 ι).injective_constr_of_linearIndependent h
-
-theorem family_expect {n : ℕ} {ι : Type*} [Fintype ι]
-    [Fintype ((ι → KMS.F2) →ₗ[KMS.F2] KMS.Ambient n)]
-    {M : Type*} [AddCommMonoid M] [Module ℚ≥0 M]
-    (g : ((ι → KMS.F2) →ₗ[KMS.F2] KMS.Ambient n) → M) :
-    (𝔼 v : ι → KMS.Ambient n, g (familyLinearEquiv n ι v)) = 𝔼 X, g X :=
-  Fintype.expect_equiv (familyLinearEquiv n ι).toEquiv _ _ (fun _ => rfl)
 
 def tupleLinearEquiv (n ell : ℕ) :
     (Fin ell → KMS.Ambient n) ≃ₗ[KMS.F2] BasisMap n ell :=
   familyLinearEquiv n (Fin ell)
 
-def tupleEquiv (n ell : ℕ) : (Fin ell → KMS.Ambient n) ≃ BasisMap n ell :=
-  (tupleLinearEquiv n ell).toEquiv
-
-theorem basisMap_card (n ell : ℕ) : Fintype.card (BasisMap n ell) = 2 ^ (n * ell) := by
-  rw [← Fintype.card_congr (tupleEquiv n ell)]
-  simp [KMS.Ambient, KMS.F2, ← pow_mul]
-
-@[simp] theorem tupleLinearEquiv_apply_basis (n ell : ℕ)
-    (v : Fin ell → KMS.Ambient n) (i : Fin ell) :
-    tupleLinearEquiv n ell v (Pi.basisFun KMS.F2 (Fin ell) i) = v i :=
-  familyLinearEquiv_apply_basis _ _ _ _
 
 @[simp] theorem tupleLinearEquiv_symm_apply (n ell : ℕ)
     (X : BasisMap n ell) (i : Fin ell) :
     (tupleLinearEquiv n ell).symm X i = X (Pi.basisFun KMS.F2 (Fin ell) i) := rfl
 
-theorem tupleLinearEquiv_range (n ell : ℕ) (v : Fin ell → KMS.Ambient n) :
-    LinearMap.range (tupleLinearEquiv n ell v) = Submodule.span KMS.F2 (Set.range v) :=
-  familyLinearEquiv_range _ _ _
-
-theorem tupleLinearEquiv_injective_iff (n ell : ℕ) (v : Fin ell → KMS.Ambient n) :
-    Function.Injective (tupleLinearEquiv n ell v) ↔ LinearIndependent KMS.F2 v :=
-  familyLinearEquiv_injective_iff _ _ _
-
-/-- The complete uniform tuple law equals the complete uniform map law. -/
-theorem tuple_expect {n ell : ℕ} {M : Type*} [AddCommMonoid M] [Module ℚ≥0 M]
-    (g : BasisMap n ell → M) :
-    (𝔼 v : Fin ell → KMS.Ambient n, g (tupleLinearEquiv n ell v)) = 𝔼 X, g X :=
-  Fintype.expect_equiv (tupleEquiv n ell) _ _ (fun _ => rfl)
-
-/-- On tuples, a rank-one map perturbation adds the same vector at coordinates
-selected by the corresponding binary functional. -/
-theorem rankOne_tuple_coordinate {n ell : ℕ} (X : BasisMap n ell)
-    (l : KMS.Ambient ell →ₗ[KMS.F2] KMS.F2) (v : KMS.Ambient n) (i : Fin ell) :
-    (tupleLinearEquiv n ell).symm (X + l.smulRight v) i =
-      (tupleLinearEquiv n ell).symm X i + l (Pi.basisFun KMS.F2 (Fin ell) i) • v :=
-  rfl
-
-/-- The lift tests precisely whether the tuple spans a selected Grassmann
-vertex; independence is forced by membership in the selected dimension. -/
-theorem inLift_tuple_iff {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
-    (v : Fin ell → KMS.Ambient n) :
-    InLift S (tupleLinearEquiv n ell v) ↔
-      ∃ L ∈ S, Submodule.span KMS.F2 (Set.range v) = L.val := by
-  simp only [InLift, tupleLinearEquiv_range]
-
-theorem linearIndependent_of_inLift_tuple {n ell : ℕ}
-    {S : Finset (KMS.Vertex n ell)} {v : Fin ell → KMS.Ambient n}
-    (h : InLift S (tupleLinearEquiv n ell v)) : LinearIndependent KMS.F2 v :=
-  (tupleLinearEquiv_injective_iff n ell v).mp (injective_of_inLift h)
 
 end
 end UniqueGamesTheorem.Inverse.KMSBasisComparison

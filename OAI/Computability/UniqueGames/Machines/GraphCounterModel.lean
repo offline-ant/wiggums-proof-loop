@@ -1,3 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
+import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachineLogCounter
@@ -16,35 +19,19 @@ inductive ExtraTape where
   | input | archive | scratch | output
   deriving DecidableEq
 
-protected abbrev ExtraTape.enumList : List ExtraTape := [.input, .archive, .scratch, .output]
-
-protected theorem ExtraTape.enumList_getElem?_ctorIdx_eq (x : ExtraTape) :
-    ExtraTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem ExtraTape.enumList_nodup : ExtraTape.enumList.Nodup := by decide
-
 instance : Fintype ExtraTape where
-  elems := ⟨ExtraTape.enumList, ExtraTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .archive, .scratch, .output}
+  complete x := by cases x <;> simp
 
 inductive ExtraLabel where
   | copyFirst | copySecond | seed | headerFirst | headerSecond
   | clearInput | clockCopy | archiveCopy | finalReverse
   deriving DecidableEq
 
-protected abbrev ExtraLabel.enumList : List ExtraLabel := [.copyFirst, .copySecond, .seed,
-  .headerFirst, .headerSecond, .clearInput, .clockCopy, .archiveCopy, .finalReverse]
-
-protected theorem ExtraLabel.enumList_getElem?_ctorIdx_eq (x : ExtraLabel) :
-    ExtraLabel.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem ExtraLabel.enumList_nodup : ExtraLabel.enumList.Nodup := by decide
-
 instance : Fintype ExtraLabel where
-  elems := ⟨ExtraLabel.enumList, ExtraLabel.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.copyFirst, .copySecond, .seed,
+  .headerFirst, .headerSecond, .clearInput, .clockCopy, .archiveCopy, .finalReverse}
+  complete x := by cases x <;> simp
 
 abbrev Tape := Fin 3 ⊕ ExtraTape
 abbrev Label := Fin 5 ⊕ ExtraLabel
@@ -57,16 +44,11 @@ def clockLabel : Option (Fin 5) → Option Label
   | none => some (.inr .clearInput)
   | some l => some (.inl l)
 
-/-- Homogeneous Boolean embedding of the fixed logarithm program. -/
-def clockStatement : TM2.Stmt MachineLogCounter.Alphabet (Fin 5) MachineLogCounter.State →
-    TM2.Stmt Alphabet Label State
-  | .push k f next => .push (.inl k) (fun state => f state.1) (clockStatement next)
-  | .peek k f next => .peek (.inl k) (fun state x => (f state.1 x, state.2)) (clockStatement next)
-  | .pop k f next => .pop (.inl k) (fun state x => (f state.1 x, state.2)) (clockStatement next)
-  | .load f next => .load (fun state => (f state.1, state.2)) (clockStatement next)
-  | .branch f yes no => .branch (fun state => f state.1) (clockStatement yes) (clockStatement no)
-  | .goto f => .goto (fun state => .inl (f state.1))
-  | .halt => .goto (fun _ => .inr .clearInput)
+/-- Place the logarithm program on its tapes and preserve the caller register. -/
+def clockStatement (q : TM2.Stmt MachineLogCounter.Alphabet (Fin 5) MachineLogCounter.State) :
+    TM2.Stmt Alphabet Label State :=
+  MachineCloudPadding.Placement.statement Sum.inl Sum.inl (some (.inr .clearInput))
+    (MachineStateFrame.frameStatement q)
 
 def readHeader (again next : Label) : TM2.Stmt Alphabet Label State :=
   .pop (.inr .input) (fun state head => (state.1, head))
@@ -111,37 +93,25 @@ def clockConfiguration (extra : ExtraTape → List Bool) (register : Option Bool
     (c : TM2.Cfg MachineLogCounter.Alphabet (Fin 5) MachineLogCounter.State) :
     TM2.Cfg Alphabet Label State := ⟨clockLabel c.l, (c.var, register), clockTapes c.stk extra⟩
 
-theorem clockTapes_update (tapes : Fin 3 → List Bool) (extra : ExtraTape → List Bool)
-    (k : Fin 3) (word : List Bool) :
-    clockTapes (Function.update tapes k word) extra =
-      Function.update (clockTapes tapes extra) (.inl k) word := by
-  funext tape
-  cases tape <;> simp [clockTapes, Function.comp_def]
-
 theorem clockStatement_simulation (extra : ExtraTape → List Bool) (register : Option Bool)
     (statement : TM2.Stmt MachineLogCounter.Alphabet (Fin 5) MachineLogCounter.State)
     (state : MachineLogCounter.State) (tapes : Fin 3 → List Bool) :
     TM2.stepAux (clockStatement statement) (state, register) (clockTapes tapes extra) =
       clockConfiguration extra register (TM2.stepAux statement state tapes) := by
-  induction statement generalizing state tapes with
-  | push k f next ih =>
-      simp only [clockStatement, TM2.stepAux, clockTapes]
-      rw [← clockTapes_update]
-      exact ih state (Function.update tapes k (f state :: tapes k))
-  | peek k f next ih =>
-      simpa only [clockStatement, TM2.stepAux, clockTapes] using ih (f state (tapes k).head?) tapes
-  | pop k f next ih =>
-      simp only [clockStatement, TM2.stepAux, clockTapes]
-      rw [← clockTapes_update]
-      exact ih (f state (tapes k).head?) (Function.update tapes k (tapes k).tail)
-  | load f next ih =>
-      simpa only [clockStatement, TM2.stepAux] using ih (f state) tapes
-  | branch f yes no ihYes ihNo =>
-      cases h : f state with
-      | false => simpa only [clockStatement, TM2.stepAux, h, Bool.cond_false] using ihNo state tapes
-      | true => simpa only [clockStatement, TM2.stepAux, h, Bool.cond_true] using ihYes state tapes
-  | goto f => rfl
-  | halt => rfl
+  let view : Tape → Option (Fin 3) := Sum.elim some (fun _ => none)
+  have tapes_eq (ts : Fin 3 → List Bool) :
+      MachineCloudPadding.Placement.tapes view ts (Sum.elim (fun _ => []) extra) =
+        clockTapes ts extra := by
+    funext k; cases k <;> rfl
+  have run := MachineCloudPadding.Placement.stepAux_simulation Sum.inl view
+    (fun _ => rfl) (by intro j k h; cases j <;> simp_all [view])
+    Sum.inl (some (.inr ExtraLabel.clearInput)) (Sum.elim (fun _ => []) extra)
+    (MachineStateFrame.frameStatement statement) (state, register) tapes
+  rw [tapes_eq, MachineStateFrame.frame_stepAux] at run
+  cases h : (TM2.stepAux statement state tapes).l <;>
+    simpa only [clockStatement, MachineCloudPadding.Placement.configuration,
+      MachineStateFrame.frameConfiguration, tapes_eq, clockConfiguration,
+      MachineCloudPadding.Placement.label, clockLabel, h] using run
 
 theorem clockStep (extra : ExtraTape → List Bool) (register : Option Bool)
     (a b : MachineLogCounter.machine.Cfg)

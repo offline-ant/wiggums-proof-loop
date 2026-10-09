@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.Rectangle
 import OAI.Computability.UniqueGames.Repetition.RoundingPaddingLemmas
 import OAI.Computability.UniqueGames.Repetition.RoundingSampling
@@ -41,13 +42,6 @@ abbrev ThresholdSeed (f : V → Ω → ℝ) := RectangleSeed (thresholdLevels f)
 def thresholdDistribution [Nonempty Ω] (f : V → Ω → ℝ) :
     FiniteDistribution (ThresholdSeed f) := rectangleDistribution (thresholdLevels f)
 
-theorem thresholdSeed_nonempty [Nonempty Ω] (f : V → Ω → ℝ) :
-    Nonempty (ThresholdSeed f) := by
-  have hsum : (∑ seed, (thresholdDistribution f).weight seed) ≠ 0 := by
-    rw [(thresholdDistribution f).normalized]
-    norm_num
-  obtain ⟨seed, _, _⟩ := Finset.exists_ne_zero_of_sum_ne_zero hsum
-  exact ⟨seed⟩
 
 def thresholdAccept (f : V → Ω → ℝ) (x : V) : ThresholdSeed f → Bool :=
   rectangleAccept (thresholdLevels f) (fun ω => f x ω ^ 2)

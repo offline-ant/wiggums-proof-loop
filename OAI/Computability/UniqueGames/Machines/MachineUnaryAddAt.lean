@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineTransfer
@@ -29,10 +30,6 @@ def loop (source destination : K) (loopLabel : Λ) (exit : Option Λ) :
         (.push source (fun _ => false) (finish destination exit))
         (finish destination exit)))
 
-omit [DecidableEq K] in
-theorem loopPushBound (source destination : K) (loopLabel : Λ) (exit : Option Λ) :
-    Runtime.statementPushBound (loop (σ := σ) source destination loopLabel exit) = 1 := by
-  cases exit <;> rfl
 
 /-- A caller's tape frame with the two unary prefixes and their unread suffixes. -/
 def unaryTapes (source destination : K) (base : K → List Bool) (a b : Nat)
@@ -40,11 +37,6 @@ def unaryTapes (source destination : K) (base : K → List Bool) (a b : Nat)
   tapesAt source destination base (encodeWord a ++ sourceSuffix)
     (encodeWord b ++ destinationSuffix)
 
-@[simp] theorem unaryTapes_source (source destination : K) (distinct : source ≠ destination)
-    (base : K → List Bool) (a b : Nat) (sourceSuffix destinationSuffix : List Bool) :
-    unaryTapes source destination base a b sourceSuffix destinationSuffix source =
-      encodeWord a ++ sourceSuffix := by
-  simp [unaryTapes, distinct]
 
 @[simp] theorem unaryTapes_destination (source destination : K)
     (base : K → List Bool) (a b : Nat) (sourceSuffix destinationSuffix : List Bool) :
@@ -52,12 +44,6 @@ def unaryTapes (source destination : K) (base : K → List Bool) (a b : Nat)
       encodeWord b ++ destinationSuffix := by
   simp [unaryTapes]
 
-theorem unaryTapes_other (source destination other : K)
-    (notSource : other ≠ source) (notDestination : other ≠ destination)
-    (base : K → List Bool) (a b : Nat) (sourceSuffix destinationSuffix : List Bool) :
-    unaryTapes source destination base a b sourceSuffix destinationSuffix other =
-      base other := by
-  simp [unaryTapes, tapesAt, notSource, notDestination]
 
 private theorem update_source (source destination : K) (distinct : source ≠ destination)
     (base : K → List Bool) (input output replacement : List Bool) :

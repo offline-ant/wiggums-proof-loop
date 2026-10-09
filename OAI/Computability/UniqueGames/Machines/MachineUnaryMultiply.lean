@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
@@ -20,18 +21,10 @@ inductive Label
   | copyDrain | copyFork | seed | guard | scan | emitFalse | emitTrue | restore | finish
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.copyDrain, .copyFork, .seed, .guard, .scan,
-  .emitFalse, .emitTrue, .restore, .finish]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.copyDrain, .copyFork, .seed, .guard, .scan,
+  .emitFalse, .emitTrue, .restore, .finish}
+  complete x := by cases x <;> simp
 
 variable {K Λ σ : Type}
 
@@ -86,9 +79,6 @@ def resultTapes (slots : Fin 5 ↪ K) (base : K → List Bool) (product : ℕ) :
     resultTapes slots base p (slots 2) = encodeWord p ++ base (slots 2) := by
   simp [resultTapes]
 
-theorem resultTapes_other (slots : Fin 5 ↪ K) (base : K → List Bool) (p : ℕ)
-    (k : K) (hk : k ≠ slots 2) : resultTapes slots base p k = base k := by
-  simp [resultTapes, hk]
 
 def bodySteps (a : ℕ) : ℕ := 3 * (a + 1) + 2
 def steps (a b : ℕ) : ℕ := 3 * a * b + 8 * b + 7
@@ -249,23 +239,6 @@ theorem multiplyTrace (slots : Fin 5 ↪ K) (labels : Label → Λ) (exit : Opti
     hcopy, hseed, hloop]
   exact hfinish
 
-/-- A time witness with the exact transition count, including restoration
-of the operand delimiter and removal of the counter delimiter. -/
-def multiplyInTime (slots : Fin 5 ↪ K) (labels : Label → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (a b : ℕ)
-    (operandA : base (slots 0) = encodeWord a)
-    (operandB : base (slots 1) = encodeWord b)
-    (counterEmpty : base (slots 3) = []) (scratchEmpty : base (slots 4) = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels .copyDrain), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (a * b)⟩) (steps a b) where
-  steps := steps a b
-  evals_in_steps := multiplyTrace slots labels exit p atLabels base a b operandA operandB
-    counterEmpty scratchEmpty ambient register
-  steps_le_m := Nat.le_refl _
 
 noncomputable def timePolynomial : Polynomial ℕ :=
   Polynomial.C 3 * Polynomial.X ^ 2 + Polynomial.C 8 * Polynomial.X + Polynomial.C 7
@@ -280,11 +253,6 @@ theorem steps_le_timePolynomial (a b : ℕ) :
   unfold steps
   nlinarith
 
-/-- Both input stacks, both restored work stacks, and every unrelated stack
-are preserved because only the output stack differs at the actual endpoint. -/
-theorem multiplyFrame (slots : Fin 5 ↪ K) (base : K → List Bool) (a b : ℕ)
-    (k : K) (hk : k ≠ slots 2) :
-    resultTapes slots base (a * b) k = base k := resultTapes_other slots base _ k hk
 
 /-- The fixed finite program realizes the trace without any caller-code
 or abstract-computability hypothesis. -/
@@ -299,25 +267,6 @@ theorem programTrace (slots : Fin 5 ↪ K) (base : K → List Bool) (a b : ℕ)
   multiplyTrace slots id none (program slots) (fun _ => rfl) base a b
     operandA operandB counterEmpty scratchEmpty ambient register
 
-/-- The fixed program's genuine execution fits a quadratic polynomial in
-the combined lengths of its two encoded operand fields. -/
-def programInPolynomialTime (slots : Fin 5 ↪ K) (base : K → List Bool) (a b : ℕ)
-    (operandA : base (slots 0) = encodeWord a)
-    (operandB : base (slots 1) = encodeWord b)
-    (counterEmpty : base (slots 3) = []) (scratchEmpty : base (slots 4) = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ) slots))
-      ⟨some .copyDrain, ((ambient, ()), register), base⟩
-      (some ⟨none, ((ambient, ()), none), resultTapes slots base (a * b)⟩)
-      (timePolynomial.eval ((encodeWord a).length + (encodeWord b).length)) where
-  steps := steps a b
-  evals_in_steps := programTrace slots base a b operandA operandB counterEmpty scratchEmpty ambient register
-  steps_le_m := by
-    have hlength : (encodeWord a).length + (encodeWord b).length = a + b + 2 := by
-      simp only [encodeWord, List.length_append, List.length_replicate, List.length_singleton]
-      omega
-    rw [hlength]
-    exact steps_le_timePolynomial a b
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineUnaryMultiply
 

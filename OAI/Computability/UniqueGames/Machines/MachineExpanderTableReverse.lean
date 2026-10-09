@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamilyTransferLemmas
 
 namespace OAI
@@ -45,29 +46,18 @@ theorem reverseOutputTrace (positive : 0 < d) (H : Table (cloudSize d) d)
         boundaryTapes vertex remaining oldTable output countSuffix result⟩) =
       some ⟨some (.inr .done), clearRegister state,
         boundaryTapes vertex remaining oldTable [] countSuffix (output.reverse ++ result)⟩ := by
-  induction output generalizing result state with
-  | nil =>
-      simpa only [List.length_nil, Nat.zero_add, Function.iterate_one, advance_some,
-        List.reverse_nil, List.nil_append] using
-        reverseOutput_nilStep positive H
-          (boundaryTapes vertex remaining oldTable [] countSuffix result) state rfl
-  | cons symbol output ih =>
-      rw [List.length_cons, Function.iterate_succ_apply]
-      simp only [advance_some]
-      rw [reverseOutput_consStep positive H
-        (boundaryTapes vertex remaining oldTable (symbol :: output) countSuffix result)
-        state symbol output rfl]
-      change (advance (TM2.step (program positive H)))^[output.length + 1]
-        (some ⟨some (.inr .reverseOutput), ((state.1.1, some symbol), state.2),
-          Function.update
-            (Function.update
-              (boundaryTapes vertex remaining oldTable (symbol :: output) countSuffix result)
-              (.inl .output) output)
-            (.inr .result) (symbol :: result)⟩) = _
-      rw [boundaryTapes_reverse_update]
-      simpa only [clearRegister, List.reverse_cons, List.append_assoc,
-        List.singleton_append] using
-        ih (symbol :: result) ((state.1.1, some symbol), state.2)
+  have run := MachineControl.transferTrace (Γ := Alphabet)
+    (.inl .output) (.inr .result) (guardStates ρ d) (by decide) id false
+    (.inr .reverseOutput) (some (.inr .done)) (program positive H) rfl
+    (boundaryTapes vertex remaining oldTable output countSuffix result)
+    ((guardStates ρ d).symm state).1 ((guardStates ρ d).symm state).2
+  have source : boundaryTapes vertex remaining oldTable output countSuffix result
+      (.inl .output) = output := rfl
+  have destination : boundaryTapes vertex remaining oldTable output countSuffix result
+      (.inr .result) = result := rfl
+  simpa only [source, destination, guardStates_apply, guardStates_symm_apply, Prod.mk.eta,
+    Reduction.MachineTransfer.tapesAt, boundaryTapes_reverse_update, clearRegister,
+    List.map_id] using run
 
 /-- The actual `done` statement halts one transition after reversal completes. -/
 theorem reverseOutputHaltTrace (positive : 0 < d) (H : Table (cloudSize d) d)
@@ -85,18 +75,6 @@ theorem reverseOutputHaltTrace (positive : 0 < d) (H : Table (cloudSize d) d)
     (boundaryTapes vertex remaining oldTable [] countSuffix (output.reverse ++ result))
     (clearRegister state)
 
-def reverseOutputInTime (positive : 0 < d) (H : Table (cloudSize d) d)
-    (vertex remaining : Nat) (oldTable output countSuffix result : List Bool)
-    (state : State ρ d) :
-    StateTransition.EvalsToInTime (TM2.step (program positive H))
-      ⟨some (.inr .reverseOutput), state,
-        boundaryTapes vertex remaining oldTable output countSuffix result⟩
-      (some ⟨some (.inr .done), clearRegister state,
-        boundaryTapes vertex remaining oldTable [] countSuffix (output.reverse ++ result)⟩)
-      (output.length + 1) where
-  steps := output.length + 1
-  evals_in_steps := reverseOutputTrace positive H vertex remaining oldTable output countSuffix result state
-  steps_le_m := Nat.le_refl _
 
 def reverseOutputHaltInTime (positive : 0 < d) (H : Table (cloudSize d) d)
     (vertex remaining : Nat) (oldTable output countSuffix result : List Bool)

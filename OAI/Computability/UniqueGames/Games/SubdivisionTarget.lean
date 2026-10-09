@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Games.ProductTarget
 import OAI.Computability.UniqueGames.Machines.MachineFixedCopiesLemmas
 
@@ -52,15 +53,6 @@ theorem ofInstance_value {q : Nat} (H : Instance q) :
 def numericRightEquiv (Q : Nat) : Fin Q × Bool ≃ Fin (Q * 2) :=
   (Equiv.prodCongr (Equiv.refl (Fin Q)) finTwoEquiv.symm).trans finProdFinEquiv
 
-@[simp] theorem numericRightEquiv_false_val (Q : Nat) (e : Fin Q) :
-    (numericRightEquiv Q (e, false)).val = 2 * e.val := by
-  change 0 + 2 * e.val = 2 * e.val
-  exact Nat.zero_add _
-
-@[simp] theorem numericRightEquiv_true_val (Q : Nat) (e : Fin Q) :
-    (numericRightEquiv Q (e, true)).val = 2 * e.val + 1 := by
-  change 1 + 2 * e.val = 2 * e.val + 1
-  exact Nat.add_comm _ _
 
 /-- Original vertices, middle vertices, then interleaved `p_e,r_e`. -/
 def numericVertexEquiv (n Q : Nat) :
@@ -181,38 +173,6 @@ theorem subdivide_translation {q s : Nat}
 def simpleBipartite {q : Nat} (H : Instance q) : SimpleBipartite (subdivide H) :=
   ProductTarget.render_simpleBipartite _ _ _ _ _
 
-theorem numeric_side (n Q : Nat) (v : Fin (n + 3 * Q)) :
-    Sum.elim (fun _ => false) (fun _ => true) ((numericVertexEquiv n Q).symm v) =
-      decide (n + Q ≤ v.val) := by
-  obtain ⟨x, rfl⟩ := (numericVertexEquiv n Q).surjective v
-  rcases x with (v | e) | ⟨e, b⟩
-  · simp only [Equiv.symm_apply_apply, Sum.elim_inl, numericVertexEquiv_original_val]
-    have h : ¬ n + Q ≤ v.val := by omega
-    simp [h]
-  · simp only [Equiv.symm_apply_apply, Sum.elim_inl, numericVertexEquiv_middle_val]
-    have h : ¬ n + Q ≤ n + e.val := by omega
-    simp [h]
-  · cases b
-    · simp only [Equiv.symm_apply_apply, Sum.elim_inr, numericVertexEquiv_p_val]
-      have h : n + Q ≤ n + Q + 2 * e.val := by omega
-      simp [h]
-    · simp only [Equiv.symm_apply_apply, Sum.elim_inr, numericVertexEquiv_r_val]
-      have h : n + Q ≤ n + Q + 2 * e.val + 1 := by omega
-      simp [h]
-
-/-- The concrete left side is precisely the first `n+Q` numeric names. -/
-theorem simpleBipartite_side {q : Nat} (H : Instance q) (v : Fin (subdivide H).vertices) :
-    (simpleBipartite H).side v = decide (H.vertices + H.constraints.length ≤ v.val) :=
-  numeric_side H.vertices H.constraints.length v
-
-/-- Satisfaction correspondence for every labeling of the actual numbered output. -/
-theorem subdivide_count {q : Nat} (H : Instance q)
-    (a : Fin (H.vertices + 3 * H.constraints.length) → Fin q) :
-    countSatisfied a (subdivide H).constraints =
-      (Subdivision.game (ofInstance H)).satisfiedCount
-        (fun l => a (numericVertexEquiv H.vertices H.constraints.length (Sum.inl l)))
-        (fun r => a (numericVertexEquiv H.vertices H.constraints.length (Sum.inr r))) :=
-  ProductTarget.render_count _ _ _ _ _ (tables_correspond H) a
 
 /-- The serialized output has exactly the abstract subdivision value. -/
 theorem subdivide_value {q : Nat} (H : Instance q) :

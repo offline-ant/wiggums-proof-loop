@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineTransducerCopy
 
@@ -236,13 +237,6 @@ def prefixSteps {count : Nat} (commands : Fin count → Command h σ bound)
 def resultTapes (output : K) (base : K → List Bool) (bits : List Bool) : K → List Bool :=
   Function.update base output (bits.reverse ++ base output)
 
-@[simp] theorem resultTapes_output (output : K) (base : K → List Bool) (bits : List Bool) :
-    resultTapes output base bits output = bits.reverse ++ base output := by
-  simp [resultTapes]
-
-theorem resultTapes_other (output : K) (base : K → List Bool) (bits : List Bool)
-    (k : K) (hk : k ≠ output) : resultTapes output base bits k = base k := by
-  simp [resultTapes, hk]
 
 /-- Composition of the actual finite command traces, with preserved operand
 stacks available again at every command boundary. -/
@@ -410,30 +404,6 @@ theorem bitCommands_bits (bits : List (σ → Bool)) (values : Fin h → Nat) (a
     simpa only [bitCommands, List.map_cons, List.flatMap_cons, commandBits, encodeWords]
       using congrArg (encodeWord (if bit ambient then 1 else 0) ++ ·) ih
 
-/-- The affine template itself has an actual composable machine certificate. -/
-def affineInTime (terms : List (Fin h × Nat)) (offset : σ → Fin bound)
-    (sources : Fin h → K) (scratch output : K)
-    (sourceScratch : ∀ i, sources i ≠ scratch)
-    (sourceOutput : ∀ i, sources i ≠ output) (scratchOutput : scratch ≠ output)
-    (labels : Label (affineCommands terms offset).length bound → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atLabels : ∀ label, p (labels label) =
-      statement (listCommands (affineCommands terms offset)) sources scratch output labels exit label)
-    (values : Fin h → Nat) (base : K → List Bool)
-    (operands : ∀ i, base (sources i) = encodeWord (values i))
-    (scratchEmpty : base scratch = []) (ambient : σ)
-    (N : Nat) (bounded : ∀ i, values i ≤ N) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels (labelAt (affineCommands terms offset).length bound 0 .entry)),
-        ((ambient, ()), none), base⟩
-      (some ⟨exit, ((ambient, ()), none),
-        resultTapes output base (encodeWord (affineValue terms values (offset ambient).val))⟩)
-      ((terms.length + 2) * (3 * (N + 1) + 3) + 1) := by
-  have run := planInTime (listCommands (affineCommands terms offset)) sources scratch output
-    sourceScratch sourceOutput scratchOutput labels exit p atLabels values base operands
-    scratchEmpty ambient N bounded
-  rw [bits_listCommands, affineCommands_bits] at run
-  simpa only [affineCommands_length] using run
 
 /-- Enlarge the finite ambient registers by reading a projection of them. -/
 def Command.mapAmbient {τ : Type} (view : σ → τ) :
@@ -450,10 +420,6 @@ def Command.mapAmbient {τ : Type} (view : σ → τ) :
       commandBits values (view ambient) command := by
   cases command <;> rfl
 
-@[simp] theorem commandSteps_mapAmbient {τ : Type} (view : σ → τ)
-    (command : Command h τ bound) (values : Fin h → Nat) :
-    commandSteps values (command.mapAmbient view) = commandSteps values command := by
-  cases command <;> rfl
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Emitter
 

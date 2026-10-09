@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineUnaryEqualityBit
 import OAI.Computability.UniqueGames.Machines.PoweringMachineRelationLemmas
 
@@ -181,10 +182,6 @@ theorem finalTapes_output (graph : PortTables.Table n d) (hl : l ≤ max) (hr : 
     wordTapes_role graph hl placement distinct false vertex left base 10
       (by decide) (by decide) (by decide) (by decide)]
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {u v : Nat}
-    (first : f^[u] a = b) (second : f^[v] b = c) : f^[u + v] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 theorem fieldTrace (graph : PortTables.Table n d) (hl : l ≤ max) (hr : r ≤ max)
     (placement : Tape max → K) (distinct : Function.Injective placement)
     (vertex : Fin n) (left : Fin l → Fin d) (right : Fin r → Fin d)
@@ -281,34 +278,12 @@ theorem fieldTrace (graph : PortTables.Table n d) (hl : l ≤ max) (hr : r ≤ m
     (by simpa only [Function.comp_apply, PoweringMachineTapes.equalityPlacement_four,
       PoweringMachineTapes.scratch] using scratchBoth)
     ambient
-  have joined := joinTrace (joinTrace leftRun.1 rightRun.1) equalityRun
+  have joined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans leftRun.1 rightRun.1) equalityRun
   simpa only [steps, entry, MachineUnaryEqualityBit.clean, Function.comp_apply,
     PoweringMachineTapes.equalityPlacement_five, PoweringMachineTapes.rowOutput,
     finalTapes, resultBit, Fin.ext_iff,
     afterLeft, afterBoth, wordTapes] using joined
 
-def fieldInTime (graph : PortTables.Table n d) (hl : l ≤ max) (hr : r ≤ max)
-    (placement : Tape max → K) (distinct : Function.Injective placement)
-    (vertex : Fin n) (left : Fin l → Fin d) (right : Fin r → Fin d)
-    (labels : Label l r → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
-    (atLabels : ∀ q, program (labels q) = instruction hl hr placement left right labels exit q)
-    (base : K → List Bool)
-    (tableWord : base (placement (.inl 0)) = PortTables.tableBits graph)
-    (scratchEmpty : base (placement (.inl 5)) = [])
-    (leftCopyEmpty : base (placement (.inl 8)) = [])
-    (rightCopyEmpty : base (placement (.inl 9)) = [])
-    (suffix : List Bool) (sourceWord : base (placement (.inl 1)) = encodeWord vertex.val ++ suffix)
-    (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (entry l r)), MachineUnaryEqualityBit.clean ambient, base⟩
-      (some ⟨exit, MachineUnaryEqualityBit.clean ambient,
-        finalTapes graph hl hr placement vertex left right base⟩)
-      ((14 * (l + r) + 10) * (PortTables.tableBits graph).length + 12 * (l + r) + 15) where
-  steps := steps graph vertex left right
-  evals_in_steps := fieldTrace graph hl hr placement distinct vertex left right labels exit program
-    atLabels base tableWord scratchEmpty leftCopyEmpty rightCopyEmpty suffix sourceWord ambient
-  steps_le_m := steps_le graph vertex left right
 
 def machine (degree : Nat) (hl : l ≤ max) (hr : r ≤ max)
     (left : Fin l → Fin degree) (right : Fin r → Fin degree) : FinTM2 where

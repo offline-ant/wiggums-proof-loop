@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Research.R22PcpPreprocessing
 import OAI.Computability.UniqueGames.PCP.PreprocessingPaddingOffsets
 
 namespace OAI
@@ -81,19 +83,10 @@ theorem reverseIndex_internal (v : Fin t.vertices) (x : PaddedCloud t padding v)
   dsimp only
   omega
 
-private theorem relation_ext {r s : GraphTables.RelationTable}
-    (h : ∀ a b, GraphTables.relationAt r a b = GraphTables.relationAt s a b) : r = s := by
-  apply Vector.ext
-  intro i hi
-  simpa only [GraphTables.relationAt, Prod.eta, Equiv.apply_symm_apply,
-    Fin.getElem_fin] using
-    h (GraphTables.relationIndex.symm ⟨i, hi⟩).1
-      (GraphTables.relationIndex.symm ⟨i, hi⟩).2
-
 /-- Equality is the entire stored relation vector, not only one tested entry. -/
 theorem relations_internal (v : Fin t.vertices) (x : PaddedCloud t padding v) (p : Fin q) :
     (ofCloudTables t padding tables).relations[rowIndex t padding v x p] = equalityRelation := by
-  apply relation_ext
+  apply GraphTables.relation_ext
   intro a b
   rw [equalityRelation_apply]
   exact accepts_internal t padding tables x.val p a b
@@ -124,17 +117,6 @@ theorem row_reverse (v : Fin t.vertices) (x : PaddedCloud t padding v) (p : Fin 
     localStep t padding tables v (paddedNew t padding v j) p =
       ExpanderTables.lookup (tables v) (Fin.natAdd (cloudSize t v) j, p) := rfl
 
-@[simp] theorem row_tail_original (v : Fin t.vertices) (x : Cloud (GraphTables.semantics t) v)
-    (p : Fin q) :
-    (row t padding tables v (paddedOld t padding v x) p).tail.val = x.val.val := by
-  rw [row_tail]
-  rfl
-
-@[simp] theorem row_tail_dummy (v : Fin t.vertices) (j : Fin (padding v)) (p : Fin q) :
-    (row t padding tables v (paddedNew t padding v j) p).tail.val =
-      t.darts + PreprocessingPaddingOffsets.offset padding v.val + j.val := by
-  rw [row_tail]
-  exact PreprocessingPaddingOffsets.vertexOrder_dummy_val t padding v j
 
 /-- The global target number computed from an arbitrary returned cloud index. -/
 def selectedIndex (v : Fin t.vertices) (i : Fin (cloudSize t v + padding v)) : Nat :=
@@ -146,26 +128,13 @@ def selectedIndex (v : Fin t.vertices) (i : Fin (cloudSize t v + padding v)) : N
 theorem selectedIndex_eq (v : Fin t.vertices) (i : Fin (cloudSize t v + padding v)) :
     (vertexOrder t padding (paddedCloudSelect t padding v i).val).val =
       selectedIndex t padding v i := by
-  unfold selectedIndex
-  split
-  · rename_i hi
-    have he : i = Fin.castAdd (padding v) (⟨i.val, hi⟩ : Fin (cloudSize t v)) := Fin.ext rfl
-    refine (congrArg (fun j =>
-      (vertexOrder t padding (paddedCloudSelect t padding v j).val).val) he).trans ?_
-    rw [paddedCloudSelect_castAdd]
-    rfl
-  · rename_i hi
-    have hj : i.val - cloudSize t v < padding v := by have h := i.isLt; omega
-    have he : i = Fin.natAdd (cloudSize t v) (⟨i.val - cloudSize t v, hj⟩ : Fin (padding v)) := by
-      apply Fin.ext
-      dsimp only [Fin.val_natAdd]
-      omega
-    refine (congrArg (fun j =>
-      (vertexOrder t padding (paddedCloudSelect t padding v j).val).val) he).trans ?_
-    rw [paddedCloudSelect_natAdd]
-    change (vertexOrder t padding
-      (Sum.inr ⟨v, (⟨i.val - cloudSize t v, hj⟩ : Fin (padding v))⟩)).val = _
-    exact PreprocessingPaddingOffsets.vertexOrder_dummy_val t padding v _
+  refine Fin.addCases (fun j => ?_) (fun j => ?_) i
+  · rw [paddedCloudSelect_castAdd]
+    simp [selectedIndex, j.isLt, paddedOld]
+  · rw [paddedCloudSelect_natAdd]
+    change (vertexOrder t padding (Sum.inr ⟨v, j⟩)).val = _
+    rw [PreprocessingPaddingOffsets.vertexOrder_dummy_val]
+    simp [selectedIndex, Fin.val_natAdd]
 
 /-- Old target indices select the original dart from its actual cloud list. -/
 theorem selectedIndex_old (v : Fin t.vertices) (i : Fin (cloudSize t v + padding v))
@@ -189,15 +158,6 @@ theorem row_reverse_selectedIndex (v : Fin t.vertices) (x : PaddedCloud t paddin
   unfold destination
   rw [selectedIndex_eq]
 
-/-- All 4098 words of the actual internal row, in the existing codec. -/
-theorem rowWords_eq (v : Fin t.vertices) (x : PaddedCloud t padding v) (p : Fin q) :
-    GraphTables.rowWords (row t padding tables v x p) =
-      [(vertexOrder t padding x.val).val,
-        (q + 1) * selectedIndex t padding v (localStep t padding tables v x p).1 +
-          (localStep t padding tables v x p).2.val] ++
-        GraphTables.relationWords equalityRelation := by
-  unfold GraphTables.rowWords
-  rw [row_tail, row_reverse_selectedIndex, row_relation]
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingInternalRows
 

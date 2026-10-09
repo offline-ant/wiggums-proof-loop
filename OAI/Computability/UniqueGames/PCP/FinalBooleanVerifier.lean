@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.AlphabetTableBoundsLemmas
@@ -30,10 +31,6 @@ def bitsOfLabels (vertices : V ≃ Fin n) (labeling : V → Label) : Fin (n * 6)
   funext v j
   simp only [labelsOfBits, bitsOfLabels, bitIndex, Equiv.symm_apply_apply]
 
-@[simp] theorem bitsOfLabels_labelsOfBits (vertices : V ≃ Fin n)
-    (assignment : Fin (n * 6) → Bool) : bitsOfLabels vertices (labelsOfBits vertices assignment) = assignment := by
-  funext k
-  simp only [bitsOfLabels, labelsOfBits, bitIndex, Equiv.apply_symm_apply, Prod.eta]
 
 abbrev verifier (G : ConstraintGraph V E Label) (vertices : V ≃ Fin n) (edges : E ≃ Fin m) :
     VerifierToCNF.FiniteVerifier 12 where
@@ -112,13 +109,6 @@ theorem verifier_completeness (G : ConstraintGraph V E Label) (vertices : V ≃ 
   rw [eventValue_eq, labelsOfBits_bitsOfLabels]
   exact satisfied (edges.symm e)
 
-theorem verifier_reflects (G : ConstraintGraph V E Label) (vertices : V ≃ Fin n)
-    (edges : E ≃ Fin m) (assignment : Fin (n * 6) → Bool)
-    (accepted : ∀ e, VerifierToCNF.eventValue (verifier G vertices edges) assignment e = true) :
-    ∀ e, G.edgeSatisfied (labelsOfBits vertices assignment) e = true := by
-  intro e
-  have h := accepted (edges e)
-  simpa only [eventValue_eq, Equiv.symm_apply_apply] using h
 
 def cnf (G : ConstraintGraph V E Label) (vertices : V ≃ Fin n) (edges : E ≃ Fin m) : Formula :=
   VerifierToCNF.convert (verifier G vertices edges) (by decide)
@@ -207,41 +197,10 @@ theorem cnf_gap [Fintype E] (G : ConstraintGraph V E Label)
   simpa only [cnf, VerifierToCNF.twelve_query_factor] using
     VerifierToCNF.convert_gap (verifier G vertices edges) (by decide) a b testGap assignment
 
-abbrev ReducedVertex (V E A : Type*) :=
-  QueryIncidence.Vertex (AlphabetGraph.Event E A) (AlphabetGraph.Address V E A)
-
-abbrev ReducedDart (E A : Type*) := QueryIncidence.Dart (AlphabetGraph.Event E A) 6
 
 variable {A : Type*} [Fintype A] [DecidableEq A] [Nonempty A]
   [DecidableEq V] [DecidableEq E]
 
-noncomputable def alphabetCNF (G : ConstraintGraph V E A)
-    (vertices : ReducedVertex V E A ≃ Fin n) (edges : ReducedDart E A ≃ Fin m) : Formula :=
-  cnf (AlphabetGraph.graph G) vertices edges
-
-omit [DecidableEq A] [Nonempty A] in
-theorem alphabetCNF_completeness (G : ConstraintGraph V E A)
-    (vertices : ReducedVertex V E A ≃ Fin n) (edges : ReducedDart E A ≃ Fin m)
-    (sat : G.Satisfiable) : (alphabetCNF G vertices edges).Satisfiable :=
-  cnf_completeness (AlphabetGraph.graph G) vertices edges (AlphabetGraph.perfect_completeness G sat)
-
-omit [DecidableEq A] [Nonempty A] in
-theorem alphabetCNF_clause_count (G : ConstraintGraph V E A)
-    (vertices : ReducedVertex V E A ≃ Fin n) (edges : ReducedDart E A ≃ Fin m) :
-    (alphabetCNF G vertices edges).clauses.length = m * 40960 :=
-  cnf_clause_count (AlphabetGraph.graph G) vertices edges
-
-theorem alphabetCNF_gap [Fintype E] (G : ConstraintGraph V E A)
-    (vertices : ReducedVertex V E A ≃ Fin n) (edges : ReducedDart E A ≃ Fin m)
-    (a b : Nat)
-    (source : ∀ labeling : V → A, a * Fintype.card E ≤ b * G.rejectionCount labeling)
-    (assignment : OutputAssignment (AlphabetGraph.graph G) vertices edges) :
-    a * (alphabetCNF G vertices edges).clauses.length ≤
-      (b * 503316480) * NameCompaction.failedCount (alphabetCNF G vertices edges) assignment := by
-  have h := cnf_gap (AlphabetGraph.graph G) vertices edges a (b * 12288)
-    (AlphabetGraph.gap_transfer G a b source) assignment
-  have factor : (b * 12288) * 40960 = b * 503316480 := by omega
-  simpa only [alphabetCNF, factor] using h
 
 end UniqueGamesTheorem.Foundations.PCP.FinalBooleanVerifier
 

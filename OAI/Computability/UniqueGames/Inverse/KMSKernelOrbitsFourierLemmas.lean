@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.Prod
@@ -105,20 +106,6 @@ def hyperplaneExtensionEquiv (z : B →ₗ[F2] E) :
     change hyperplaneExtend z (S.1 (0, 1)) = S.1
     simpa only [S.2] using hyperplaneExtend_recover S.1
 
-theorem hyperplaneExtend_injective (z : B →ₗ[F2] E) :
-    Function.Injective (hyperplaneExtend z) := by
-  intro u v h
-  simpa using congrArg (fun S : (B × F2) →ₗ[F2] E => S (0, 1)) h
-
-/-- The range is the old range plus the span of the new vector. -/
-theorem range_hyperplaneExtend (z : B →ₗ[F2] E) (v : E) :
-    (hyperplaneExtend z v).range = z.range ⊔ Submodule.span F2 {v} := by
-  rw [hyperplaneExtend, LinearMap.range_coprod, LinearMap.range_toSpanSingleton]
-
-theorem range_hyperplaneExtend_of_mem (z : B →ₗ[F2] E) {v : E} (hv : v ∈ z.range) :
-    (hyperplaneExtend z v).range = z.range := by
-  rw [range_hyperplaneExtend, sup_eq_left]
-  exact (Submodule.span_singleton_le_iff_mem _ _).mpr hv
 
 /-- All outside-range extensions have the same actual kernel. -/
 theorem ker_hyperplaneExtend_of_notMem (z : B →ₗ[F2] E) {v : E}
@@ -152,13 +139,6 @@ theorem card_hyperplaneExtension_outside (z : B →ₗ[F2] E) :
   rw [← Fintype.card_subtype]
   exact Fintype.card_subtype_compl (fun v : E => v ∈ z.range)
 
-omit [FiniteDimensional F2 E] [Fintype (E →ₗ[F2] B × F2)] in
-theorem card_hyperplaneExtension_outside_pow (z : B →ₗ[F2] E) :
-    (Finset.univ.filter (fun v : E => v ∉ z.range)).card =
-      2 ^ Module.finrank F2 E - 2 ^ Module.finrank F2 z.range := by
-  rw [card_hyperplaneExtension_outside, Module.card_eq_pow_finrank (K := F2) (V := E),
-    Module.card_eq_pow_finrank (K := F2) (V := z.range)]
-  simp only [F2, ZMod.card]
 
 /-- Exact sum of the common coefficient over all outside-range extensions. -/
 theorem sum_hyperplaneExtend_outside (f : (E →ₗ[F2] (B × F2)) → ℝ)
@@ -187,21 +167,6 @@ theorem sum_hyperplaneExtend (f : (E →ₗ[F2] (B × F2)) → ℝ)
   exact (Finset.sum_filter_add_sum_filter_not Finset.univ
     (fun u => u ∈ z.range) (fun u => linearCoeff f (hyperplaneExtend z u))).symm
 
-/-- Solve the extension sum for the coefficient of an independent extension. -/
-theorem coefficient_hyperplaneExtend_recursion (f : (E →ₗ[F2] (B × F2)) → ℝ)
-    (hf : KMSBasisInvariant.IsBasisInvariant f) (z : B →ₗ[F2] E)
-    {v : E} (hv : v ∉ z.range) :
-    linearCoeff f (hyperplaneExtend z v) =
-      ((∑ u : E, linearCoeff f (hyperplaneExtend z u)) -
-        ∑ u with u ∈ z.range, linearCoeff f (hyperplaneExtend z u)) /
-      ((Fintype.card E - Fintype.card z.range : ℕ) : ℝ) := by
-  have hlt : Fintype.card z.range < Fintype.card E :=
-    Fintype.card_subtype_lt hv
-  have hne : ((Fintype.card E - Fintype.card z.range : ℕ) : ℝ) ≠ 0 :=
-    Nat.cast_ne_zero.mpr (Nat.ne_of_gt (Nat.sub_pos_of_lt hlt))
-  apply (eq_div_iff hne).mpr
-  rw [sum_hyperplaneExtend f hf z hv]
-  ring
 
 end Fourier
 end
@@ -365,68 +330,6 @@ theorem smallComponent_energy_cross_mul (ι : I →ₗ[F2] E)
     Finset.sum_subtype (p := fun S : F →ₗ[F2] E => Module.finrank F2 S.range = Module.finrank F2 I) _ (by simp) (fun S : F →ₗ[F2] E => linearCoeff f S ^ 2)]
   exact h
 
-omit [Finite F] [Finite I] in
-/-- Dividing by the positive, explicitly counted injection multiplicity gives
-the normalized small-space energy exactly. -/
-theorem smallComponent_energy_ratio (ι : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBasisInvariant f) :
-    (𝔼 X, smallComponent ι f X ^ 2) =
-      (beta I I : ℝ) / (beta I E : ℝ) *
-        (𝔼 X, rankComponent (Module.finrank F2 I) f X ^ 2) := by
-  have hdim : Module.finrank F2 I ≤ Module.finrank F2 E :=
-    LinearMap.finrank_le_finrank_of_injective hι
-  have hb : (beta I E : ℝ) ≠ 0 := by
-    exact_mod_cast (ne_of_gt (KMSInjectionCount.beta_positive I E hdim))
-  apply (mul_left_cancel₀ hb)
-  calc
-    _ = (beta I I : ℝ) * (𝔼 X, rankComponent (Module.finrank F2 I) f X ^ 2) :=
-      smallComponent_energy_cross_mul ι hι f hf
-    _ = _ := by field_simp
-
-omit [Finite F] in
-/-- An explicit dimension-only norm comparison obtained from the actual
-injection counts. The loose constant is sufficient for the analytic argument. -/
-theorem smallComponent_energy_pow_bound (ι : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBasisInvariant f) :
-    (2 : ℝ) ^ (Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I)) *
-        (𝔼 X, smallComponent ι f X ^ 2) ≤
-      (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) *
-        (𝔼 X, rankComponent (Module.finrank F2 I) f X ^ 2) := by
-  have hdim : Module.finrank F2 I ≤ Module.finrank F2 E :=
-    LinearMap.finrank_le_finrank_of_injective hι
-  have hlo : (2 : ℝ) ^
-      (Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I)) ≤
-      (beta I E : ℝ) := by
-    exact_mod_cast KMSInjectionCount.beta_ge_pow I E hdim
-  have hhi : (beta I I : ℝ) ≤
-      (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) := by
-    exact_mod_cast KMSInjectionCount.beta_self_le I
-  calc
-    _ ≤ (beta I E : ℝ) * (𝔼 X, smallComponent ι f X ^ 2) :=
-      mul_le_mul_of_nonneg_right hlo (Finset.expect_nonneg (fun _ _ => sq_nonneg _))
-    _ = (beta I I : ℝ) *
-        (𝔼 X, rankComponent (Module.finrank F2 I) f X ^ 2) :=
-      smallComponent_energy_cross_mul ι hι f hf
-    _ ≤ _ := mul_le_mul_of_nonneg_right hhi
-      (Finset.expect_nonneg (fun _ _ => sq_nonneg _))
-
-omit [Finite F] in
-/-- The zero-fixed-character case uses only the original function's squared
-norm bound. In particular it applies to a pseudorandom indicator of density
-at most `ε`, without assuming any restricted Fourier inequality. -/
-theorem smallComponent_energy_le_of_energy_le (ι : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBasisInvariant f) (ε : ℝ) (hε : (𝔼 X, f X ^ 2) ≤ ε) :
-    (2 : ℝ) ^ (Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I)) *
-        (𝔼 X, smallComponent ι f X ^ 2) ≤
-      (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) * ε := by
-  exact (smallComponent_energy_pow_bound ι hι f hf).trans
-    (mul_le_mul_of_nonneg_left
-      ((component_energy_le (fun T : F →ₗ[F2] E =>
-        Module.finrank F2 T.range = Module.finrank F2 I) f).trans hε)
-      (pow_nonneg (by norm_num) _))
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -466,60 +369,6 @@ theorem smallCoeff_eq_of_basisInvariant (ι κ : I →ₗ[F2] E)
   smallCoeff_eq_of_kernel_coeff_const ι κ hι hκ f
     (KMSKernelOrbitsFourier.coefficient_eq_of_ker_eq f hf)
 
-omit [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] in
-/-- Independence is equality of the actual small-space functions. -/
-theorem smallComponent_eq_of_basisInvariant (ι κ : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (hκ : Function.Injective κ)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f) :
-    smallComponent ι f = smallComponent κ f :=
-  smallComponent_eq_of_kernel_coeff_const ι κ hι hκ f
-    (KMSKernelOrbitsFourier.coefficient_eq_of_ker_eq f hf)
-
-omit [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)] in
-theorem surjective_postcomp_equiv (g : I ≃ₗ[F2] I) (T : F →ₗ[F2] I) :
-    Function.Surjective (g.toLinearMap.comp T) ↔ Function.Surjective T := by
-  constructor
-  · intro h y
-    obtain ⟨x, hx⟩ := h (g y)
-    exact ⟨x, g.injective hx⟩
-  · intro h y
-    obtain ⟨x, hx⟩ := h (g.symm y)
-    refine ⟨x, ?_⟩
-    simp only [LinearMap.comp_apply, LinearEquiv.coe_coe, hx, LinearEquiv.apply_symm_apply]
-
-omit [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)] in
-/-- The retained coefficient array is invariant under a small-space basis
-change, with surjectivity and the lifted frequency kernel both preserved. -/
-theorem smallCoeff_postcomp_equiv (ι : I →ₗ[F2] E) (hι : Function.Injective ι)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f)
-    (g : I ≃ₗ[F2] I) (T : F →ₗ[F2] I) :
-    smallCoeff ι f (g.toLinearMap.comp T) = smallCoeff ι f T := by
-  unfold smallCoeff
-  rw [surjective_postcomp_equiv]
-  split_ifs
-  · apply KMSKernelOrbitsFourier.coefficient_eq_of_ker_eq f hf
-    rw [ker_comp_of_injective ι hι, ker_comp_of_injective g.toLinearMap g.injective,
-      ker_comp_of_injective ι hι]
-  · rfl
-
-omit [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] in
-/-- The small component is genuinely invariant as a function on matrices. -/
-theorem smallComponent_invariant (ι : I →ₗ[F2] E) (hι : Function.Injective ι)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f) :
-    KMSBasisInvariant.IsBasisInvariant (smallComponent ι f) := by
-  intro g X
-  unfold smallComponent synthesis
-  simp only [Finset.sum_apply, Pi.smul_apply, smul_eq_mul]
-  apply Fintype.sum_equiv (KMSBasisInvariant.frequencyChange g)
-  intro T
-  change smallCoeff ι f T * (linearTraceCharacter T (X.comp g.toLinearMap)).re =
-    smallCoeff ι f (g.toLinearMap.comp T) *
-      (linearTraceCharacter (g.toLinearMap.comp T) X).re
-  rw [smallCoeff_postcomp_equiv ι hι f hf, KMSBasisInvariant.character_change]
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -665,21 +514,6 @@ variable {B C W : Type*}
   [AddCommGroup C] [Module F2 C] [FiniteDimensional F2 C]
   [AddCommGroup W] [Module F2 W] [FiniteDimensional F2 W]
 
-/-- The exact number of extensions is independent of the prescribed map. -/
-theorem natCard_extension (z : B →ₗ[F2] W) :
-    Nat.card (Extension (C := C) z) =
-      2 ^ (Module.finrank F2 C * Module.finrank F2 W) := by
-  rw [Nat.card_congr (extensionEquiv (C := C) z)]
-  exact CompressionCount.natCard_linearMap
-
-/-- The same exact count in the filtered form used by the fiber Cauchy bound. -/
-theorem card_restriction_fiber [Fintype ((B × C) →ₗ[F2] W)]
-    (z : B →ₗ[F2] W) :
-    (Finset.univ.filter (fun ψ : (B × C) →ₗ[F2] W =>
-      ψ.comp (LinearMap.inl F2 B C) = z)).card =
-        2 ^ (Module.finrank F2 C * Module.finrank F2 W) := by
-  rw [← Fintype.card_subtype]
-  simpa only [Extension, Nat.card_eq_fintype_card] using natCard_extension (C := C) z
 
 end Extensions
 
@@ -696,26 +530,6 @@ theorem card_linearMap_eq [Fintype (C →ₗ[F2] D)] :
   simpa only [Nat.card_eq_fintype_card] using
     (CompressionCount.natCard_linearMap (U := C) (C := D))
 
-/-- Ordered independent complementary choices are no more numerous than
-all maps on the complementary domain; there is no basis-orbit quotient. -/
-theorem natCard_injective_le :
-    Nat.card {v : C →ₗ[F2] D // Function.Injective v} ≤
-      2 ^ (Module.finrank F2 C * Module.finrank F2 D) := by
-  let : Finite C := Finite.of_injective (Module.finBasis F2 C).equivFun
-    (Module.finBasis F2 C).equivFun.injective
-  let : Finite D := Finite.of_injective (Module.finBasis F2 D).equivFun
-    (Module.finBasis F2 D).equivFun.injective
-  let : Finite (C →ₗ[F2] D) := Finite.of_injective
-    (fun v : C →ₗ[F2] D => (v : C → D)) DFunLike.coe_injective
-  calc
-    _ ≤ Nat.card (C →ₗ[F2] D) :=
-      Nat.card_le_card_of_injective Subtype.val Subtype.val_injective
-    _ = _ := CompressionCount.natCard_linearMap
-
-theorem card_injective_le [Fintype (C →ₗ[F2] D)] :
-    Fintype.card {v : C →ₗ[F2] D // Function.Injective v} ≤
-      2 ^ (Module.finrank F2 C * Module.finrank F2 D) := by
-  simpa only [Nat.card_eq_fintype_card] using natCard_injective_le (C := C) (D := D)
 
 end Injections
 
@@ -858,15 +672,6 @@ theorem fixedFrequencyEnergy_eq_zero_of_not_surjective
   have ht := (Finset.mem_filter.mp hT).2
   exact (hA (ht.1 ▸ hπ.comp ht.2)).elim
 
-omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
-/-- Forgetting the prescribed partial frequency gives the exact full small
-energy, so every individual restricted sum is bounded by it. -/
-theorem fixedFrequencyEnergy_le (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) (π : I →ₗ[F2] J) (A : F →ₗ[F2] J) :
-    fixedFrequencyEnergy ι f π A ≤ 𝔼 X, smallComponent ι f X ^ 2 := by
-  rw [smallComponent, synthesis_energy]
-  exact Finset.sum_le_sum_of_subset_of_nonneg (Finset.filter_subset _ _)
-    (fun _ _ _ => sq_nonneg _)
 
 omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
 /-- With no fixed characters the restricted sum is exactly the small squared
@@ -878,17 +683,6 @@ theorem fixedFrequencyEnergy_zero (ι : I →ₗ[F2] E)
   rw [smallComponent, synthesis_energy]
   simp [fixedFrequencyEnergy]
 
-omit [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] in
-/-- The fixed-character energy is independent of the chosen small-space
-embedding for the actual basis-invariant function. -/
-theorem fixedFrequencyEnergy_eq_of_basisInvariant (ι κ : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (hκ : Function.Injective κ)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : IsBasisInvariant f)
-    (π : I →ₗ[F2] J) (A : F →ₗ[F2] J) :
-    fixedFrequencyEnergy ι f π A = fixedFrequencyEnergy κ f π A := by
-  unfold fixedFrequencyEnergy
-  rw [smallCoeff_eq_of_basisInvariant ι κ hι hκ f hf]
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic

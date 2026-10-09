@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.ActualAdviceBridgeLemmas
 import OAI.Computability.UniqueGames.Decoding.AdviceImageLaw
 import OAI.Computability.UniqueGames.Decoding.PaddedLaw
@@ -5,7 +6,6 @@ import OAI.Computability.UniqueGames.Decoding.StochasticBound
 import OAI.Computability.UniqueGames.Decoding.TableKeysLemmas
 import OAI.Computability.UniqueGames.Foundations.MixtureLemmas
 import OAI.Computability.UniqueGames.Soundness.RawTargetLawLemmas
-import OAI.Computability.UniqueGames.Soundness.SubsetIntersectionLemmas
 
 namespace OAI
 
@@ -139,9 +139,9 @@ def fixedMapSuccess (μ : FiniteDistribution (O × Fin 3))
     (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
     (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] D) : ℝ :=
   (FiniteDistribution.table (fun _ : Fin k => μ)).expectation fun draw =>
-    (policy.first J (fun j => (draw j).1) (Y.comp (projection g J draw))).expectation fun x =>
-      (policy.second J (displayedQuestion g J draw) Y).expectation fun v =>
-        if projection g J draw x.val = v.val then 1 else 0
+    ((policy.first J (fun j => (draw j).1) (Y.comp (projection g J draw))).product
+      (policy.second J (displayedQuestion g J draw) Y)).probability
+        (fun answers => decide (projection g J draw answers.1.val = answers.2.val))
 
 omit [DecidableEq O] [DecidableEq N] [Fintype D] in
 theorem fixedMapSuccess_le (coordinates : D ≃ₗ[F2] (Q → F2))
@@ -156,13 +156,15 @@ theorem fixedMapSuccess_le (coordinates : D ≃ₗ[F2] (Q → F2))
   rw [FiniteDistribution.expectation_pushforward]
   apply expectation_mono
   intro draw
-  rw [firstResponse_actual, secondResponse_actual,
-    FiniteDistribution.expectation_pushforward]
-  apply expectation_mono
-  intro x
-  rw [FiniteDistribution.expectation_pushforward]
-  apply expectation_mono
-  intro v
+  rw [firstResponse_actual, secondResponse_actual]
+  simp_rw [FiniteDistribution.expectation_pushforward]
+  simp only [FiniteDistribution.probability, FiniteDistribution.expectation,
+    FiniteDistribution.product, Fintype.sum_prod_type, Finset.mul_sum,
+    mul_ite, mul_one, mul_zero, decide_eq_true_eq]
+  apply Finset.sum_le_sum
+  intro x _
+  apply Finset.sum_le_sum
+  intro v _
   by_cases h : projection g J draw x.val = v.val
   · have accepted := ActualPointAnswers.actual_accepts J g
       (actualFirst J (encodedMapCoefficients coordinates J Y) draw)
@@ -184,9 +186,11 @@ theorem fixedMapSuccess_le (coordinates : D ≃ₗ[F2] (Q → F2))
       change ActualProjection.accepts g (PartnerMapCoordinates.activeOf J) _ _ _ _
       rw [← sample_question g J (encodedMapCoefficients coordinates J Y) draw]
       exact accepted
-    simp only [h, ite_eq_left, accepted', decide_true, le_refl]
+    simp only [h, ite_eq_left, accepted', le_refl]
   · simp only [h, ite_false]
-    split <;> norm_num
+    split
+    · exact mul_nonneg (FiniteDistribution.nonnegative _ _) (FiniteDistribution.nonnegative _ _)
+    · rfl
 
 def responses (coordinates : D ≃ₗ[F2] (Q → F2))
     (g : IncidenceExtraction.Incidence O N) (policy : Policies k g D)
@@ -213,18 +217,8 @@ theorem success_le_native_stochastic (coordinates : D ≃ₗ[F2] (Q → F2))
   unfold success StochasticBound.nativeStochasticSuccess responses
   apply expectation_mono
   intro mask
-  calc
-    _ ≤ (FiniteDistribution.uniform
-        (RawPoint (NativeExperiment.maskSet mask) →ₗ[F2] D)).expectation
-        (fun Y => (StochasticBound.actualGame μ (NativeExperiment.maskSet mask) g
-          (encodedMapCoefficients coordinates (NativeExperiment.maskSet mask) Y)).stochasticSuccess
-          (firstResponse coordinates g policy (NativeExperiment.maskSet mask))
-          (secondResponse coordinates g policy (NativeExperiment.maskSet mask))) :=
-      expectation_mono _ (fun Y => fixedMapSuccess_le coordinates μ g policy _ Y)
-    _ = _ := uniform_maps_to_bits coordinates (NativeExperiment.maskSet mask)
-      (fun gamma => (StochasticBound.actualGame μ (NativeExperiment.maskSet mask) g gamma).stochasticSuccess
-        (firstResponse coordinates g policy (NativeExperiment.maskSet mask))
-        (secondResponse coordinates g policy (NativeExperiment.maskSet mask)))
+  rw [← uniform_maps_to_bits coordinates]
+  exact expectation_mono _ (fun Y => fixedMapSuccess_le coordinates μ g policy _ Y)
 
 omit [DecidableEq O] [DecidableEq N] in
 theorem success_le_some_native (coordinates : D ≃ₗ[F2] (Q → F2))
@@ -253,20 +247,6 @@ open AnswerBridge
 variable {k : ℕ} {D Q O N : Type} [AddCommGroup D] [Module F2 D] [Fintype D]
   [Fintype Q] [DecidableEq Q] [Fintype O] [DecidableEq O] [Fintype N] [DecidableEq N]
 
-theorem deterministic_success_le_dimension (coordinates : D ≃ₗ[F2] (Q → F2))
-    (g : IncidenceExtraction.Incidence O N) (ω : FiniteDistribution O)
-    (policy : ActualAdviceBridge.Policies k g D)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (hopt : IncidenceGap.parityValue g ω ≤ (4 : ℝ) / 5)
-    (dimW rs : ℕ) (hcard : Fintype.card D ≤ 2 ^ (dimW + rs)) :
-    ActualAdviceBridge.success (IncidenceGap.slotLaw ω) g policy β hβ₀ hβ₁ ≤
-      (1 - (β / (2 : ℝ) ^ (dimW + rs)) / 3600) ^ k := by
-  have hcard' : Fintype.card (Experiment.Coefficient Q) ≤ 2 ^ (dimW + rs) :=
-    (Fintype.card_congr (bitsCoordinatesEquiv coordinates).symm).le.trans hcard
-  exact (ActualAdviceBridge.success_le_native coordinates (IncidenceGap.slotLaw ω)
-    g policy β hβ₀ hβ₁).trans (Bound.native_clean_success_le_dimension k g ω β hβ₀ hβ₁
-      (ActualAdviceBridge.nativeStrategy coordinates g policy) distinct hopt dimW rs hcard')
 
 /-- Arbitrary local randomized point policies obey the same bound. Complete
 deterministic response tables may be chosen after the public mask/advice is
@@ -333,10 +313,6 @@ def visibleMap (A : K →ₗ[F2] R) {J : Finset (Fin k)}
     RawPoint J →ₗ[F2] (W × A.range) :=
   T.prod (A.rangeRestrict.comp M)
 
-omit [Fintype K] [Fintype W] [Fintype R] in
-theorem visibleMap_apply (A : K →ₗ[F2] R) {J : Finset (Fin k)}
-    (T : RawPoint J →ₗ[F2] W) (M : RawPoint J →ₗ[F2] K) (x : RawPoint J) :
-    visibleMap A T M x = (T x, AdviceImageLaw.rangePoint A (M x)) := rfl
 
 def rawMapPairCoefficientsEquiv (J : Finset (Fin k)) :
     ((RawPoint J →ₗ[F2] W) × (RawPoint J →ₗ[F2] K)) ≃
@@ -443,12 +419,6 @@ theorem paddedDistribution_totalVariation_eq_slope (rhs : Fin k → Bool) (β : 
           (SparseLaw.uniformWeights (Fin k → V × V)) := by
   exact PaddedLaw.paddedMapWeights_totalVariation_eq_slope rhs β
 
-theorem paddedDistribution_totalVariation (rhs : Fin k → Bool) (β : ℝ)
-    (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    (paddedDistribution (V := V) rhs β hβ hβ').totalVariation
-      (FiniteDistribution.uniform (ActualHomogeneous.E k →ₗ[F2] V)) ≤
-        Real.sqrt ((1 + β ^ 2 * ((Fintype.card V : ℝ) - 1) / 3) ^ k - 1) / 2 := by
-  exact PaddedLaw.paddedMapWeights_totalVariation rhs β hβ hβ'
 
 end WholeTable
 
@@ -470,47 +440,12 @@ theorem withKernel_totalVariation (μ : FiniteDistribution Ω)
     (p q : Ω → FiniteDistribution Y) :
     (withKernel μ p).totalVariation (withKernel μ q) =
       ∑ x, μ.weight x * (p x).totalVariation (q x) := by
-  unfold FiniteDistribution.totalVariation withKernel
-  rw [Fintype.sum_prod_type]
-  have inner (x : Ω) :
-      (∑ y, |μ.weight x * (p x).weight y - μ.weight x * (q x).weight y|) =
-        μ.weight x * ∑ y, |(p x).weight y - (q x).weight y| := by
-    simp only [← mul_sub, abs_mul, abs_of_nonneg (μ.nonnegative x), ← Finset.mul_sum]
-  simp_rw [inner]
-  rw [Finset.sum_div]
-  apply Finset.sum_congr rfl
-  intro x _
-  ring
+  exact Foundations.Information.totalVariation_joint_common_weights
+    μ.weight (fun x => (p x).weight) (fun x => (q x).weight) μ.nonnegative
 
-theorem withKernel_totalVariation_le (μ : FiniteDistribution Ω)
-    (p q : Ω → FiniteDistribution Y) (η : ℝ)
-    (h : ∀ x, (p x).totalVariation (q x) ≤ η) :
-    (withKernel μ p).totalVariation (withKernel μ q) ≤ η := by
-  rw [withKernel_totalVariation]
-  calc
-    _ ≤ ∑ x, μ.weight x * η := Finset.sum_le_sum fun x _ =>
-      mul_le_mul_of_nonneg_left (h x) (μ.nonnegative x)
-    _ = η := by rw [← Finset.sum_mul, μ.normalized, one_mul]
 
 end CommonLaw
 
-/-- Whole `(occurrences, public advice, Mπ,Tπ)` comparison. The product
-codomain represents the two genuine sampled maps; occurrence weights are
-arbitrary and remain in both laws. The public law can in particular be uniform
-on all row maps. Projection choices are averaged out before this comparison. -/
-theorem wholeAdvice_totalVariation {k : ℕ} {Id A V : Type}
-    [Fintype Id] [Fintype A] [AddCommGroup V] [Module F2 V] [Fintype V]
-    [Fintype (ActualHomogeneous.E k →ₗ[F2] V)]
-    (occurrences : FiniteDistribution (Fin k → Id)) (publicLaw : FiniteDistribution A)
-    (rhs : Id → Bool) (β : ℝ) (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    (withKernel (occurrences.product publicLaw)
-      (fun ua => paddedDistribution (V := V) (fun j => rhs (ua.1 j)) β hβ hβ')).totalVariation
-      (withKernel (occurrences.product publicLaw)
-        (fun _ => FiniteDistribution.uniform (ActualHomogeneous.E k →ₗ[F2] V))) ≤
-      Real.sqrt ((1 + β ^ 2 * ((Fintype.card V : ℝ) - 1) / 3) ^ k - 1) / 2 := by
-  apply withKernel_totalVariation_le
-  intro ua
-  exact paddedDistribution_totalVariation (fun j => rhs (ua.1 j)) β hβ hβ'
 
 /-- Common occurrence/public randomness preserves the exact slope variation. -/
 theorem wholeAdvice_totalVariation_eq_slope {k : ℕ} {Id A V : Type}
@@ -529,19 +464,6 @@ theorem wholeAdvice_totalVariation_eq_slope {k : ℕ} {Id A V : Type}
   simp_rw [paddedDistribution_totalVariation_eq_slope]
   rw [← Finset.sum_mul, (occurrences.product publicLaw).normalized, one_mul]
 
-theorem wholeAdvice_totalVariation_le_slope {k : ℕ} {Id A V : Type}
-    [Fintype Id] [Fintype A] [AddCommGroup V] [Module F2 V] [Fintype V]
-    [Fintype (ActualHomogeneous.E k →ₗ[F2] V)]
-    (occurrences : FiniteDistribution (Fin k → Id)) (publicLaw : FiniteDistribution A)
-    (rhs : Id → Bool) (β : ℝ) (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    (withKernel (occurrences.product publicLaw)
-      (fun ua => paddedDistribution (V := V) (fun j => rhs (ua.1 j)) β hβ hβ')).totalVariation
-      (withKernel (occurrences.product publicLaw)
-        (fun _ => FiniteDistribution.uniform (ActualHomogeneous.E k →ₗ[F2] V))) ≤
-      UniqueGamesTheorem.Foundations.Information.totalVariation
-        (SparseLaw.independentWeights (SparseLaw.mixture β (SparseLaw.singletonPairWeights V)) k)
-        (SparseLaw.uniformWeights (Fin k → V × V)) :=
-  (wholeAdvice_totalVariation_eq_slope occurrences publicLaw rhs β hβ hβ').le
 
 section HiddenRows
 
@@ -552,17 +474,6 @@ variable {k : ℕ} {K R : Type}
 instance observedRowsFintype (J : Finset (Fin k)) (A : K →ₗ[F2] R) :
     Fintype (AdviceFibers.ObservedRow (E := RawPoint J) A) := Fintype.ofFinite _
 
-/-- After fixing the mask, public map and complement table, the uniform hidden
-matrix has independent uniform attainable rows and private kernel coordinates.
-The observation fixes only `A M`, not `M` or a chosen witness. -/
-theorem observed_hidden_independent (J : Finset (Fin k)) (A : K →ₗ[F2] R)
-    (f : AdviceFibers.ObservedRow (E := RawPoint J) A → ℝ)
-    (g : (RawPoint J →ₗ[F2] A.ker) → ℝ) :
-    (𝔼 M : RawPoint J →ₗ[F2] K,
-      f (AdviceFibers.observe A M) * g (AdviceFibers.hiddenCoordinate A M)) =
-      (𝔼 S : AdviceFibers.ObservedRow (E := RawPoint J) A, f S) *
-        (𝔼 N : RawPoint J →ₗ[F2] A.ker, g N) :=
-  AdviceFibers.observed_hidden_independent A f g
 
 end HiddenRows
 
@@ -604,18 +515,8 @@ theorem projectionSeed_expectation (rhs : Fin k → Bool) (β : ℝ)
         H (projectSeedMap rhs s)) =
     ∑ dz, PaddedLaw.drawWeights β k dz * H (PaddedLaw.paddedMap rhs dz.1 dz.2)
   rw [PaddedLaw.actual_projection_mixture_expectation, Fintype.sum_sigma]
-  apply Finset.sum_congr rfl
-  intro c _
-  calc
-    _ = PaddedLaw.choiceTupleWeight β c *
-        ∑ Y : RawPoint (PaddedLaw.choiceMask c) →ₗ[F2] V,
-          SparseLaw.uniformWeights _ Y *
-            H (Y.comp (rawProjection rhs (PaddedLaw.choiceMask c) (PaddedLaw.choiceSlots c))) := by
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
-      intro Y _
-      exact mul_assoc _ _ _
-    _ = _ := by rw [PaddedLaw.sum_uniformWeights_mul]
+  simp only [mul_assoc, ← Finset.mul_sum, PaddedLaw.sum_uniformWeights_mul,
+    projectSeedMap]
 
 theorem projectionSeed_pushforward (rhs : Fin k → Bool) (β : ℝ)
     (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
@@ -646,36 +547,6 @@ def seedToActualDraw (occ : Fin k → Id) (A : K →ₗ[F2] R)
   hiddenMatrix := (LinearMap.fst F2 K W).comp s.2
   complement := (LinearMap.snd F2 K W).comp s.2
 
-theorem seed_projection (rhs : Id → F2) (occ : Fin k → Id) (A : K →ₗ[F2] R)
-    (s : ProjectionSeed k (K × W)) :
-    AdviceExperiment.projection rhs (seedToActualDraw occ A s) =
-      rawProjection (fun j => toBit (rhs (occ j)))
-        (PaddedLaw.choiceMask s.1) (PaddedLaw.choiceSlots s.1) := rfl
-
-theorem seed_padded_pair (rhs : Id → F2) (occ : Fin k → Id) (A : K →ₗ[F2] R)
-    (s : ProjectionSeed k (K × W)) :
-    (AdviceExperiment.paddedMatrix rhs (seedToActualDraw occ A s)).prod
-      (AdviceExperiment.paddedComplement rhs (seedToActualDraw occ A s)) =
-        projectSeedMap (fun j => toBit (rhs (occ j))) s := by
-  ext x <;> rfl
-
-theorem seed_left_observation (rhs : Id → F2) (occ : Fin k → Id) (A : K →ₗ[F2] R)
-    (s : ProjectionSeed k (K × W)) :
-    AdviceExperiment.leftObservation rhs (seedToActualDraw occ A s) = {
-      occurrences := occ, rowMap := A,
-      complement := (LinearMap.snd F2 K W).comp
-        (projectSeedMap (fun j => toBit (rhs (occ j))) s),
-      rows := A.comp ((LinearMap.fst F2 K W).comp
-        (projectSeedMap (fun j => toBit (rhs (occ j))) s)) } := rfl
-
-theorem seed_right_observation {Name : Type} (names : Id → Fin 3 → Name)
-    (occ : Fin k → Id) (A : K →ₗ[F2] R) (s : ProjectionSeed k (K × W)) :
-    AdviceExperiment.rightObservation names (seedToActualDraw occ A s) =
-      ⟨PaddedLaw.choiceMask s.1, {
-        question := RawPrivateTable.supported (PaddedLaw.choiceMask s.1) names occ
-          (PaddedLaw.choiceSlots s.1), rowMap := A,
-        complement := (LinearMap.snd F2 K W).comp s.2,
-        rows := A.comp ((LinearMap.fst F2 K W).comp s.2) }⟩ := rfl
 
 end ActualDraw
 
@@ -748,16 +619,10 @@ theorem projectionSeed_mask_slots_expectation {k : ℕ} {V : Type}
     _ = ((choiceDistribution β hβ hβ').iid k).expectation (fun c =>
         (FiniteDistribution.uniform (RawPoint (PaddedLaw.choiceMask c) →ₗ[F2] V)).expectation
           (fun Y => H ⟨c, Y⟩)) := by
-      unfold FiniteDistribution.expectation
-      rw [Fintype.sum_sigma]
-      apply Finset.sum_congr rfl
-      intro c _
-      change (∑ Y, PaddedLaw.choiceTupleWeight β c * SparseLaw.uniformWeights _ Y * H ⟨c, Y⟩) =
-        PaddedLaw.choiceTupleWeight β c * ∑ Y, SparseLaw.uniformWeights _ Y * H ⟨c, Y⟩
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
-      intro Y _
-      exact mul_assoc _ _ _
+      simp only [FiniteDistribution.expectation, Fintype.sum_sigma,
+        projectionSeedDistribution, FiniteDistribution.iid, choiceDistribution,
+        FiniteDistribution.uniform, SparseLaw.uniformWeights,
+        PaddedLaw.choiceTupleWeight, Finset.mul_sum, mul_assoc]
     _ = _ := choices_expectation β hβ hβ' _
 
 end MaskSlots
@@ -774,20 +639,8 @@ theorem product_pushforward_withKernel (μ : FiniteDistribution Ω)
   rintro ⟨a, b⟩
   simp only [FiniteDistribution.pushforward, FiniteDistribution.product, withKernel]
   rw [Fintype.sum_prod_type]
-  calc
-    _ = ∑ x : Ω, if x = a then μ.weight x *
-        ∑ z, if f x z = b then ν.weight z else 0 else 0 := by
-      apply Finset.sum_congr rfl
-      intro x _
-      by_cases hx : x = a
-      · subst x
-        simp only [Prod.mk.injEq, true_and, ite_true]
-        rw [Finset.mul_sum]
-        apply Finset.sum_congr rfl
-        intro z _
-        split_ifs <;> simp
-      · simp [Prod.mk.injEq, hx]
-    _ = _ := by simp
+  simp only [Prod.mk.injEq, ite_and, Finset.sum_ite_irrel, Finset.sum_const_zero,
+    Finset.sum_ite_eq', Finset.mem_univ, ite_true, Finset.mul_sum, mul_ite, mul_zero]
 
 end FullSeedLaw
 
@@ -819,18 +672,6 @@ theorem fullSeed_pad_law {k : ℕ} {Id A V : Type}
   funext ua
   exact projectionSeed_pushforward (fun j => rhs (ua.1 j)) β hβ hβ'
 
-theorem fullSeed_totalVariation {k : ℕ} {Id A V : Type}
-    [Fintype Id] [Fintype A] [AddCommGroup V] [Module F2 V] [Fintype V]
-    [Fintype (ActualHomogeneous.E k →ₗ[F2] V)]
-    (occurrences : FiniteDistribution (Fin k → Id)) (publicLaw : FiniteDistribution A)
-    (rhs : Id → Bool) (β : ℝ) (hβ : 0 ≤ β) (hβ' : β ≤ 1) :
-    ((fullSeedLaw (V := V) occurrences publicLaw β hβ hβ').pushforward
-      (fullSeedPad rhs)).totalVariation
-      (withKernel (occurrences.product publicLaw)
-        (fun _ => FiniteDistribution.uniform (ActualHomogeneous.E k →ₗ[F2] V))) ≤
-      Real.sqrt ((1 + β ^ 2 * ((Fintype.card V : ℝ) - 1) / 3) ^ k - 1) / 2 := by
-  rw [fullSeed_pad_law]
-  exact wholeAdvice_totalVariation occurrences publicLaw rhs β hβ hβ'
 
 theorem fullSeed_totalVariation_eq_slope {k : ℕ} {Id A V : Type}
     [Fintype Id] [Fintype A] [AddCommGroup V] [Module F2 V] [Fintype V]
@@ -912,15 +753,6 @@ def completeAssemble (d : CompleteData k Id K W R) (N : PrivateMap d) :
     FullSeed k Id K W R :=
   fullSeedCoordinatesEquiv.symm ⟨d, N⟩
 
-theorem completeObserve_eq (s : FullSeed k Id K W R) :
-    completeObserve s = ⟨s.1, s.2.1,
-      (LinearMap.snd F2 K W).comp s.2.2,
-      AdviceFibers.observe s.1.2 ((LinearMap.fst F2 K W).comp s.2.2)⟩ := rfl
-
-theorem completeAssemble_eq (d : CompleteData k Id K W R) (N : PrivateMap d) :
-    completeAssemble d N = (d.1, ⟨d.2.1,
-      (AdviceFibers.assemble d.1.2 (AdviceFibers.observedBase d.1.2 d.2.2.2) N).prod
-        d.2.2.1⟩) := rfl
 
 @[simp] theorem completeObserve_assemble (d : CompleteData k Id K W R)
     (N : PrivateMap d) : completeObserve (completeAssemble d N) = d :=
@@ -966,15 +798,6 @@ theorem completeDraw_left (rhs : Id → F2) (d : CompleteData k Id K W R)
   simp only [AdviceExperiment.leftObservation, completeDraw_rows]
   rfl
 
-theorem completeDraw_right {Name : Type} (names : Id → Fin 3 → Name)
-    (d : CompleteData k Id K W R) (N : PrivateMap d) :
-    AdviceExperiment.rightObservation names (completeDraw d N) =
-      ⟨PaddedLaw.choiceMask d.2.1, {
-        question := RawPrivateTable.supported (PaddedLaw.choiceMask d.2.1) names d.1.1
-          (PaddedLaw.choiceSlots d.2.1), rowMap := d.1.2,
-        complement := d.2.2.1, rows := d.2.2.2.val }⟩ := by
-  simp only [AdviceExperiment.rightObservation, completeDraw_rows]
-  rfl
 
 variable [Fintype Id] [Fintype K] [Fintype W] [Fintype R] [Fintype (K →ₗ[F2] R)]
 

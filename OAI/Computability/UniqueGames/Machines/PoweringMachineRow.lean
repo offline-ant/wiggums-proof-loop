@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.PCP.GenericGraphTables
 
@@ -62,16 +63,6 @@ def rightMatches {t S : Nat} (bits : Buffer (inputSize t S))
 def firstMatch {S : Nat} (mask : Fin S → Bool) : Option (Fin S) :=
   (List.ofFn id).find? mask
 
-theorem firstMatch_spec {S : Nat} (mask : Fin S → Bool) (i : Fin S) :
-    firstMatch mask = some i ↔
-      mask i = true ∧ ∃ before after,
-        List.ofFn id = before ++ i :: after ∧ ∀ j ∈ before, mask j = false := by
-  simpa only [firstMatch, Bool.not_eq_eq_eq_not, Bool.not_true] using
-    (List.find?_eq_some_iff_append (xs := List.ofFn id) (p := mask) (b := i))
-
-theorem firstMatch_none {S : Nat} (mask : Fin S → Bool) :
-    firstMatch mask = none ↔ ∀ i, mask i = false := by
-  simp [firstMatch, List.find?_eq_none, List.mem_ofFn]
 
 /-- `labelAt` is a fixed finite lookup table determined by the reduction
 parameters, for example `decodeLabel a (allAddresses.get i)`. -/
@@ -81,13 +72,6 @@ def edgeAccept {t S q : Nat} (labelAt : Fin q → Fin S → GraphTables.Label)
   | some i, some j => basePredicate bits k (labelAt a i) (labelAt b j)
   | _, _ => false
 
-theorem edgeAccept_of_matches {t S q : Nat}
-    (labelAt : Fin q → Fin S → GraphTables.Label)
-    (bits : Buffer (inputSize t S)) (k : Fin t) (a b : Fin q) (i j : Fin S)
-    (hl : firstMatch (leftMatches bits k) = some i)
-    (hr : firstMatch (rightMatches bits k) = some j) :
-    edgeAccept labelAt bits k a b = basePredicate bits k (labelAt a i) (labelAt b j) := by
-  simp [edgeAccept, hl, hr]
 
 def rowAccept {t S q : Nat} (labelAt : Fin q → Fin S → GraphTables.Label)
     (bits : Buffer (inputSize t S)) (a b : Fin q) : Bool :=
@@ -106,12 +90,6 @@ def rowBlock {t S q : Nat} (labelAt : Fin q → Fin S → GraphTables.Label)
     ((GenericGraphTables.relationIndex q).symm i).1
     ((GenericGraphTables.relationIndex q).symm i).2
 
-@[simp] theorem rowBlock_at {t S q : Nat}
-    (labelAt : Fin q → Fin S → GraphTables.Label)
-    (bits : Buffer (inputSize t S)) (a b : Fin q) :
-    rowBlock labelAt bits (GenericGraphTables.relationIndex q (a, b)) =
-      rowAccept labelAt bits a b := by
-  simp [rowBlock]
 
 def encodeBit (b : Bool) : List Bool := if b then [true, false] else [false]
 
@@ -132,13 +110,6 @@ theorem encodeBits_graphWords (bits : List Bool) :
   | cons b bits ih => cases b <;> simp [encodeBits, encodeBit, encodeWords,
       GraphTables.bitWord, encodeWord, ih]
 
-theorem encodeBits_length_le (bits : List Bool) :
-    (encodeBits bits).length ≤ 2 * bits.length := by
-  induction bits with
-  | nil => simp [encodeBits]
-  | cons b bits ih =>
-      cases b <;> simp only [encodeBits, encodeBit, Bool.false_eq_true,
-        ite_false, ite_true, List.length_append, List.length_cons, List.length_nil] <;> omega
 
 section Chains
 
@@ -193,14 +164,6 @@ theorem stepAux_readEncodedAll (src : K)
   rw [hin, fill_all] at h
   exact h
 
-omit [DecidableEq K] in
-theorem statementPushBound_readEncodedSlots (src : K) (slots : List (Fin N))
-    (next : TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N)) :
-    Runtime.statementPushBound (readEncodedSlots src slots next) =
-      Runtime.statementPushBound next := by
-  induction slots with
-  | nil => rfl
-  | cons i slots ih => simp [readEncodedSlots, Runtime.statementPushBound, ih]
 
 /-- The delimiter is pushed first, then the optional unary one; writing slots
 in reverse order gives the canonical field order on the destination stack. -/
@@ -228,17 +191,6 @@ theorem stepAux_writeEncodedSlots {M : Nat} (dst : K) (emit : σ → Buffer M)
       all_goals simp [Function.update_idem, List.map_cons, List.reverse_cons,
         encodeBits_append, encodeBits, encodeBit, hb, List.append_assoc]
 
-omit [DecidableEq K] in
-theorem statementPushBound_writeEncodedSlots {M : Nat}
-    (dst : K) (emit : σ → Buffer M) (slots : List (Fin M))
-    (next : TM2.Stmt (fun _ : K => Bool) Λ σ) :
-    Runtime.statementPushBound (writeEncodedSlots dst emit slots next) =
-      2 * slots.length + Runtime.statementPushBound next := by
-  induction slots with
-  | nil => simp [writeEncodedSlots]
-  | cons i slots ih =>
-      simp only [writeEncodedSlots, Runtime.statementPushBound, ih, List.length_cons]
-      omega
 
 end Chains
 
@@ -257,12 +209,6 @@ def encodedBlockAt (src dst : K) (F : Buffer N → Buffer M) (exit : Option Λ) 
     TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N) :=
   encodedBlockStmt src dst F (finishAt exit)
 
-theorem statementPushBound_encodedBlockAt (src dst : K)
-    (F : Buffer N → Buffer M) (exit : Option Λ) :
-    Runtime.statementPushBound (encodedBlockAt (σ := σ) src dst F exit) = 2 * M := by
-  cases exit <;> simp [encodedBlockAt, encodedBlockStmt,
-    statementPushBound_readEncodedSlots, statementPushBound_writeEncodedSlots,
-    finishAt, Runtime.statementPushBound]
 
 variable [DecidableEq K]
 
@@ -292,20 +238,6 @@ theorem stepAux_encodedBlockAt (src dst : K) (F : Buffer N → Buffer M)
   rw [encodedBlockAt, stepAux_encodedBlockStmt src dst F _ hne bits suffix state tapes hinput]
   cases exit <;> rfl
 
-theorem step_encodedBlockAt (src dst : K) (F : Buffer N → Buffer M)
-    (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N))
-    (label : Λ) (hprogram : program label = encodedBlockAt src dst F exit)
-    (hne : src ≠ dst) (bits : Buffer N) (suffix : List Bool)
-    (state : σ × Buffer N) (tapes : K → List Bool)
-    (hinput : tapes src = encodeBits (List.ofFn bits) ++ suffix) :
-    TM2.step program { l := some label, var := state, stk := tapes } =
-      some { l := exit
-             var := (state.1, emptyBuffer N)
-             stk := Function.update (Function.update tapes src suffix) dst
-               (encodeBits (List.ofFn (F bits)) ++ tapes dst) } := by
-  simp only [TM2.step, hprogram,
-    stepAux_encodedBlockAt src dst F exit hne bits suffix state tapes hinput]
 
 end Block
 
@@ -325,35 +257,6 @@ def machine {t S q : Nat} (labelAt : Fin q → Fin S → GraphTables.Label) : Fi
   initialState := ((), emptyBuffer (inputSize t S))
   m _ := rowAt false true labelAt none
 
-theorem machine_statementPushBound {t S q : Nat}
-    (labelAt : Fin q → Fin S → GraphTables.Label) :
-    Runtime.statementPushBound ((machine (t := t) labelAt).m ()) = 2 * (q * q) :=
-  statementPushBound_encodedBlockAt false true (rowBlock labelAt) none
-
-/-- The input predicate/match block is consumed. The exact unary predicate
-row is prepended; the remaining input, old output, and ambient register are
-accounted for in the actual transition witness. -/
-def machineInTime {t S q : Nat} (labelAt : Fin q → Fin S → GraphTables.Label)
-    (bits : Buffer (inputSize t S)) (suffix : List Bool)
-    (register : Buffer (inputSize t S)) (tapes : Bool → List Bool)
-    (hinput : tapes false = encodeBits (List.ofFn bits) ++ suffix) :
-    StateTransition.EvalsToInTime (machine (t := t) labelAt).step
-      ⟨some (), ((), register), tapes⟩
-      (some ⟨none, ((), emptyBuffer (inputSize t S)),
-        Function.update (Function.update tapes false suffix) true
-          (encodeBits (List.ofFn (rowBlock labelAt bits)) ++ tapes true)⟩) 1 where
-  steps := 1
-  evals_in_steps := by
-    change TM2.step (fun _ : Unit => rowAt false true labelAt none)
-        { l := some (), var := ((), register), stk := tapes } =
-      some { l := none
-             var := ((), emptyBuffer (inputSize t S))
-             stk := Function.update (Function.update tapes false suffix) true
-               (encodeBits (List.ofFn (rowBlock labelAt bits)) ++ tapes true) }
-    exact step_encodedBlockAt false true (rowBlock labelAt) (none : Option Unit)
-      (fun _ => rowAt false true labelAt none) () rfl (by decide)
-      bits suffix ((), register) tapes hinput
-  steps_le_m := le_rfl
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineRow
 

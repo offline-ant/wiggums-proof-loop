@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.PCP.PreprocessingOverlayTables
 
@@ -34,38 +35,17 @@ def moveRow (table : PortTables.Table n d) (v : Fin n) (p : Fin d) :
 /-- The machine's fixed-degree numerical map for an old reverse-row index. -/
 def reverseMap (d j : Nat) : Nat := 2 * d * (j / d) + d + j % d
 
-private theorem relation_ext {r s : RelationTable}
-    (h : ∀ a b, relationAt r a b = relationAt s a b) : r = s := by
-  apply Vector.ext
-  intro i hi
-  simpa only [relationAt, Prod.eta, Equiv.apply_symm_apply, Fin.getElem_fin] using
-    h (relationIndex.symm ⟨i, hi⟩).1 (relationIndex.symm ⟨i, hi⟩).2
-
 theorem row_lazy_stay (table : PortTables.Table n d) (v : Fin n) (p : Fin d) :
     row (lazy table) v (lazyPorts d (false, p)) = stayRow d v p := by
-  have hr : (lazy table).reverseIndex[rowIndex n (2 * d) (v, lazyPorts d (false, p))] =
-      rowIndex n (2 * d) (v, lazyPorts d (false, p)) := by
-    rw [← rowIndex_rotation, lazy_rotation_false]
-  have hp : (lazy table).relations[rowIndex n (2 * d) (v, lazyPorts d (false, p))] =
-      trueRelation := by
-    apply relation_ext
-    intro a b
-    simpa only [PortTables.accepts, relationAt, trueRelation, Fin.getElem_fin,
-      Vector.getElem_replicate] using lazy_accepts_false table v p a b
-  exact congrArg₂ (DartRow.mk v) hr hp
+  apply PortTables.row_eq _ _ _ _ _ (lazy_rotation_false table v p)
+  intro a b
+  simpa only [trueRelation, relationAt, Fin.getElem_fin, Vector.getElem_replicate] using
+    lazy_accepts_false table v p a b
 
 theorem row_lazy_move (table : PortTables.Table n d) (v : Fin n) (p : Fin d) :
     row (lazy table) v (lazyPorts d (true, p)) = moveRow table v p := by
-  have hr : (lazy table).reverseIndex[rowIndex n (2 * d) (v, lazyPorts d (true, p))] =
-      rowIndex n (2 * d) ((rotation table (v, p)).1,
-        lazyPorts d (true, (rotation table (v, p)).2)) := by
-    rw [← rowIndex_rotation, lazy_rotation_true]
-  have hp : (lazy table).relations[rowIndex n (2 * d) (v, lazyPorts d (true, p))] =
-      table.relations[rowIndex n d (v, p)] := by
-    apply relation_ext
-    intro a b
-    exact lazy_accepts_true table v p a b
-  exact congrArg₂ (DartRow.mk v) hr hp
+  exact PortTables.row_eq _ _ _ _ _ (lazy_rotation_true table v p)
+    (lazy_accepts_true table v p)
 
 theorem stayRow_reverse_val (v : Fin n) (p : Fin d) :
     (stayRow d v p).reverseIndex.val = 2 * d * v.val + p.val := by
@@ -84,11 +64,6 @@ theorem relationWords_true : relationWords trueRelation = List.replicate 4096 1 
   simp only [relationWords, trueRelation, Vector.toList_replicate,
     List.map_replicate, bitWord, ite_true]
 
-theorem stayRow_words (v : Fin n) (p : Fin d) :
-    rowWords (stayRow d v p) =
-      [v.val, 2 * d * v.val + p.val] ++ List.replicate 4096 1 := by
-  rw [rowWords, stayRow_reverse_val]
-  exact congrArg (fun words => [v.val, 2 * d * v.val + p.val] ++ words) relationWords_true
 
 theorem moveRow_words (table : PortTables.Table n d) (v : Fin n) (p : Fin d) :
     rowWords (moveRow table v p) =
@@ -101,16 +76,8 @@ theorem moveRow_words (table : PortTables.Table n d) (v : Fin n) (p : Fin d) :
 theorem ofFn_rowIndex {α : Type*} (f : Fin (n * d) → α) :
     List.ofFn f = (List.ofFn fun v : Fin n =>
       List.ofFn fun p : Fin d => f (rowIndex n d (v, p))).flatten := by
-  rw [List.ofFn_mul]
-  apply congrArg List.flatten
-  congr 1
-  funext v
-  congr 1
-  funext p
-  apply congrArg f
-  apply Fin.ext
-  simp only [rowIndex_val]
-  ac_rfl
+  simpa only [rowIndex, finProdFinEquiv, Equiv.coe_fn_mk, Nat.mul_comm, Nat.add_comm] using
+    List.ofFn_mul f
 
 theorem flatRows_list (table : PortTables.Table n d) :
     (flatRows table).toList =
@@ -137,10 +104,6 @@ def vertexRows (table : PortTables.Table n d) (v : Fin n) :
     List (DartRow n (n * (2 * d))) :=
   List.ofFn (stayRow d v) ++ List.ofFn (moveRow table v)
 
-theorem vertexRows_length (table : PortTables.Table n d) (v : Fin n) :
-    (vertexRows table v).length = 2 * d := by
-  simp only [vertexRows, List.length_append, List.length_ofFn]
-  omega
 
 /-- Every stored lazy row, with no permutation or multiset quotient. -/
 theorem flatRows_lazy (table : PortTables.Table n d) :
@@ -153,25 +116,6 @@ theorem flatRows_lazy (table : PortTables.Table n d) :
   simp only [row_lazy_stay, row_lazy_move]
   rfl
 
-theorem vertexRows_words (table : PortTables.Table n d) (v : Fin n) :
-    (vertexRows table v).flatMap rowWords =
-      (List.ofFn fun p : Fin d =>
-        [v.val, 2 * d * v.val + p.val] ++ List.replicate 4096 1).flatten ++
-      (List.ofFn fun p : Fin d =>
-        [v.val, reverseMap d (row table v p).reverseIndex.val] ++
-          relationWords (row table v p).relation).flatten := by
-  have hs : rowWords ∘ stayRow d v = fun p : Fin d =>
-      [v.val, 2 * d * v.val + p.val] ++ List.replicate 4096 1 := by
-    funext p
-    exact stayRow_words v p
-  have hm : rowWords ∘ moveRow table v = fun p : Fin d =>
-      [v.val, reverseMap d (row table v p).reverseIndex.val] ++
-        relationWords (row table v p).relation := by
-    funext p
-    exact moveRow_words table v p
-  simp only [vertexRows, List.flatMap_def, List.map_append, List.map_ofFn,
-    List.flatten_append]
-  rw [hs, hm]
 
 /-- The full existing word codec, including both graph header fields. -/
 theorem tableWords_lazy (table : PortTables.Table n d) :

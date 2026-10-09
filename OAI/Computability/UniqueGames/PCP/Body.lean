@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.DriverLemmas
 import OAI.Computability.UniqueGames.PCP.LoopState
 
@@ -68,17 +69,6 @@ private theorem workingTapes_other (input : GenericGraphTables.Table q)
     parsedTapes, Lookup.readRowTapes, guardTapes, hcounter, hcursor, htail,
     hreverse, hscan, hindex, hhead]
 
-private theorem workingTapes_counter (input : GenericGraphTables.Table q)
-    (e : Fin input.darts) (base : Tape → List Bool) :
-    workingTapes input e base .counter = encodeWord (input.darts - (e.val + 1)) := by
-  simp [workingTapes, Lookup.headLookupTapes, MachineLookup.tapes, headPorts,
-    parsedTapes, Lookup.readRowTapes, guardTapes]
-
-private theorem workingTapes_cursor (input : GenericGraphTables.Table q)
-    (e : Fin input.darts) (base : Tape → List Bool) :
-    workingTapes input e base .cursor = LoopState.cursorBits input (e.val + 1) := by
-  simp [workingTapes, Lookup.headLookupTapes, MachineLookup.tapes, headPorts,
-    parsedTapes, Lookup.readRowTapes]
 
 private theorem workingTapes_tail (input : GenericGraphTables.Table q)
     (e : Fin input.darts) (base : Tape → List Bool) :

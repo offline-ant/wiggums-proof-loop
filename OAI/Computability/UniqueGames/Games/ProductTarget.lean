@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Data.List.FinRange
 import Mathlib.Data.Nat.Digits.Lemmas
@@ -29,8 +30,6 @@ def fullTable (p : Equiv.Perm (Fin q)) : PermutationTable q where
   leftInverse a := by simp
   rightInverse a := by simp
 
-@[simp] theorem fullTable_images (p : Equiv.Perm (Fin q)) (a : Fin q) :
-    (fullTable p).images[a] = p a := by simp [fullTable]
 
 @[simp] theorem permutationEquiv_fullTable (p : Equiv.Perm (Fin q)) :
     permutationEquiv (fullTable p) = p := by
@@ -176,29 +175,6 @@ theorem render_value (G : BipartiteGame L R E (Fin q))
 
 end Value
 
-/-- The product order is increasing radix address, with coordinate zero the
-least significant digit. The inverse computes each digit by division/modulo. -/
-def tuples (n t : ℕ) : List (Fin t → Fin n) :=
-  (List.finRange (n ^ t)).map finFunctionFinEquiv.symm
-
-@[simp] theorem tuples_length (n t : ℕ) : (tuples n t).length = n ^ t := by
-  simp [tuples]
-
-theorem tuples_mem {n t : ℕ} (f : Fin t → Fin n) : f ∈ tuples n t := by
-  apply List.mem_map.mpr
-  exact ⟨finFunctionFinEquiv f, List.mem_finRange _, Equiv.symm_apply_apply _ _⟩
-
-theorem tuples_nodup (n t : ℕ) : (tuples n t).Nodup :=
-  (List.nodup_finRange _).map finFunctionFinEquiv.symm.injective
-
-@[simp] theorem tuples_get (n t : ℕ) (i : Fin (n ^ t)) :
-    (tuples n t)[i.val]'(by simpa only [tuples_length] using i.isLt) =
-      finFunctionFinEquiv.symm i := by
-  simp [tuples]
-
-theorem tuple_address (n t : ℕ) (f : Fin t → Fin n) :
-    (finFunctionFinEquiv f : ℕ) = ∑ i : Fin t, (f i : ℕ) * n ^ (i : ℕ) :=
-  finFunctionFinEquiv_apply f
 
 /-- The explicit address and `ofDigits` share the same least-significant-first
 coordinate order, with no restriction on the radix beyond the digit type. -/

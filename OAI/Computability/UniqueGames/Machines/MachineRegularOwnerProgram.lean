@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalBody
 import OAI.Computability.UniqueGames.Machines.MachineRegularOwnerCleanup
 import OAI.Computability.UniqueGames.PCP.PreprocessingRegularLoopWordsLemmas
@@ -36,7 +37,6 @@ instance : Fintype Tape := MachineRegularOwnerCleanup.tapeFintype
 
 def core (k : Fin 27) : Tape := .inl (.inl k)
 def paddingTape : Tape := .inl (.inr (.inl .padding))
-def levelTape : Tape := .inl (.inr (.inl .level))
 def dummyFuel : Tape := .inr 0
 def scratch : Tape := .inr 1
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Positivity
 import OAI.Computability.UniqueGames.Decoding.UniformConditioning
@@ -132,30 +133,6 @@ theorem visibleWitness_conditional
   rw [hsame]
   exact (le_div_iff₀ hh.1).mpr hh.2
 
-omit [Fintype D] in
-/-- Goodness is inherited from any event whose membership requires good
-visible advice. Positivity supplies an actual supporting hidden sample. -/
-theorem visibleWitness_good
-    (μ : FiniteDistribution Ω) (observe : Ω → D)
-    (slice targetHit : Ω → Bool) (threshold : ℝ)
-    (good : D → Prop) (hslice : ∀ x, slice x = true → good (observe x))
-    (d : D) (h : visibleWitness μ observe slice targetHit threshold d = true) :
-    good d := by
-  classical
-  have hpos : 0 < fiberMass μ observe d slice := by
-    have hh := of_decide_eq_true h
-    exact hh.1
-  by_contra hbad
-  have hempty : fiberEvent observe d slice = fun _ => false := by
-    funext x
-    apply Bool.eq_false_iff.mpr
-    intro hx
-    have hh : observe x = d ∧ slice x = true := by
-      simpa only [fiberEvent, Bool.and_eq_true, decide_eq_true_eq] using hx
-    exact hbad (hh.1 ▸ hslice x hh.2)
-  unfold fiberMass at hpos
-  rw [hempty, FiniteDistribution.probability_false] at hpos
-  exact (lt_irrefl 0) hpos
 
 /-- A pair of full-table event probabilities transfers with error
 `(1 + threshold) * TV`. This estimate precedes all conditioning. -/
@@ -228,22 +205,11 @@ variable {Ω D Y : Type*}
 def selectedFiberEquiv (observe : Ω → D) (d : D) (slice : Ω → Bool)
     (e : Y ≃ {x : Ω // observe x = d}) :
     {x : Ω // VisibleTransfer.fiberEvent observe d slice x = true} ≃
-      {y : Y // slice (e y).val = true} where
-  toFun x := by
-    have hx : observe x.val = d ∧ slice x.val = true := by
-      simpa only [VisibleTransfer.fiberEvent, Bool.and_eq_true, decide_eq_true_eq] using x.property
-    refine ⟨e.symm ⟨x.val, hx.1⟩, ?_⟩
-    simpa only [Equiv.apply_symm_apply] using hx.2
-  invFun y := ⟨(e y.val).val, by
-    simp only [VisibleTransfer.fiberEvent, Bool.and_eq_true, decide_eq_true_eq]
-    exact ⟨(e y.val).property, y.property⟩⟩
-  left_inv x := by
-    apply Subtype.ext
-    dsimp
-    simp only [Equiv.apply_symm_apply]
-  right_inv y := by
-    apply Subtype.ext
-    exact e.symm_apply_apply y.val
+      {y : Y // slice (e y).val = true} :=
+  (Equiv.subtypeEquivRight (fun x => by
+    simp only [VisibleTransfer.fiberEvent, Bool.and_eq_true, decide_eq_true_eq])).trans
+    ((Equiv.subtypeSubtypeEquivSubtypeInter (fun x => observe x = d)
+      (fun x => slice x = true)).symm.trans e.subtypeEquivOfSubtype.symm)
 
 theorem selectedFiberEquiv_point (observe : Ω → D) (d : D) (slice : Ω → Bool)
     (e : Y ≃ {x : Ω // observe x = d})

@@ -1,5 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.FinRange
-import Mathlib.Logic.Equiv.Fin.Basic
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.PCP.SourceContextLoad
@@ -16,36 +16,18 @@ abbrev Tape := SourceContextLoad.Tape
 
 variable {u : Nat} {Extra : Type}
 
-def fieldAt (i : Fin (u * 6)) : Tape u Extra :=
-  .field (finProdFinEquiv.symm i).1 (finProdFinEquiv.symm i).2
-
-def fields : List (Tape u Extra) := List.ofFn fieldAt
-
-theorem fieldAt_injective : Function.Injective (fieldAt (u := u) (Extra := Extra)) := by
-  intro i j h
-  have hpair := SourceContextLoad.Tape.field.inj h
-  have hp : finProdFinEquiv.symm i = finProdFinEquiv.symm j :=
-    Prod.ext hpair.1 hpair.2
-  exact finProdFinEquiv.symm.injective hp
+def fields : List (Tape u Extra) :=
+  (List.finRange u).flatMap fun j => (List.finRange 6).map (SourceContextLoad.Tape.field j)
 
 @[simp] theorem fields_length : (fields (u := u) (Extra := Extra)).length = 6 * u := by
   simp [fields, Nat.mul_comm]
 
-theorem fields_nodup : (fields (u := u) (Extra := Extra)).Nodup := by
-  exact List.nodup_ofFn.mpr fieldAt_injective
-
 theorem field_mem (j : Fin u) (s : Fin 6) :
     (SourceContextLoad.Tape.field j s : Tape u Extra) ∈ fields := by
-  apply List.mem_ofFn.mpr
-  exact ⟨finProdFinEquiv (j, s), by simp [fieldAt]⟩
+  simp [fields]
 
 theorem mem_fields_iff (p : Tape u Extra) : p ∈ fields ↔ ∃ j s, p = .field j s := by
-  constructor
-  · intro h
-    obtain ⟨i, hi⟩ := List.mem_ofFn.mp h
-    exact ⟨(finProdFinEquiv.symm i).1, (finProdFinEquiv.symm i).2, hi.symm⟩
-  · rintro ⟨j, s, rfl⟩
-    exact field_mem j s
+  simp [fields, eq_comm]
 
 def outputTapes (base : Tape u Extra → List Bool) : Tape u Extra → List Bool
   | .field _ _ => []
@@ -54,9 +36,6 @@ def outputTapes (base : Tape u Extra → List Bool) : Tape u Extra → List Bool
 @[simp] theorem output_field (base : Tape u Extra → List Bool) (j : Fin u) (s : Fin 6) :
     outputTapes base (.field j s) = [] := rfl
 
-theorem output_frame (base : Tape u Extra → List Bool) (p : Tape u Extra)
-    (hp : ∀ j s, p ≠ .field j s) : outputTapes base p = base p := by
-  cases p <;> simp_all [outputTapes]
 
 abbrev Label (u : Nat) (Extra : Type) :=
   MachineDrainMany.Label (fields (u := u) (Extra := Extra)) ⊕ Unit
@@ -91,64 +70,26 @@ theorem finalTapes_eq (base : Tape u Extra → List Bool) :
   rw [MachineDrainMany.finalTapes_apply]
   cases p <;> simp [mem_fields_iff, outputTapes]
 
-private theorem lengthSum_update {K : Type} [DecidableEq K] (chosen : List K)
-    (base : K → List Bool) (source : K) (h : source ∉ chosen) :
-    MachineDrainMany.lengthSum chosen (Function.update base source []) =
-      MachineDrainMany.lengthSum chosen base := by
-  unfold MachineDrainMany.lengthSum
-  congr 1
-  apply List.map_congr_left
-  intro k hk
-  rw [Function.update_of_ne (by intro he; subst k; exact h hk)]
-
-/-- Distinct chosen tapes make the pre-cleanup length sum the exact drain cost. -/
-private theorem steps_eq_of_nodup {K : Type} [DecidableEq K] (chosen : List K)
-    (h : chosen.Nodup) (base : K → List Bool) :
-    MachineDrainMany.steps chosen base =
-      MachineDrainMany.lengthSum chosen base + chosen.length := by
-  induction chosen generalizing base with
-  | nil => rfl
-  | cons source chosen ih =>
-      obtain ⟨hn, hd⟩ := List.nodup_cons.mp h
-      rw [MachineDrainMany.steps, ih hd, lengthSum_update chosen base source hn]
-      simp only [MachineDrainMany.lengthSum, List.map_cons, List.sum_cons, List.length_cons]
-      omega
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
-theorem clearTrace (base : Tape u Extra → List Bool) (register : Option Bool) :
-    (advance (TM2.step program))^[MachineDrainMany.lengthSum fields base + 6 * u + 1]
-      (some ⟨some main, ((), register), base⟩) =
-      some ⟨none, ((), none), outputTapes base⟩ := by
-  have drain := MachineDrainMany.trace fields Sum.inl (some (.inr ()))
-    program (fun _ => rfl) base () register
-  rw [entry_eq, finalTapes_eq, steps_eq_of_nodup fields fields_nodup, fields_length] at drain
-  have last : (advance (TM2.step program))^[1]
-      (some ⟨some (.inr ()), ((), MachineDrainMany.finalRegister (fields (u := u) (Extra := Extra)) register), outputTapes base⟩) =
-      some ⟨none, ((), none), outputTapes base⟩ := rfl
-  exact trace_trans _ drain last
-
+/-- Use the common drain-and-reset execution directly: the caller needs a
+budget, not an equality between the budget and the number of transitions. -/
 def clearInTime (base : Tape u Extra → List Bool) (register : Option Bool) :
     StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some main, ((), register), base⟩ (some ⟨none, ((), none), outputTapes base⟩)
-      (MachineDrainMany.lengthSum fields base + 6 * u + 1) where
-  steps := MachineDrainMany.lengthSum fields base + 6 * u + 1
-  evals_in_steps := clearTrace base register
-  steps_le_m := Nat.le_refl _
+      ⟨some main, ((), register), base⟩
+      (some ⟨none, ((), none), outputTapes base⟩)
+      (MachineDrainMany.lengthSum fields base + 6 * u + 1) := by
+  have run := MachineDrainMany.executionWithReset fields Sum.inl (.inr ())
+    program (fun _ => rfl) ((), none) rfl base ((), register)
+  refine { steps := run.steps, evals_in_steps := ?_, steps_le_m := ?_ }
+  · simpa only [entry_eq, finalTapes_eq] using run.evals_in_steps
+  · exact run.steps_le_m.trans (Nat.add_le_add_right
+      (by simpa only [fields_length] using MachineDrainMany.steps_le fields base) 1)
 
 private theorem lengthSum_le_selected {K : Type} (chosen : List K)
     (base : K → List Bool) (B : Nat) (h : ∀ k ∈ chosen, (base k).length ≤ B) :
     MachineDrainMany.lengthSum chosen base ≤ chosen.length * B := by
-  induction chosen with
-  | nil => simp [MachineDrainMany.lengthSum]
-  | cons source chosen ih =>
-      have hs := h source (by simp)
-      have ht := ih (by intro k hk; exact h k (by simp [hk]))
-      simp only [MachineDrainMany.lengthSum, List.map_cons, List.sum_cons,
-        List.length_cons, Nat.add_mul, Nat.one_mul] at ht ⊢
-      omega
+  simpa [MachineDrainMany.lengthSum] using
+    List.sum_le_length_nsmul (chosen.map fun k => (base k).length) B
+      (by simpa only [List.forall_mem_map] using h)
 
 theorem clauseField_length_le {n : Nat} (clause : Target.Clause n) (s : Fin 6) :
     (encodeWord ((clauseWords clause)[s.val]'(by simp))).length ≤ n + 2 := by
@@ -193,10 +134,11 @@ def clearLoadedInTime (F : Target.Formula) (tuple : Fin u → Fin F.clauses.leng
     StateTransition.EvalsToInTime (TM2.step program)
       ⟨some main, ((), register), SourceContextLoad.stageTapes F tuple base u⟩
       (some ⟨none, ((), none), outputTapes (SourceContextLoad.stageTapes F tuple base u)⟩)
-      (6 * u * ((formulaBits F).length + 1) + 1) where
-  steps := MachineDrainMany.lengthSum fields (SourceContextLoad.stageTapes F tuple base u) + 6 * u + 1
-  evals_in_steps := clearTrace _ register
-  steps_le_m := loaded_cost_le F tuple base hfields
+      (6 * u * ((formulaBits F).length + 1) + 1) := by
+  have run := clearInTime (SourceContextLoad.stageTapes F tuple base u) register
+  exact {
+    toEvalsTo := run.toEvalsTo
+    steps_le_m := run.steps_le_m.trans (loaded_cost_le F tuple base hfields) }
 
 omit [DecidableEq Extra] in
 theorem output_loaded_eq_base (F : Target.Formula) (tuple : Fin u → Fin F.clauses.length)

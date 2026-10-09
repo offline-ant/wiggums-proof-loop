@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Tactic.FieldSimp
@@ -46,13 +47,10 @@ theorem probability_and_as_subtype_sum (μ : FiniteDistribution Ω)
 theorem probability_of_constant_weight (μ : FiniteDistribution Ω)
     (given : Ω → Bool) (c : ℝ) (hconstant : ∀ x, given x = true → μ.weight x = c) :
     μ.probability given = (Fintype.card {x : Ω // given x = true} : ℝ) * c := by
-  rw [probability_as_subtype_sum]
-  calc
-    _ = ∑ _x : {x : Ω // given x = true}, c := by
-      apply Finset.sum_congr rfl
-      intro x _
-      exact hconstant x.val x.property
-    _ = _ := by simp [nsmul_eq_mul]
+  have hw (x : {x : Ω // given x = true}) : μ.weight x.val = c :=
+    hconstant x.val x.property
+  simp only [probability_as_subtype_sum, hw, Finset.sum_const,
+    Finset.card_univ, nsmul_eq_mul]
 
 /-- Every remaining point receives equal conditional weight. Positivity of
 the conditioning event justifies cancellation; no unconditional uniform law
@@ -67,21 +65,13 @@ theorem condition_probability_uniform (μ : FiniteDistribution Ω)
     intro hz
     rw [hp, hz, mul_zero] at positive
     exact (lt_irrefl 0) positive
-  have hn : (Fintype.card {x : Ω // given x = true} : ℝ) ≠ 0 := by
-    intro hz
-    rw [hp, hz, zero_mul] at positive
-    exact (lt_irrefl 0) positive
   rw [FiniteDistribution.probability_condition, probability_and_as_subtype_sum, hp,
     Fintype.expect_eq_sum_div_card]
-  have hnum : (∑ x : {x : Ω // given x = true}, if event x.val then μ.weight x.val else 0) =
-      c * ∑ x : {x : Ω // given x = true}, if event x.val then (1 : ℝ) else 0 := by
-    rw [Finset.mul_sum]
-    apply Finset.sum_congr rfl
-    intro x _
-    rw [hconstant x.val x.property]
-    cases event x.val <;> simp
-  rw [hnum]
-  field_simp [hc, hn]
+  have hw (x : {x : Ω // given x = true}) : μ.weight x.val = c :=
+    hconstant x.val x.property
+  simp_rw [hw]
+  simp only [← boole_mul (event _ = true) c, ← Finset.sum_mul,
+    mul_div_mul_right _ _ hc]
 
 /-- A proved bijection with the actual affine matrix slice identifies the
 conditional target probability with that slice's complete uniform average. -/

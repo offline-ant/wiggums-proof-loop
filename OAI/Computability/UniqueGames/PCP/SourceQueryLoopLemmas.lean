@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineTupleOdometer
 import OAI.Computability.UniqueGames.PCP.SourceAddressArithmeticLemmas
 import OAI.Computability.UniqueGames.PCP.SourceContextLoad
@@ -170,18 +171,6 @@ namespace UniqueGamesTheorem.Foundations.Hastad.SourceOccurrences.Encoding
 
 open UniqueGamesTheorem.Foundations.Complexity.MachineTupleOdometer
 
-/-- Interpret a radix tuple using the declared domain and codomain numbering. -/
-def decodeTuple {α β : Type} (a : Encoding α) (b : Encoding β)
-    (digits : Fin a.size → Fin b.size) : α → β :=
-  fun x => b.code.symm (digits (a.code x))
-
-/-- Increasing function rank is exactly the controller's tuple order, followed
-by the explicit coordinate decoder. This includes empty domains and codomains. -/
-theorem enumerate_function {α β : Type} (a : Encoding α) (b : Encoding β) :
-    (a.function b).enumerate =
-      (tupleOrder b.size a.size).map (decodeTuple a b) := by
-  simp only [tupleOrder, List.map_ofFn]
-  rfl
 
 theorem enumerate_fin_function (n u : ℕ) :
     ((Encoding.fin u).function (Encoding.fin n)).enumerate = tupleOrder n u := by
@@ -195,26 +184,6 @@ open Complexity Complexity.MachineTupleOdometer
 open Target SourceContexts SourceOccurrences
 open UniqueGamesTheorem.Reduction
 
-def tupleTapeOrder (u D : ℕ) : List (SourceTape.TestTape (I u) (J u) D) :=
-  (tupleOrder 2 (2 ^ u)).flatMap (fun f =>
-    (tupleOrder D (8 ^ u)).flatMap (fun z =>
-      (tupleOrder 2 (8 ^ u)).map (fun g =>
-        (Encoding.decodeTuple (iEncoding u) Encoding.bool f,
-         Encoding.decodeTuple (jEncoding u) (Encoding.fin D) z,
-         Encoding.decodeTuple (jEncoding u) Encoding.bool g))))
-
-theorem testTapeEncoding_eq_tupleTapeOrder (u D : ℕ) :
-    (testTapeEncoding u D).enumerate = tupleTapeOrder u D := by
-  rw [SourceEnumeration.testTapeEncoding_enumerate]
-  simp only [tupleTapeOrder, Encoding.enumerate_function,
-    List.flatMap_map, List.map_map, Function.comp_def]
-  rfl
-
-theorem testTapeEncoding_flatMap_tupleTapeOrder {α : Type} (u D : ℕ)
-    (emit : SourceTape.TestTape (I u) (J u) D → List α) :
-    (testTapeEncoding u D).enumerate.flatMap emit =
-      (tupleTapeOrder u D).flatMap emit := by
-  rw [testTapeEncoding_eq_tupleTapeOrder]
 
 /-- Total extension of the declared tape decoder, for the query loop's natural
 index register. Out-of-range values are never visited by that loop. -/
@@ -258,109 +227,6 @@ theorem query_prefixBits_eq_enumerate (u D : ℕ) (fallback : SourceQueryLoop.Qu
     exact rankedQuery_at u D fallback i
   rw [hlist]
 
-theorem query_prefixBits_eq_tupleTapeOrder (u D : ℕ)
-    (fallback : SourceQueryLoop.Query u D) (values : Fin 3 → ℕ)
-    (signature : SourceLocalSignature.Signature u) :
-    SourceQueryLoop.prefixBits u D (rankedQuery u D fallback) values signature
-        (testTapeEncoding u D).size =
-      (tupleTapeOrder u D).flatMap
-        (fun query => SourceTestAppend.equationBits u D values (signature, query)) := by
-  rw [query_prefixBits_eq_enumerate, testTapeEncoding_eq_tupleTapeOrder]
-
-/-- Clause, slot, left-query, noise, right-query loops, from outermost to
-innermost. Within each tuple loop coordinate zero changes fastest. -/
-def tupleSourceOrder (F : Formula) (u D : ℕ) : List (SourceIndex F u D) :=
-  (tupleOrder F.clauses.length u).flatMap (fun c =>
-    (tupleOrder 3 u).flatMap (fun s =>
-      (tupleTapeOrder u D).map (fun t =>
-        ((c, Encoding.decodeTuple (Encoding.fin u) slotEncoding s), t))))
-
-theorem sourceIndexEncoding_eq_tupleSourceOrder (F : Formula) (u D : ℕ) :
-    (sourceIndexEncoding F u D).enumerate = tupleSourceOrder F u D := by
-  rw [SourceEnumeration.sourceIndexEncoding_enumerate]
-  simp only [tupleSourceOrder, tupleTapeOrder, clauseEncoding, slotContextEncoding,
-    Encoding.enumerate_function, List.flatMap_map, List.map_map, Function.comp_def]
-  apply List.flatMap_congr
-  intro c hc
-  apply List.flatMap_congr
-  intro slots hslots
-  erw [List.map_flatMap]
-  apply List.flatMap_congr
-  intro first hfirst
-  erw [List.map_flatMap]
-  apply List.flatMap_congr
-  intro second hsecond
-  erw [List.map_map]
-  rfl
-
-/-- Equality of ordered equation lists preserves every repeated occurrence. -/
-theorem rawSourceList_eq_tupleOrder (F : Formula) (u D : ℕ) :
-    rawSourceList F u D = (tupleSourceOrder F u D).map (sourceEquation F u D) := by
-  unfold rawSourceList occurrenceList
-  rw [sourceIndexEncoding_eq_tupleSourceOrder]
-
-theorem sourceList_eq_tupleOrder (F : Formula) (u D : ℕ) (hne : F.clauses ≠ []) :
-    sourceList F u D = (tupleSourceOrder F u D).map (sourceEquation F u D) := by
-  rw [sourceList_nonempty F u D hne, rawSourceList_eq_tupleOrder]
-
-theorem rawSourceList_flatMap_tupleOrder {α : Type} (F : Formula) (u D : ℕ)
-    (emit : CloneGap.Equation (Fin (nBits F u)) → List α) :
-    (rawSourceList F u D).flatMap emit =
-      (tupleSourceOrder F u D).flatMap (fun p => emit (sourceEquation F u D p)) := by
-  rw [rawSourceList_eq_tupleOrder]
-  simp only [List.flatMap_map]
-
-/-- The stack update performed by one record append. -/
-def reverseAppend {α β : Type} (encode : α → List β)
-    (accumulator : List β) (record : α) : List β :=
-  (encode record).reverse ++ accumulator
-
-/-- After any ascending prefix, the accumulator is its reversed encoding
-followed by the original accumulator. -/
-theorem foldl_reverseAppend {α β : Type} (encode : α → List β)
-    (records : List α) (accumulator : List β) :
-    records.foldl (reverseAppend encode) accumulator =
-      (records.flatMap encode).reverse ++ accumulator := by
-  induction records generalizing accumulator with
-  | nil => simp
-  | cons record records ih =>
-    simp only [List.foldl_cons, ih, reverseAppend, List.flatMap_cons,
-      List.reverse_append, List.append_assoc]
-
-theorem foldl_reverseAppend_header {α β : Type} (encode : α → List β)
-    (records : List α) (header : List β) :
-    records.foldl (reverseAppend encode) header.reverse =
-      (header ++ records.flatMap encode).reverse := by
-  rw [foldl_reverseAppend, List.reverse_append]
-
-/-- The prefix invariant is stated without requiring that the prefix end on
-the last record. A later suffix continues from exactly this accumulator. -/
-theorem foldl_reverseAppend_prefix {α β : Type} (encode : α → List β)
-    (emitted remaining : List α) (header : List β) :
-    (emitted ++ remaining).foldl (reverseAppend encode) header.reverse =
-      remaining.foldl (reverseAppend encode)
-        (header ++ emitted.flatMap encode).reverse := by
-  rw [List.foldl_append, foldl_reverseAppend_header]
-
-/-- The actual tape update used by `SourceTestAppend` has this same invariant;
-all other tapes remain the original tapes. -/
-theorem foldl_resultTapes {α K : Type} [DecidableEq K]
-    (layout : SourceTestAppend.Layout K) (encode : α → List Bool)
-    (records : List α) (base : K → List Bool) :
-    records.foldl (fun tapes record =>
-        SourceTestAppend.resultTapes layout tapes (encode record)) base =
-      Function.update base layout.accumulator
-        ((records.flatMap encode).reverse ++ base layout.accumulator) := by
-  induction records generalizing base with
-  | nil =>
-    funext k
-    by_cases hk : k = layout.accumulator <;> simp [hk]
-  | cons record records ih =>
-    simp only [List.foldl_cons, ih]
-    funext k
-    by_cases hk : k = layout.accumulator <;>
-      simp [SourceTestAppend.resultTapes, hk, List.flatMap_cons,
-        List.reverse_append, List.append_assoc]
 
 theorem inputBits_eq_header_records (input : SourceEncoding.Input) :
     SourceEncoding.inputBits input =
@@ -374,44 +240,6 @@ theorem inputBits_eq_header_records (input : SourceEncoding.Input) :
   | cons e es ih =>
     simp only [List.flatMap_cons, encodeWords_append, ih]
 
-theorem input_reverse_accumulator (input : SourceEncoding.Input) :
-    input.equations.foldl
-        (reverseAppend (fun e => encodeWords (SourceEncoding.equationWords e)))
-        (encodeWords [input.variables, input.equations.length]).reverse =
-      (SourceEncoding.inputBits input).reverse := by
-  rw [foldl_reverseAppend_header, inputBits_eq_header_records]
-
-/-- The nonempty-formula branch can feed the accumulator directly from the
-tuple controller's occurrence order. The total-input invariant above also
-covers the separate singleton empty-formula branch. -/
-theorem sourceInput_tuple_reverse_accumulator (F : Formula) (u D : ℕ)
-    (hD : 0 < D) (hne : F.clauses ≠ []) :
-    (tupleSourceOrder F u D).foldl
-        (reverseAppend (fun p => encodeWords
-          (SourceEncoding.equationWords (sourceEquation F u D p))))
-        (encodeWords [nBits F u, (sourceList F u D).length]).reverse =
-      (SourceEncoding.inputBits (sourceInput F u D hD)).reverse := by
-  rw [← input_reverse_accumulator (sourceInput F u D hD)]
-  change _ = (sourceList F u D).foldl
-    (reverseAppend (fun e => encodeWords (SourceEncoding.equationWords e)))
-    (encodeWords [nBits F u, (sourceList F u D).length]).reverse
-  rw [sourceList_eq_tupleOrder F u D hne, List.foldl_map]
-  rfl
-
-/-- Applying the existing reversal machine to the accumulated records returns
-the exact serialized input in `inputBits.length + 1` transitions. This is only
-the final reversal stage, not a bound for generating the records. -/
-theorem finalReverse_steps (input : SourceEncoding.Input) (register : Option Bool) :
-    MachineReverse.next^[(SourceEncoding.inputBits input).length + 1]
-      (some (MachineReverse.running
-        (input.equations.foldl
-          (reverseAppend (fun e => encodeWords (SourceEncoding.equationWords e)))
-          (encodeWords [input.variables, input.equations.length]).reverse)
-        [] register)) =
-      some (MachineReverse.halted (SourceEncoding.inputBits input)) := by
-  rw [input_reverse_accumulator]
-  simpa only [List.length_reverse, List.reverse_reverse, List.append_nil] using
-    MachineReverse.reverse_steps (SourceEncoding.inputBits input).reverse [] register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceLoopOrder
 
@@ -767,36 +595,6 @@ theorem traversalInTime
     evals_in_steps := tree.trace
     steps_le_m := tree.steps_le_power positive B ht }⟩
 
-omit [DecidableEq Extra] in
-@[simp] theorem initial_current (base : Tape u Extra → List Bool)
-    (bodyLabel : Λ) (canonical : σ) (i : Fin u) :
-    (initialConfiguration (m := m) u bodyLabel canonical base).stk (.current i) =
-      encodeWord 0 := by simp [initialConfiguration, configuration, setDigits]
-
-omit [DecidableEq Extra] in
-@[simp] theorem initial_remaining (base : Tape u Extra → List Bool)
-    (bodyLabel : Λ) (canonical : σ) (i : Fin u) :
-    (initialConfiguration (m := m) u bodyLabel canonical base).stk (.remaining i) =
-      encodeWord (m - 1) := by simp [initialConfiguration, configuration, setDigits]
-
-@[simp] theorem final_current (base : Tape u Extra → List Bool)
-    (exitLabel : Λ) (canonical : σ) (accumulator : Extra)
-    (bits : (Fin u → Fin m) → List Bool) (i : Fin u) :
-    (finalConfiguration exitLabel canonical accumulator base bits).stk (.current i) =
-      encodeWord 0 := by simp [finalConfiguration, configuration, setDigits]
-
-@[simp] theorem final_remaining (base : Tape u Extra → List Bool)
-    (exitLabel : Λ) (canonical : σ) (accumulator : Extra)
-    (bits : (Fin u → Fin m) → List Bool) (i : Fin u) :
-    (finalConfiguration exitLabel canonical accumulator base bits).stk (.remaining i) =
-      encodeWord (m - 1) := by simp [finalConfiguration, configuration, setDigits]
-
-@[simp] theorem final_accumulator (base : Tape u Extra → List Bool)
-    (exitLabel : Λ) (canonical : σ) (accumulator : Extra)
-    (bits : (Fin u → Fin m) → List Bool) :
-    (finalConfiguration exitLabel canonical accumulator base bits).stk (.extra accumulator) =
-      ((tupleOrder m u).flatMap bits).reverse ++ base (.extra accumulator) := by
-  simp [finalConfiguration, configuration, allBits]
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceOdometerSchedule
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Nat.Log
 import Mathlib.Tactic.NormNum
 import OAI.Computability.UniqueGames.PCP.AlphabetRetractionLemmas
@@ -112,23 +113,6 @@ def zigzag (G : PortGraph V D) (H : PortGraph D E) : PortGraph (V × D) (E × E)
       let last := H.rot (middle.2, e₂)
       ((middle.1, last.1), (last.2, first.2)) := rfl
 
-theorem natCard_square_ports : Nat.card (D × D) = Nat.card D ^ 2 := by
-  simp [Nat.card_prod, pow_two]
-
-theorem natCard_square_edges :
-    Nat.card (Edge V (D × D)) = Nat.card V * Nat.card D ^ 2 := by
-  simp [Edge, Nat.card_prod, pow_two]
-
-theorem natCard_zigzag_vertices :
-    Nat.card (V × D) = Nat.card V * Nat.card D := Nat.card_prod V D
-
-theorem natCard_zigzag_ports : Nat.card (E × E) = Nat.card E ^ 2 := by
-  simp [Nat.card_prod, pow_two]
-
-theorem natCard_zigzag_edges :
-    Nat.card (Edge (V × D) (E × E)) =
-      Nat.card V * Nat.card D * Nat.card E ^ 2 := by
-  simp [Edge, Nat.card_prod, pow_two]
 
 /-! ## Exact averaging operators -/
 
@@ -253,11 +237,6 @@ theorem projection_energy_decomposition [Fintype V] [Fintype D] [Nonempty D]
   rw [energy_centered_eq_sub]
   ring
 
-theorem energy_projection_le [Fintype V] [Fintype D] [Nonempty D]
-    (f : V × D → ℝ) : energy (projection f) ≤ energy f := by
-  have h := projection_energy_decomposition f
-  have hn := energy_nonnegative (centered f)
-  linarith
 
 theorem energy_centered_le [Fintype V] [Fintype D] [Nonempty D]
     (f : V × D → ℝ) : energy (centered f) ≤ energy f := by
@@ -593,11 +572,6 @@ theorem size_le_mul {k : Nat} (hk : 0 < k) : size k ≤ growth * k := by
       _ = growth * growth ^ (level k).pred := by rw [pow_succ, Nat.mul_comm]
       _ ≤ growth * k := Nat.mul_le_mul_left growth hp.le
 
-theorem padded_family_size {k : Nat} (hk : 0 < k) :
-    k ≤ Fintype.card (Vertex (level k)) ∧
-      Fintype.card (Vertex (level k)) ≤ growth * k := by
-  rw [card_vertex]
-  exact ⟨le_size k, size_le_mul hk⟩
 
 end UniqueGamesTheorem.Foundations.PCP.ExpanderFamily
 
@@ -637,12 +611,6 @@ theorem le_paddedSize (k : Nat) : k ≤ paddedSize k := by
   · rw [paddedSize, ite_eq_right hk]
     exact ExpanderFamily.le_size k
 
-theorem paddedSize_le_mul (k : Nat) : paddedSize k ≤ ExpanderFamily.growth * k := by
-  by_cases hk : k = 0
-  · subst k
-    simp
-  · rw [paddedSize, ite_eq_right hk]
-    exact ExpanderFamily.size_le_mul (Nat.pos_of_ne_zero hk)
 
 /-- The actual padded tail fiber contains old darts and exactly the dummy
 darts indexed by that tail, with transport along the sigma index equality. -/
@@ -704,15 +672,6 @@ theorem card_cloud (G : ConstraintGraph V E A) (v : V) :
   simp only [dummy, Fintype.card_fin]
   exact Nat.add_sub_of_le (le_paddedSize _)
 
-omit [Fintype V] in
-theorem card_dummy_of_empty (G : ConstraintGraph V E A) (v : V)
-    (hk : Fintype.card (Cloud G v) = 0) : Fintype.card (dummy G v) = 0 := by
-  simp [dummy, hk]
-
-theorem card_cloud_of_empty (G : ConstraintGraph V E A) (v : V)
-    (hk : Fintype.card (Cloud G v) = 0) :
-    Fintype.card (Cloud (paddedGraph G (dummy G)) v) = 0 := by
-  rw [card_cloud, hk, paddedSize_zero]
 
 theorem card_cloud_eq_family (G : ConstraintGraph V E A) (v : V)
     (hk : 0 < Fintype.card (Cloud G v)) :
@@ -722,32 +681,6 @@ theorem card_cloud_eq_family (G : ConstraintGraph V E A) (v : V)
   rw [card_cloud, paddedSize_of_pos hk, ExpanderFamily.card_vertex]
   rfl
 
-/-- Exact count over all padded tail fibers, including empty original fibers. -/
-theorem card_paddedDart_eq_sum (G : ConstraintGraph V E A) :
-    Fintype.card (PaddedDart G (dummy G)) =
-      ∑ v, paddedSize (Fintype.card (Cloud G v)) := by
-  calc
-    Fintype.card (PaddedDart G (dummy G)) =
-        ∑ v, Fintype.card (Cloud (paddedGraph G (dummy G)) v) :=
-      (sum_card_cloud (paddedGraph G (dummy G))).symm
-    _ = ∑ v, paddedSize (Fintype.card (Cloud G v)) := by
-      apply Finset.sum_congr rfl
-      intro v _
-      exact card_cloud G v
-
-/-- Padding increases the total number of darts by at most the fixed family
-growth factor, independent of the number of empty vertices. -/
-theorem card_paddedDart_le (G : ConstraintGraph V E A) :
-    Fintype.card (PaddedDart G (dummy G)) ≤ ExpanderFamily.growth * Fintype.card E := by
-  rw [card_paddedDart_eq_sum]
-  calc
-    (∑ v, paddedSize (Fintype.card (Cloud G v))) ≤
-        ∑ v, ExpanderFamily.growth * Fintype.card (Cloud G v) := by
-      apply Finset.sum_le_sum
-      intro v _
-      exact paddedSize_le_mul _
-    _ = ExpanderFamily.growth * Fintype.card E := by
-      rw [← Finset.mul_sum, sum_card_cloud]
 
 end Finite
 

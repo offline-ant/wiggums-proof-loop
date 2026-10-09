@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
@@ -188,19 +189,6 @@ variable {E F : Type u}
   [FiniteDimensional F2 E] [FiniteDimensional F2 F]
   [Fintype E] [Fintype F]
 
-/-- The genuine hybrid derivative bound, including ranks above the ambient
-dimension where the selected Fourier component vanishes. -/
-theorem hybridDerivative_energy_bound_allRanks
-    (i : ℕ) (ε : ℝ) (hε : 0 ≤ ε)
-    (f : (E →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f)
-    (hd : AffineDensityBound i ε f)
-    (A : Submodule F2 E) (B : Submodule F2 F) (T : E →ₗ[F2] F) :
-    (𝔼 N, hybridDerivative A B T (rankComponent i f) N ^ 2) ≤ mixedRankConstant i * ε := by
-  by_cases hi : i ≤ Module.finrank F2 E
-  · exact hybridDerivative_energy_bound i ε hε f hf hd hi A B T
-  · rw [hybridDerivative_rankComponent_energy_eq_zero_of_finrank_lt
-      A B T f i (Nat.lt_of_not_ge hi)]
-    exact mul_nonneg (mixedRankConstant_nonneg i) hε
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy
@@ -350,98 +338,6 @@ end
 section
 
 /-!
-Exact mass of a nonempty column slice within a fixed row-advice fiber. A
-column span of dimension at most `r` costs at most `ell*r` binary degrees of
-freedom. All inhomogeneous values are represented by the chosen base point.
--/
-
-namespace UniqueGamesTheorem.Inverse.RowErasureColumnMass
-
-noncomputable section
-
-open UniqueGamesTheorem.Integration.BinaryLinear
-open UniqueGamesTheorem.Decoder.AdviceFibers
-open UniqueGamesTheorem.Inverse.RowErasureSliceQuotient
-
-variable {E K R : Type*}
-  [AddCommGroup E] [Module F2 E] [FiniteDimensional F2 E]
-  [AddCommGroup K] [Module F2 K] [FiniteDimensional F2 K]
-  [AddCommGroup R] [Module F2 R]
-
-theorem card_affineSlice (A : K →ₗ[F2] R) (Q : Submodule F2 E)
-    (M₀ : E →ₗ[F2] K) :
-    Nat.card (AffineSlice A Q M₀) =
-      2 ^ (Module.finrank F2 (E ⧸ Q) * Module.finrank F2 A.ker) := by
-  rw [Nat.card_congr (equiv A Q M₀).symm,
-    Module.natCard_eq_pow_finrank (K := F2), Module.finrank_linearMap]
-  simp [F2]
-
-theorem card_rowFiber (A : K →ₗ[F2] R) (M₀ : E →ₗ[F2] K) :
-    Nat.card (RowFiber A (A.comp M₀)) =
-      2 ^ (Module.finrank F2 E * Module.finrank F2 A.ker) := by
-  rw [Nat.card_congr (rowFiberEquiv A (A.comp M₀) M₀ rfl).symm,
-    Module.natCard_eq_pow_finrank (K := F2), Module.finrank_linearMap]
-  simp [F2]
-
-/-- The exact number of row-fiber points for each compatible specification on
-the column span. Dependent column equations cost only their actual rank. -/
-theorem card_rowFiber_eq_mul (A : K →ₗ[F2] R) (Q : Submodule F2 E)
-    (M₀ : E →ₗ[F2] K) :
-    Nat.card (RowFiber A (A.comp M₀)) = Nat.card (AffineSlice A Q M₀) *
-      2 ^ (Module.finrank F2 Q * Module.finrank F2 A.ker) := by
-  rw [card_rowFiber, card_affineSlice, ← pow_add, ← Nat.add_mul,
-    Q.finrank_quotient_add_finrank]
-
-/-- A denominator-free bound by the listed column count and ambient output
-dimension, with no independence or full-rank hypothesis. -/
-theorem card_rowFiber_le_mul (A : K →ₗ[F2] R) (Q : Submodule F2 E)
-    (M₀ : E →ₗ[F2] K) (ell r : ℕ)
-    (hQ : Module.finrank F2 Q ≤ r) (hK : Module.finrank F2 K ≤ ell) :
-    Nat.card (RowFiber A (A.comp M₀)) ≤
-      Nat.card (AffineSlice A Q M₀) * 2 ^ (ell * r) := by
-  have hker : Module.finrank F2 A.ker ≤ ell := A.ker.finrank_le.trans hK
-  have hexponent : Module.finrank F2 Q * Module.finrank F2 A.ker ≤ ell * r := by
-    simpa only [Nat.mul_comm r ell] using Nat.mul_le_mul hQ hker
-  rw [card_rowFiber_eq_mul A Q M₀]
-  exact Nat.mul_le_mul_left _ (Nat.pow_le_pow_right (by decide : 1 ≤ 2) hexponent)
-
-/-- The exact uniform fraction of the row fiber occupied by its compatible
-affine column slice. -/
-theorem column_fraction_eq (A : K →ₗ[F2] R) (Q : Submodule F2 E)
-    (M₀ : E →ₗ[F2] K) :
-    (Nat.card (AffineSlice A Q M₀) : ℝ) /
-        (Nat.card (RowFiber A (A.comp M₀)) : ℝ) =
-      1 / (2 : ℝ) ^ (Module.finrank F2 Q * Module.finrank F2 A.ker) := by
-  have hs : (0 : ℝ) < Nat.card (AffineSlice A Q M₀) := by
-    rw [card_affineSlice]
-    positivity
-  rw [card_rowFiber_eq_mul A Q M₀]
-  simp only [Nat.cast_mul, Nat.cast_pow, Nat.cast_ofNat]
-  rw [div_mul_cancel_left₀ hs.ne', one_div]
-
-/-- At most `r` independent column constraints retain at least the fraction
-`2^(-ell*r)` of any nonempty row-advice fiber. -/
-theorem column_fraction_ge (A : K →ₗ[F2] R) (Q : Submodule F2 E)
-    (M₀ : E →ₗ[F2] K) (ell r : ℕ)
-    (hQ : Module.finrank F2 Q ≤ r) (hK : Module.finrank F2 K ≤ ell) :
-    1 / (2 : ℝ) ^ (ell * r) ≤
-      (Nat.card (AffineSlice A Q M₀) : ℝ) /
-        (Nat.card (RowFiber A (A.comp M₀)) : ℝ) := by
-  rw [column_fraction_eq]
-  have hker : Module.finrank F2 A.ker ≤ ell := A.ker.finrank_le.trans hK
-  have hexponent : Module.finrank F2 Q * Module.finrank F2 A.ker ≤ ell * r := by
-    simpa only [Nat.mul_comm r ell] using Nat.mul_le_mul hQ hker
-  exact one_div_le_one_div_of_le (by positivity)
-    (pow_le_pow_right₀ (by norm_num : (1 : ℝ) ≤ 2) hexponent)
-
-end
-end UniqueGamesTheorem.Inverse.RowErasureColumnMass
-
-end
-
-section
-
-/-!
 The actual finite matrix column event occupies at least `2^(-ell*r)` of its
 row-advice fiber. This connects the intrinsic quotient-map count to the padded
 descriptions used by the selector, without assuming independent equations.
@@ -463,64 +359,31 @@ def rowFiber {ell m r : ℕ} (A : RowMap ell r) (s : Mat r m) :
     (M : Mat ell m) : M ∈ rowFiber A s ↔ rowAdvice A M = s := by
   simp [rowFiber]
 
-/-- Forget only the column equations of a slice. -/
-def rowOnly {ell m : ℕ} (S : Slice ell m) : Slice ell m where
-  rows := S.rows
-  columns := 0
-  rowCoefficient := S.rowCoefficient
-  rowValue := S.rowValue
-  columnCoefficient := Fin.elim0
-  columnValue := Fin.elim0
-
-theorem rowOnly_contains_iff {ell m : ℕ} (S : Slice ell m) (M : Mat ell m) :
-    (rowOnly S).Contains M ↔ rowAdvice S.rowCoefficient M = S.rowValue := by
-  constructor
-  · intro h
-    funext i j
-    exact h.1 i j
-  · intro h
-    constructor
-    · intro i j
-      exact congrFun (congrFun h i) j
-    · intro i
-      exact Fin.elim0 i
-
-theorem rowOnly_points {ell m : ℕ} (S : Slice ell m) :
-    (rowOnly S).points = rowFiber S.rowCoefficient S.rowValue := by
-  ext M
-  simp only [Slice.points, rowFiber, Finset.mem_filter, Finset.mem_univ, true_and,
-    rowOnly_contains_iff]
-
-theorem contains_rowOnly {ell m : ℕ} (S : Slice ell m) {M : Mat ell m}
-    (hM : S.Contains M) : (rowOnly S).Contains M := by
-  exact ⟨hM.1, fun i => Fin.elim0 i⟩
-
-theorem rowOnly_columnSpan {ell m : ℕ} (S : Slice ell m) :
-    (rowOnly S).columnSpan = ⊥ := by
-  apply Submodule.span_eq_bot.mpr
-  rintro _ ⟨i, _⟩
-  exact Fin.elim0 i
-
-theorem rowOnly_quotient_finrank {ell m : ℕ} (S : Slice ell m) :
-    Module.finrank F2 (Shortcode.Vector m ⧸ (rowOnly S).columnSpan) = m := by
-  have h := (rowOnly S).columnSpan.finrank_quotient_add_finrank
-  have hz : Module.finrank F2 (rowOnly S).columnSpan = 0 := by
-    rw [rowOnly_columnSpan]
-    simp
-  have hm : Module.finrank F2 (Shortcode.Vector m) = m := by simp [Shortcode.Vector]
-  rw [hz, add_zero, hm] at h
-  exact h
-
-/-- The size of an actual nonempty row fiber, in the same coordinates used by
-the selector's uniform matrix sample. -/
+/-- Count a row fiber directly in linear-map coordinates, without introducing
+an auxiliary slice with empty column constraints. -/
 theorem rowFiber_card {ell m : ℕ} (S : Slice ell m) (M₀ : Mat ell m)
     (h₀ : S.Contains M₀) :
     (rowFiber S.rowCoefficient S.rowValue).card =
       2 ^ (m * Module.finrank F2 S.rowMap.ker) := by
-  rw [← rowOnly_points S,
-    (rowOnly S).card_points_eq_directions M₀ (contains_rowOnly S h₀),
-    (rowOnly S).card_directions, rowOnly_quotient_finrank]
-  rfl
+  let e : (rowFiber S.rowCoefficient S.rowValue) ≃
+      UniqueGamesTheorem.Decoder.AdviceFibers.RowFiber S.rowMap
+        (S.rowMap.comp (Matrix.toLin' M₀)) :=
+    Matrix.toLin'.toEquiv.subtypeEquiv fun M => by
+      simp only [rowFiber, Finset.mem_filter, Finset.mem_univ, true_and]
+      change rowAdvice S.rowCoefficient M = S.rowValue ↔
+        S.rowMap.comp (Matrix.toLin' M) = S.rowMap.comp (Matrix.toLin' M₀)
+      rw [(S.row_equations_iff M₀).mp h₀.1]
+      constructor
+      · intro h
+        exact (S.row_equations_iff M).mp (fun i j => congrFun (congrFun h i) j)
+      · intro h
+        funext i j
+        exact (S.row_equations_iff M).mpr h i j
+  rw [← Nat.card_eq_finsetCard, Nat.card_congr (e.trans
+    (UniqueGamesTheorem.Decoder.AdviceFibers.rowFiberEquiv S.rowMap
+      (S.rowMap.comp (Matrix.toLin' M₀)) (Matrix.toLin' M₀) rfl).symm),
+    Module.natCard_eq_pow_finrank (K := F2), Module.finrank_linearMap]
+  simp [Shortcode.Vector, F2]
 
 theorem rowFiber_nonempty {ell m r : ℕ} (d : Description ell m r)
     (hne : d.toSlice.points.Nonempty) : (rowFiber d.1 d.2.1).Nonempty := by
@@ -538,21 +401,30 @@ theorem column_fraction_ge {ell m r : ℕ} (d : Description ell m r)
       (d.toSlice.points.card : ℝ) / ((rowFiber d.1 d.2.1).card : ℝ) := by
   obtain ⟨M₀, hM₀⟩ := hne
   have h₀ : d.toSlice.Contains M₀ := (Finset.mem_filter.mp hM₀).2
-  have hs : d.toSlice.points.card = Nat.card
-      (RowErasureSliceQuotient.AffineSlice d.toSlice.rowMap d.toSlice.columnSpan
-        (Matrix.toLin' M₀)) := by
-    rw [d.toSlice.card_points_eq_directions M₀ h₀, d.toSlice.card_directions,
-      RowErasureColumnMass.card_affineSlice]
-  have hr : (rowFiber d.1 d.2.1).card = Nat.card
-      (UniqueGamesTheorem.Decoder.AdviceFibers.RowFiber d.toSlice.rowMap
-        (d.toSlice.rowMap.comp (Matrix.toLin' M₀))) := by
-    have hm : Module.finrank F2 (Shortcode.Vector m) = m := by simp [Shortcode.Vector]
-    rw [RowErasureColumnMass.card_rowFiber, hm]
-    exact rowFiber_card d.toSlice M₀ h₀
-  have h := RowErasureColumnMass.column_fraction_ge
-    d.toSlice.rowMap d.toSlice.columnSpan (Matrix.toLin' M₀) ell r
-    d.toSlice.columnSpan_finrank_le (by simp [Shortcode.Vector])
-  rwa [← hs, ← hr] at h
+  change _ ≤ (d.toSlice.points.card : ℝ) /
+    ((rowFiber d.toSlice.rowCoefficient d.toSlice.rowValue).card : ℝ)
+  rw [rowFiber_card d.toSlice M₀ h₀, d.toSlice.card_points_eq_directions M₀ h₀,
+    d.toSlice.card_directions]
+  simp only [Nat.cast_pow, Nat.cast_ofNat]
+  apply (le_div_iff₀ (by positivity)).mpr
+  rw [one_div, inv_mul_eq_div]
+  apply (div_le_iff₀ (by positivity)).mpr
+  rw [← pow_add]
+  apply pow_le_pow_right₀ (by norm_num : (1 : ℝ) ≤ 2)
+  have hdim : Module.finrank F2 (Shortcode.Vector m ⧸ d.toSlice.columnSpan) +
+      Module.finrank F2 d.toSlice.columnSpan = m := by
+    simpa [Shortcode.Vector] using d.toSlice.columnSpan.finrank_quotient_add_finrank
+  have hcost : Module.finrank F2 d.toSlice.columnSpan *
+      Module.finrank F2 d.toSlice.rowMap.ker ≤ ell * r := by
+    simpa [Nat.mul_comm] using Nat.mul_le_mul
+      (show Module.finrank F2 d.toSlice.columnSpan ≤ r from d.toSlice.columnSpan_finrank_le)
+      (d.toSlice.rowMap.ker.finrank_le.trans
+        (show Module.finrank F2 (Shortcode.Vector ell) ≤ ell by simp [Shortcode.Vector]))
+  calc
+    _ = (Module.finrank F2 (Shortcode.Vector m ⧸ d.toSlice.columnSpan) +
+        Module.finrank F2 d.toSlice.columnSpan) *
+          Module.finrank F2 d.toSlice.rowMap.ker := by rw [hdim]
+    _ ≤ _ := by rw [Nat.add_mul]; omega
 
 end
 end UniqueGamesTheorem.Inverse.RowErasureDescriptionColumnMass
@@ -776,46 +648,6 @@ theorem selectedMatchMass_ge (f : Mat ell m → Vector ell) (α : ℝ) :
   rw [← Finset.mul_expect] at h
   exact h
 
-/-- Context weights may be the pushforward of verifier seeds and need not be
-uniform on distinct questions. Normalization is not needed for this inequality. -/
-theorem selectedEventMass_weighted_ge {Q : Type*} [Fintype Q]
-    (w : Q → ℝ) (hw : ∀ q, 0 ≤ w q) (f : Q → Mat ell m → Vector ell)
-    (α g₀ : ℝ)
-    (hgood : g₀ ≤ ∑ q, w q * adviceMass ((family ell m r).goodAt (f q) α)) :
-    (1 / (2 : ℝ) ^ (ell * r)) * g₀ ≤ ∑ q, w q * selectedEventMass r (f q) α := by
-  have h := Finset.sum_le_sum (s := Finset.univ) (fun q _ =>
-    mul_le_mul_of_nonneg_left (selectedEventMass_ge (r := r) (f q) α) (hw q))
-  have heq : (∑ q, w q * ((1 / (2 : ℝ) ^ (ell * r)) *
-      adviceMass ((family ell m r).goodAt (f q) α))) =
-      (1 / (2 : ℝ) ^ (ell * r)) *
-        ∑ q, w q * adviceMass ((family ell m r).goodAt (f q) α) := by
-    rw [Finset.mul_sum]
-    apply Finset.sum_congr rfl
-    intro q _
-    ring
-  rw [heq] at h
-  exact (mul_le_mul_of_nonneg_left hgood (by positivity)).trans h
-
-theorem selectedMatchMass_weighted_ge {Q : Type*} [Fintype Q]
-    (w : Q → ℝ) (hw : ∀ q, 0 ≤ w q) (f : Q → Mat ell m → Vector ell) (α : ℝ) :
-    (α / 2) * (∑ q, w q * selectedEventMass r (f q) α) ≤
-      ∑ q, w q * selectedMatchMass r (f q) α := by
-  have h := Finset.sum_le_sum (s := Finset.univ) (fun q _ =>
-    mul_le_mul_of_nonneg_left (selectedMatchMass_ge (r := r) (f q) α) (hw q))
-  have heq : (∑ q, w q * ((α / 2) * selectedEventMass r (f q) α)) =
-      (α / 2) * (∑ q, w q * selectedEventMass r (f q) α) := by
-    rw [Finset.mul_sum]
-    apply Finset.sum_congr rfl
-    intro q _
-    ring
-  rwa [heq] at h
-
-theorem selectedMatchMass_conditional_ge {Q : Type*} [Fintype Q]
-    (w : Q → ℝ) (hw : ∀ q, 0 ≤ w q) (f : Q → Mat ell m → Vector ell) (α : ℝ)
-    (hpositive : 0 < ∑ q, w q * selectedEventMass r (f q) α) :
-    α / 2 ≤ (∑ q, w q * selectedMatchMass r (f q) α) /
-      (∑ q, w q * selectedEventMass r (f q) α) :=
-  (le_div_iff₀ hpositive).mpr (selectedMatchMass_weighted_ge w hw f α)
 
 /-- The same bound for a uniform finite seed space, allowing repeated contexts. -/
 theorem selectedEventMass_contextual_ge {Q : Type*} [Fintype Q]

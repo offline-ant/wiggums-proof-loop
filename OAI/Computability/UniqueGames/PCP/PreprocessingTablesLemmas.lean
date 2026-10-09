@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.AlphabetReductionLemmas
@@ -60,8 +61,6 @@ def preprocess (H : BaseTable) (t : GraphTables.Table) :
 def output (H : BaseTable) (t : GraphTables.Table) : PortTables.Input degree :=
   ⟨vertices t, preprocess H t⟩
 
-def graphTable (H : BaseTable) (t : GraphTables.Table) : GraphTables.Table :=
-  PortTables.graphTable (preprocess H t)
 
 def outputBits (H : BaseTable) (t : GraphTables.Table) : List Bool :=
   PortTables.tableBits (preprocess H t)
@@ -86,43 +85,6 @@ theorem vertices_le_of_positive (t : GraphTables.Table) (ht : 0 < t.darts) :
       Nat.mul_le_mul_left _ (regularVertices_le t)
     _ = _ := by ring
 
-theorem vertices_eq_one_of_no_darts (t : GraphTables.Table) (ht : t.darts = 0) :
-    vertices t = 1 := by
-  unfold vertices regularVertices
-  rw [vertexCount_eq_zero_of_no_darts t ht, PreprocessingLevels.paddedSize_zero]
-
-/-- The total algorithm also has a uniform data bound on empty inputs. -/
-theorem vertices_le (t : GraphTables.Table) :
-    vertices t ≤ ExpanderFamily.growth ^ 2 * (t.darts + 1) := by
-  by_cases ht : t.darts = 0
-  · rw [vertices_eq_one_of_no_darts t ht, ht]
-    have hg : 0 < ExpanderFamily.growth := Nat.zero_lt_one.trans ExpanderFamily.growth_gt_one
-    have hp : 0 < ExpanderFamily.growth ^ 2 := Nat.pow_pos hg
-    simpa using Nat.succ_le_of_lt hp
-  · exact (vertices_le_of_positive t (Nat.pos_of_ne_zero ht)).trans
-      (Nat.mul_le_mul_left _ (Nat.le_succ _))
-
-theorem darts_eq (H : BaseTable) (t : GraphTables.Table) :
-    (graphTable H t).darts = vertices t * degree := rfl
-
-theorem darts_le (H : BaseTable) (t : GraphTables.Table) :
-    (graphTable H t).darts ≤ Preprocessing.sizeFactor * (t.darts + 1) := by
-  rw [darts_eq]
-  calc
-    _ ≤ (ExpanderFamily.growth ^ 2 * (t.darts + 1)) * degree :=
-      Nat.mul_le_mul_right _ (vertices_le t)
-    _ = _ := by rw [degree_eq]; unfold Preprocessing.sizeFactor; ring
-
-theorem vertices_le_inputBits (t : GraphTables.Table) :
-    vertices t ≤ ExpanderFamily.growth ^ 2 * ((GraphTables.tableBits t).length + 1) :=
-  (vertices_le t).trans (Nat.mul_le_mul_left _
-    (Nat.add_le_add_right (GraphTables.darts_le_tableBits_length t) 1))
-
-theorem darts_le_inputBits (H : BaseTable) (t : GraphTables.Table) :
-    (graphTable H t).darts ≤
-      Preprocessing.sizeFactor * ((GraphTables.tableBits t).length + 1) :=
-  (darts_le H t).trans (Nat.mul_le_mul_left _
-    (Nat.add_le_add_right (GraphTables.darts_le_tableBits_length t) 1))
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingTables
 
@@ -188,14 +150,6 @@ theorem overlay_certificate (H : BaseTable)
     (vertices_positive t) rfl PreprocessingRegularSoundness.internalDegree_ge_eight
     (overlayFamily_certificate H certificate t)
 
-/-- The concrete generated rows have the required absolute contraction. -/
-theorem spectral_certificate (H : BaseTable)
-    (certificate : SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (t : GraphTables.Table) :
-    SpectralCertificate (PortTables.portGraph (preprocess H t)) (31 / 32 : ℝ) := by
-  apply PreprocessingTableSpectral.lazy_certificate_31_32
-  · omega
-  · exact overlay_certificate H certificate t
 
 def restrictedLabel (t : GraphTables.Table)
     (labels : Fin (vertices t) → GraphTables.Label) :
@@ -302,14 +256,8 @@ theorem regularVertices_le_input (t : GraphTables.Table) :
 
 theorem offset_le_sum {n : Nat} (p : Fin n → Nat) (k : Nat) :
     PreprocessingPaddingOffsets.offset p k ≤ ∑ v, p v := by
-  have hfull : (List.finRange n).take n = List.finRange n := by simp
-  have hsplit : PreprocessingPaddingOffsets.offset p k +
-      (((List.finRange n).drop k).map p).sum =
-      PreprocessingPaddingOffsets.offset p n := by
-    simp only [PreprocessingPaddingOffsets.offset, hfull]
-    rw [← List.sum_append, ← List.map_append, List.take_append_drop]
-  rw [PreprocessingPaddingOffsets.offset_all] at hsplit
-  omega
+  simpa [PreprocessingPaddingOffsets.offset, List.finRange, List.sum_ofFn] using
+    ((List.take_sublist k (List.finRange n)).map p).sum_le_sum (fun _ _ => Nat.zero_le _)
 
 theorem prefix_le_input (t : GraphTables.Table) (k : Nat) :
     PreprocessingPaddingOffsets.offset (padding t) k ≤
@@ -422,64 +370,21 @@ noncomputable section
 
 namespace UniqueGamesTheorem.Foundations.PCP.RoundGap
 
-open AmplificationRound
-
 variable {V E : Type*} [Fintype V] [Fintype E] [DecidableEq V] [DecidableEq E]
   [Nonempty E]
 
 def poweredLower (epsilon : ℝ) : ℝ :=
-  PoweringSoundness.gain (Fintype.card Label) FinalConstants.windowHalf (31 / 32) *
+  PoweringSoundness.gain (Fintype.card PoweringFinalConstants.Alphabet)
+    FinalConstants.windowHalf (31 / 32) *
     min (epsilon / (Preprocessing.sizeFactor : ℝ)) FinalConstants.cap
 
 theorem poweredLower_nonnegative (epsilon : ℝ) (he : 0 ≤ epsilon) :
     0 ≤ poweredLower epsilon := by
-  have hg := PoweringGap.gain_nonneg (Fintype.card Label)
+  have hg := PoweringGap.gain_nonneg (Fintype.card PoweringFinalConstants.Alphabet)
     FinalConstants.windowHalf (31 / 32) (by norm_num)
   have hs : (0 : ℝ) < Preprocessing.sizeFactor := by
     exact_mod_cast Preprocessing.sizeFactor_positive
   exact mul_nonneg hg (le_min (div_nonneg he hs.le) FinalConstants.cap_positive.le)
-
-theorem powered_count_gap (addresses : List Addresses) (complete : ∀ w, w ∈ addresses)
-    (G : ConstraintGraph V E Label)
-    (labeling : Preprocessing.Vertex G → PoweredAlphabet) :
-    poweredLower G.gap * (Fintype.card (PoweredDart G) : ℝ) ≤
-      ((powered addresses complete G).rejectionCount labeling : ℝ) := by
-  let H := Overlay.originalPortGraph (Preprocessing.overlayGraph G)
-  have certificate : SpectralReturn.SpectralCertificate
-      (PoweringWalks.lazyGraph H) (31 / 32 : ℝ) :=
-    Preprocessing.spectral_certificate G
-  have lower : ∀ assignment : Preprocessing.Vertex G → Label,
-      (G.gap / (Preprocessing.sizeFactor : ℝ)) *
-          (Fintype.card (Preprocessing.Vertex G × Preprocessing.Port) : ℝ) ≤
-        ((Preprocessing.graph G).rejectionCount assignment : ℝ) :=
-    Preprocessing.gap_transfer_real G G.gap G.gap_nonnegative
-      ((G.le_gap_iff G.gap).mp le_rfl)
-  have hs : (0 : ℝ) < Preprocessing.sizeFactor := by
-    exact_mod_cast Preprocessing.sizeFactor_positive
-  have h := PoweringGap.uniform_count_gap H (31 / 32) certificate
-    (Preprocessing.graph G).accepts (Preprocessing.accepts_reverse G)
-    FinalConstants.windowHalf FinalConstants.windowHalf_positive
-    (selectors addresses complete G)
-    (G.gap / (Preprocessing.sizeFactor : ℝ)) (div_nonneg G.gap_nonnegative hs.le)
-    lower labeling
-  convert h using 1 <;>
-    simp only [poweredLower, powered, FinalConstants.cap, FinalConstants.walkLength,
-      PoweringFinalConstants.center_eq]
-  rfl
-
-theorem amplifies (addresses : List Addresses) (complete : ∀ w, w ∈ addresses)
-    (G : ConstraintGraph V E Label) :
-    min (2 * G.gap) FinalConstants.cap ≤ (graph addresses complete G).gap := by
-  apply ((graph addresses complete G).le_gap_iff _).mpr
-  intro labeling
-  have hcount := AlphabetGraphBounds.gap_transfer_real (powered addresses complete G)
-    (poweredLower G.gap) (poweredLower_nonnegative G.gap G.gap_nonnegative)
-    (powered_count_gap addresses complete G) labeling
-  have hscalar : min (2 * G.gap) FinalConstants.cap ≤ poweredLower G.gap / 12288 := by
-    simpa only [poweredLower, FinalConstants.cap, FinalConstants.walkLength,
-      PoweringFinalConstants.center_eq] using
-      PoweringFinalConstants.composed_scaled_gap G.gap G.gap_nonnegative
-  exact (mul_le_mul_of_nonneg_right hscalar (Nat.cast_nonneg _)).trans hcount
 
 end UniqueGamesTheorem.Foundations.PCP.RoundGap
 

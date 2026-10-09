@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Group.Basic
@@ -147,16 +148,6 @@ theorem explicit_slice_iff (A : C →ₗ[F2] R) (S₀ : D →ₗ[F2] R)
   unfold InSlice
   rw [hrow, columns_iff_span q t M₀ M hcol]
 
-/-- The affine target value after normalization is unchanged at every matrix
-satisfying the original, explicitly listed row and column equations. -/
-theorem translate_explicit_target (A : C →ₗ[F2] R) (S₀ : D →ₗ[F2] R)
-    (q : ι → D) (t : ι → C) (M₀ M : D →ₗ[F2] C)
-    (hrow₀ : A.comp M₀ = S₀) (hcol₀ : ∀ i, M₀ (q i) = t i)
-    (hrow : A.comp M = S₀) (hcol : ∀ i, M (q i) = t i)
-    (z w : D) (hw : w ∈ Submodule.span F2 (Set.range q)) (u : C) :
-    M (z + w) + (u + M₀ w) = M z + u :=
-  translate_target A _ M₀ M
-    ((explicit_slice_iff A S₀ q t M₀ M hrow₀ hcol₀).mp ⟨hrow, hcol⟩) z w hw u
 
 end UniqueGamesTheorem.Inverse.AffineWitness
 
@@ -194,25 +185,14 @@ theorem folded_action_injective
     Function.Injective
       (fun a : H × {x : X // F x = target x} => shift a.1 a.2.val) := by
   intro a b hab
-  have htarget : target a.2.val = target b.2.val := by
-    calc
-      target a.2.val = target (shift a.1 a.2.val) :=
-        (target_invariant a.1 a.2.val).symm
-      _ = target (shift b.1 b.2.val) := congrArg target hab
-      _ = target b.2.val := target_invariant b.1 b.2.val
-  have hfold : F a.2.val + embed a.1 = F b.2.val + embed b.1 := by
-    calc
-      F a.2.val + embed a.1 = F (shift a.1 a.2.val) :=
-        (folded a.1 a.2.val).symm
-      _ = F (shift b.1 b.2.val) := congrArg F hab
-      _ = F b.2.val + embed b.1 := folded b.1 b.2.val
-  rw [a.2.property, b.2.property, htarget] at hfold
-  have hh : a.1 = b.1 := embed_injective (add_left_cancel hfold)
+  have hh : a.1 = b.1 := embed_injective (by
+    have h := congrArg (fun x => -target x + F x) hab
+    simpa only [target_invariant, folded, a.2.property, b.2.property,
+      neg_add_cancel_left] using h)
   have hx : a.2.val = b.2.val := by
-    have hshift : shift a.1 a.2.val = shift a.1 b.2.val := by
-      simpa only [hh] using hab
-    have hinverse := congrArg (shift (-a.1)) hshift
-    simpa only [← shift_add, neg_add_cancel, shift_zero] using hinverse
+    simp only [hh] at hab
+    simpa only [← shift_add, neg_add_cancel, shift_zero] using
+      congrArg (shift (-b.1)) hab
   exact Prod.ext hh (Subtype.ext hx)
 
 /-- The agreement set of a folded function with an invariant target occupies
@@ -263,13 +243,8 @@ theorem card_finset_subtype_eq_filter_card (s : Finset X)
     Nat.card {x : s // p x.val} = (s.filter p).card := by
   classical
   let e : {x : s // p x.val} ≃ ↥(s.filter p) :=
-    { toFun := fun x =>
-        ⟨x.val.val, Finset.mem_filter.mpr ⟨x.val.property, x.property⟩⟩
-      invFun := fun x =>
-        ⟨⟨x.val, (Finset.mem_filter.mp x.property).1⟩,
-          (Finset.mem_filter.mp x.property).2⟩
-      left_inv := fun _ => rfl
-      right_inv := fun _ => rfl }
+    (Equiv.subtypeSubtypeEquivSubtypeInter (fun x => x ∈ s) p).trans
+      (Equiv.subtypeEquivRight fun _ => Finset.mem_filter.symm)
   exact (Nat.card_congr e).trans (Nat.card_eq_finsetCard _)
 
 /-- An indicator's expectation on a finite set is its agreement count divided

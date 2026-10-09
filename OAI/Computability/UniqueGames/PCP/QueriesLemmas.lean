@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.GraphTables
 
@@ -60,27 +61,6 @@ def globalize {q : Nat} {V E : Type*} (tail head : V) (edge : E) :
   | .inl (side, tape) => .inl ((if side then head else tail), tape)
   | .inr tape => .inr (edge, tape)
 
-@[simp] theorem mask_idempotent {q : Nat} (P : Fin q → Fin q → Bool)
-    (f : Cube (Fin q × Fin q)) : mask P (mask P f) = mask P f := by
-  funext p
-  cases hp : P p.1 p.2 <;> simp [mask, hp]
-
-theorem mask_of_empty {q : Nat} (P : Fin q → Fin q → Bool)
-    (empty : ∀ a b, P a b = false) (f : Cube (Fin q × Fin q)) :
-    mask P f = fun _ => false := by
-  funext p
-  simp [mask, empty]
-
-/-- Every joint-table query is already a canonical masked full tape. -/
-theorem query_is_masked {q : Nat} (P : Fin q → Fin q → Bool)
-    (event : LocalEvent q) (slot : Fin 6) :
-    match query P event slot with
-    | .inl _ => True
-    | .inr tape => mask P tape = tape := by
-  rcases event with ⟨kind, k, f, g, r₀, r₁, r₂⟩
-  by_cases hk₀ : kind = 0 <;> by_cases hk₁ : kind = 1 <;> by_cases hk₂ : kind = 2 <;>
-    simp only [query, hk₀, hk₁, hk₂, ite_true, ite_false] <;>
-    split_ifs <;> simp
 
 /-- Proof-only comparison map: extend the original legal-coordinate addresses.
 The executable `query` function above never calls this map. -/
@@ -179,16 +159,6 @@ def eqProfile (selfLoop : Bool) (queries : Fin 6 → RawQuery q)
 def canonicalSlot (selfLoop : Bool) (queries : Fin 6 → RawQuery q) (i : Fin 6) : Fin 6 :=
   Fin.find (fun j => eqProfile selfLoop queries j i = true) ⟨i, eqProfile_refl _ _ _⟩
 
-theorem canonicalSlot_profile (selfLoop : Bool) (queries : Fin 6 → RawQuery q)
-    (i : Fin 6) : eqProfile selfLoop queries (canonicalSlot selfLoop queries i) i = true := by
-  unfold canonicalSlot
-  exact Fin.find_spec (p := fun j => eqProfile selfLoop queries j i = true)
-    ⟨i, eqProfile_refl _ _ _⟩
-
-theorem canonicalSlot_le (selfLoop : Bool) (queries : Fin 6 → RawQuery q)
-    (i j : Fin 6) (h : eqProfile selfLoop queries j i = true) :
-    canonicalSlot selfLoop queries i ≤ j :=
-  Fin.find_le_of_pos ⟨i, eqProfile_refl _ _ _⟩ h
 
 def RepeatedConsistent (selfLoop : Bool) (queries : Fin 6 → RawQuery q)
     (label : QueryIncidence.Label 6) : Prop :=
@@ -227,13 +197,6 @@ def relation (P : Fin q → Fin q → Bool) (selfLoop : Bool)
         slot orientation (Enumeration.labelEquiv.symm a) (Enumeration.labelEquiv.symm b) := by
   exact GraphTables.relationAt_relationOf _ _ _
 
-theorem relation_reverse (P : Fin q → Fin q → Bool) (selfLoop : Bool)
-    (event : AlphabetGraph.LocalEvent (Fin q)) (slot : Fin 6) (orientation : Bool)
-    (a b : GraphTables.Label) :
-    GraphTables.relationAt (relation P selfLoop event slot (!orientation)) b a =
-      GraphTables.relationAt (relation P selfLoop event slot orientation) a b := by
-  simp only [relationAt_relation]
-  cases orientation <;> rfl
 
 /-- The old predicate is read in the same row-major order as a graph row. -/
 def oldPredicate (old : Vector Bool (q * q)) (a b : Fin q) : Bool :=
@@ -246,10 +209,6 @@ def relationFromTable (old : Vector Bool (q * q)) (selfLoop : Bool)
 @[simp] theorem oldPredicate_relationAt (old : GraphTables.RelationTable)
     (a b : GraphTables.Label) : oldPredicate old a b = GraphTables.relationAt old a b := rfl
 
-theorem relationFromTable_eq (old : GraphTables.RelationTable) (selfLoop : Bool)
-    (event : AlphabetGraph.LocalEvent (Fin 64)) (slot : Fin 6) (orientation : Bool) :
-    relationFromTable old selfLoop event slot orientation =
-      relation (GraphTables.relationAt old) selfLoop event slot orientation := rfl
 
 section Semantics
 

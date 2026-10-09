@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
@@ -56,35 +57,6 @@ noncomputable def kernelError (g : Data C) {P : Type}
     [AddCommGroup P] [Module F2 P] (S : g.Ambient →ₗ[F2] P) : ℚ :=
   Finset.univ.expect (kernelIndicator g S)
 
-theorem stabilityError_nonneg (g : Data C) : 0 ≤ stabilityError g := by
-  classical
-  apply Finset.expect_nonneg
-  intro sample _
-  unfold failureIndicator
-  split <;> decide
-
-theorem stabilityError_le_one (g : Data C) : stabilityError g ≤ 1 := by
-  classical
-  apply Finset.expect_le Finset.univ_nonempty
-  intro sample _
-  unfold failureIndicator
-  split <;> decide
-
-theorem kernelError_nonneg (g : Data C) {P : Type}
-    [AddCommGroup P] [Module F2 P] (S : g.Ambient →ₗ[F2] P) : 0 ≤ kernelError g S := by
-  classical
-  apply Finset.expect_nonneg
-  intro i _
-  unfold kernelIndicator
-  split <;> decide
-
-theorem kernelError_le_one (g : Data C) {P : Type}
-    [AddCommGroup P] [Module F2 P] (S : g.Ambient →ₗ[F2] P) : kernelError g S ≤ 1 := by
-  classical
-  apply Finset.expect_le Finset.univ_nonempty
-  intro i _
-  unfold kernelIndicator
-  split <;> decide
 
 /-- The actual identity leaf, with every symbol vector used once as noise. -/
 def leaf (C : Type) [AddCommGroup C] [Module F2 C] [Fintype C] : Data C where
@@ -102,12 +74,6 @@ def Satisfies (g : Data C) (ζ ν : ℚ) (r : Nat) : Prop :=
   ∀ (P : Type) [AddCommGroup P] [Module F2 P] (S : g.Ambient →ₗ[F2] P),
     r ≤ Module.finrank F2 (S.comp g.embed).range → kernelError g S ≤ ν
 
-/-- The mathematical existence target. -/
-def StableNonlinearDispersion : Prop :=
-  ∀ ζ ν : ℚ, 0 < ζ → ζ < 1 → 0 < ν → ν < 1 →
-    ∃ r : Nat, 1 ≤ r ∧
-      ∀ s : Nat, r ≤ s →
-        ∃ g : Data (UniqueGamesTheorem.Integration.BinaryLinear.Vector s), Satisfies g ζ ν r
 
 end UniqueGamesTheorem.Gadget.ActualGadget
 
@@ -147,13 +113,6 @@ theorem count_probability_eq_expect {Ω : Type*} [Fintype Ω] (p : Ω → Prop) 
   simp only [Enlargement.probability, Nat.card_eq_fintype_card, Fintype.card_subtype,
     Finset.card_filter, Nat.cast_sum, Nat.cast_ite, Nat.cast_one, Nat.cast_zero]
 
-theorem count_probability_eq_harmonic {Ω : Type*} [Fintype Ω] (p : Ω → Prop)
-    [DecidablePred p] : Enlargement.probability p = Harmonic.probability p := by
-  rw [count_probability_eq_expect]
-  unfold Harmonic.probability Harmonic.average
-  apply Finset.expect_congr rfl
-  intro x _
-  split_ifs <;> rfl
 
 theorem stabilityError_toData (s : Stage (ZMod 2) C) (embed : C →ₗ[ZMod 2] s.Input)
     (hinj : Function.Injective embed)

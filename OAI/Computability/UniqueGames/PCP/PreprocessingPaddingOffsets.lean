@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.PreprocessingRegularTablesLemmas
 
 namespace OAI
@@ -53,12 +54,6 @@ theorem sigma_idxOf {A : Type*} [DecidableEq A] (sizes : A → Nat)
 def offset {n : Nat} (padding : Fin n → Nat) (k : Nat) : Nat :=
   (((List.finRange n).take k).map padding).sum
 
-theorem sigma_length {A : Type*} (sizes : A → Nat) (xs : List A) :
-    (xs.sigma (fun x => List.finRange (sizes x))).length = (xs.map sizes).sum := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp [List.sigma_cons, ih]
-
 theorem paddingOrder_val {n : Nat} (padding : Fin n → Nat)
     (v : Fin n) (j : Fin (padding v)) :
     (PreprocessingRegularTables.paddingOrder padding ⟨v, j⟩).val =
@@ -79,10 +74,9 @@ theorem vertexOrder_dummy_val (t : GraphTables.Table)
 
 theorem offset_all {n : Nat} (padding : Fin n → Nat) :
     offset padding n = ∑ v, padding v := by
-  have ht : (List.finRange n).take n = List.finRange n := by simp
   unfold offset
-  rw [ht, ← sigma_length padding (List.finRange n)]
-  exact paddingList_length padding
+  rw [List.take_of_length_le (by simp)]
+  exact (Fin.sum_univ_def padding).symm
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingPaddingOffsets
 

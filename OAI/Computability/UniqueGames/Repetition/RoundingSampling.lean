@@ -1,5 +1,7 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Analysis.SpecificLimits.Basic
-import OAI.Computability.UniqueGames.Games.SelectedCommonMarginalLemmas
+import OAI.Computability.UniqueGames.Foundations.LabelBound
+import OAI.Computability.UniqueGames.Foundations.ValueLemmas
 
 namespace OAI
 
@@ -18,10 +20,28 @@ namespace UniqueGamesTheorem.Repetition
 
 open UniqueGamesTheorem.Foundations.Games
 open UniqueGamesTheorem.Foundations.CorrelatedSampling
-open UniqueGamesTheorem.Foundations.Repetition
 open scoped BigOperators
 
 noncomputable section
+
+/-- The existing finite trace average commutes with an independent edge law;
+no second representation of proposal sequences is needed. -/
+theorem traceAverage_expectation {S E : Type*} [Fintype S] [Fintype E]
+    (w : S → ℝ) (ν : FiniteDistribution E) (n : ℕ) (f : E → List S → ℝ) :
+    traceAverage w n (fun xs => ν.expectation (fun e => f e xs)) =
+      ν.expectation (fun e => traceAverage w n (f e)) := by
+  induction n generalizing f with
+  | zero => rfl
+  | succ n ih =>
+      simp only [traceAverage]
+      simp_rw [ih (fun e xs => f e (_ :: xs))]
+      simp only [FiniteDistribution.expectation, Finset.mul_sum]
+      rw [Finset.sum_comm]
+      apply Finset.sum_congr rfl
+      intro e _
+      apply Finset.sum_congr rfl
+      intro s _
+      ring
 
 variable {V S A : Type*} [Fintype V] [Fintype S] [Fintype A]
 
@@ -48,10 +68,6 @@ private theorem expectation_mono' {Ω : Type*} [Fintype Ω]
   apply Finset.sum_le_sum
   intro x _
   exact mul_le_mul_of_nonneg_left (h x) (μ.nonnegative x)
-
-private theorem expectation_const' {Ω : Type*} [Fintype Ω]
-    (μ : FiniteDistribution Ω) (c : ℝ) : μ.expectation (fun _ => c) = c := by
-  simp [FiniteDistribution.expectation, ← Finset.sum_mul, μ.normalized]
 
 omit [Fintype V] [Fintype S] [Fintype A] in
 private theorem first_good_relation_le (accept : V → S → Bool)
@@ -205,8 +221,7 @@ theorem exists_labeling_ge_partial {E : Type*} [Fintype E] [Nonempty V] [Nonempt
   have hbounded (n : Nat) :
       2 * (ν.expectation (partialEdgeMass μ accept label left right R) / density) - 1 -
         (1 - density) ^ n ≤ partialLabelScore ν left right R best := by
-    let seeds := traceSeedLaw μ n
-    let sample := fun seed => partialSample accept label fallback (traceList n seed)
+    let sample := partialSample accept label fallback
     have hpoint (e : E) := partialSample_pair_lower μ accept label (fun _ _ => R e)
       fallback density hdensity₀ hdensity (left e) (right e) n
     change ∀ e : E, 2 * (partialEdgeMass μ accept label left right R e / density) - 1 -
@@ -219,16 +234,14 @@ theorem exists_labeling_ge_partial {E : Type*} [Fintype E] [Nonempty V] [Nonempt
         ν.expectation (fun e => traceAverage μ.weight n (fun proposals =>
           if R e (partialSample accept label fallback proposals (left e))
             (partialSample accept label fallback proposals (right e)) then 1 else 0)) =
-        seeds.expectation (fun seed => partialLabelScore ν left right R (sample seed)) := by
-      simp_rw [← traceSeedLaw_expectation μ n]
-      rw [FiniteDistribution.expectation_comm]
-      apply FiniteDistribution.expectation_congr
-      intro seed
-      simp [partialLabelScore, FiniteDistribution.probability,
-        FiniteDistribution.expectation, sample, mul_ite]
+        traceAverage μ.weight n (fun xs => partialLabelScore ν left right R (sample xs)) := by
+      rw [← traceAverage_expectation]
+      simp only [partialLabelScore, FiniteDistribution.probability,
+        FiniteDistribution.expectation, sample, mul_ite, mul_one, mul_zero]
     rw [hswitch] at hlower
-    have hupper := expectation_mono' seeds (fun seed => hmax (sample seed))
-    rw [expectation_const'] at hupper
+    have hupper := traceAverage_mono μ.weight μ.nonnegative n _ _
+      (fun xs => hmax (sample xs))
+    rw [traceAverage_const μ.weight μ.normalized] at hupper
     exact hlower.trans hupper
   refine ⟨best, ?_⟩
   have hdensity₁ : density ≤ 1 := by

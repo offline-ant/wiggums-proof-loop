@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.ActualAdviceUpperLemmas
 import OAI.Computability.UniqueGames.Decoding.VisiblePoliciesLemmas
 
@@ -28,13 +29,6 @@ local instance homFintype {D F : Type*}
     [AddCommGroup D] [Module F2 D] [AddCommGroup F] [Module F2 F]
     [Fintype D] [Fintype F] : Fintype (D →ₗ[F2] F) :=
   Fintype.ofInjective (fun M : D →ₗ[F2] F => (M : D → F)) DFunLike.coe_injective
-
-/-- The universe finset is independent of the chosen finite enumeration.
-The instances are explicit so elaboration need not unfold either enumeration. -/
-private theorem univ_congr {X : Type*} (i j : Fintype X) :
-    @Finset.univ X i = @Finset.univ X j := by
-  cases Subsingleton.elim i j
-  rfl
 
 variable {k s d r : ℕ}
 
@@ -177,41 +171,20 @@ def selectedPrivateEquiv (S : Source)
         ((normalizedResponse S labeling α hα hsmall (datumLeft S data) hgood).columns.map
           (datumProjection S data)) (datumMatrix S data Nstar) := by
   let D := normalizedDescription S labeling α hα hsmall (datumLeft S data) hgood
-  let e := AdviceFibers.rowFiberEquiv data.1.2 data.2.2.2.val
+  let e := AdviceFibers.rowFiberEquiv data.1.2
+    (data.1.2.comp (datumMatrix S data Nstar))
     (AdviceFibers.observedBase data.1.2 data.2.2.2)
-    (AdviceFibers.observedBase_property data.1.2 data.2.2.2)
+    ((AdviceFibers.observedBase_property data.1.2 data.2.2.2).trans
+      (datumMatrix_rows S data Nstar).symm)
   have hs : mapEquiv k s ((datumMatrix S data Nstar).comp (datumProjection S data)) ∈ D.toSlice.points :=
     (slice_assemble_iff S labeling α hα hsmall data hgood Nstar).mp hstar
-  have hrow (N : AdviceLaw.PrivateMap data) :
-      data.1.2.comp (datumMatrix S data N) = data.1.2.comp (datumMatrix S data Nstar) := by
-    rw [datumMatrix_rows, datumMatrix_rows]
-  let lift := fun M : RowErasureSliceQuotient.AffineSlice data.1.2
-      ((normalizedResponse S labeling α hα hsmall (datumLeft S data) hgood).columns.map
-        (datumProjection S data)) (datumMatrix S data Nstar) =>
-    e.symm ⟨M.val, M.property.1.trans (datumMatrix_rows S data Nstar)⟩
-  have hlift (M) : datumMatrix S data (lift M) = M.val :=
-    congrArg Subtype.val (e.apply_symm_apply ⟨M.val, M.property.1.trans (datumMatrix_rows S data Nstar)⟩)
-  refine {
-    toFun := fun N => ⟨datumMatrix S data N.val, hrow N.val, ?_⟩
-    invFun := fun M => ⟨lift M, ?_⟩
-    left_inv := ?_
-    right_inv := ?_ }
-  · exact (ProjectedColumnSlice.contains_padded_iff D data.1.2
+  refine (e.subtypeEquiv ?_).trans (Equiv.subtypeSubtypeEquivSubtypeInter _ _)
+  intro N
+  exact (slice_assemble_iff S labeling α hα hsmall data hgood N).trans
+    (ProjectedColumnSlice.contains_padded_iff D data.1.2
       (normalizedDescription_spec S labeling α hα hsmall (datumLeft S data) hgood).1
       (datumProjection S data) (datumMatrix S data Nstar) hs
-      (datumMatrix S data N.val) (hrow N.val)).mp
-        ((slice_assemble_iff S labeling α hα hsmall data hgood N.val).mp N.property)
-  · apply (slice_assemble_iff S labeling α hα hsmall data hgood (lift M)).mpr
-    rw [hlift]
-    exact (ProjectedColumnSlice.contains_padded_iff D data.1.2
-      (normalizedDescription_spec S labeling α hα hsmall (datumLeft S data) hgood).1
-      (datumProjection S data) (datumMatrix S data Nstar) hs M.val M.property.1).mpr M.property.2
-  · intro N
-    apply Subtype.ext
-    exact e.symm_apply_apply N.val
-  · intro M
-    apply Subtype.ext
-    exact hlift M
+      (datumMatrix S data N) (e N).property)
 
 @[simp] theorem selectedPrivateEquiv_val (S : Source)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
@@ -259,40 +232,13 @@ theorem conditional_eq_transferred (S : Source)
       ((normalizedResponse S labeling α hα hsmall (datumLeft S data) hgood).columns.map
         (datumProjection S data)) (datumMatrix S data Nstar)) :=
     SelectedDecoding.affineSliceFintype _ _ _
-  let f : {N : AdviceLaw.PrivateMap data //
-      slice S k s d r labeling α (AdviceLaw.completeAssemble data N) = true} → ℝ :=
-    fun N => if targetHit S k s d r labeling α (AdviceLaw.completeAssemble data N.val) = true
-      then 1 else 0
-  let g : RowErasureSliceQuotient.AffineSlice data.1.2
-      ((normalizedResponse S labeling α hα hsmall (datumLeft S data) hgood).columns.map
-        (datumProjection S data)) (datumMatrix S data Nstar) → ℝ :=
-    fun M => if TableKeysRestoration.projectedAnswer S k s d labeling
-        (PaddedLaw.choiceMask data.2.1)
-        (RawPrivateTable.supported (PaddedLaw.choiceMask data.2.1) (ActualGame.names S)
-          data.1.1 (PaddedLaw.choiceSlots data.2.1)) (M.val.prod data.2.2.1) =
-        M.val (datumProjection S data
-          (normalizedResponse S labeling α hα hsmall (datumLeft S data) hgood).coefficient) +
-          (normalizedDescription S labeling α hα hsmall (datumLeft S data) hgood).intercept
-      then 1 else 0
-  have he : (𝔼 N, f N) = 𝔼 M, g M := by
-    refine Fintype.expect_equiv
-      (selectedPrivateEquiv S labeling α hα hsmall data hgood Nstar hstar) f g ?_
-    intro N
-    dsimp only [f, g]
-    simp only [selectedPrivateEquiv_val]
-    exact TransferredDecoding.indicator_congr _ _ _ _
-      (target_assemble_iff S labeling α hα hsmall data hgood N.val N.property)
-  calc
-    _ = 𝔼 N, f N := by
-      apply Finset.expect_congr (by ext N; simp only [Finset.mem_univ])
-      intro N _
-      exact TransferredDecoding.indicator_congr _ _ _ _ Iff.rfl
-    _ = 𝔼 M, g M := he
-    _ = _ := by
-      unfold SelectedDecoding.transferredAgreement
-      apply Finset.expect_congr (univ_congr _ _)
-      intro M _
-      exact TransferredDecoding.indicator_congr _ _ _ _ Iff.rfl
+  unfold SelectedDecoding.transferredAgreement
+  refine Fintype.expect_equiv
+    (selectedPrivateEquiv S labeling α hα hsmall data hgood Nstar hstar) _ _ ?_
+  intro N
+  simp only [selectedPrivateEquiv_val]
+  exact TransferredDecoding.indicator_congr _ _ _ _
+    (target_assemble_iff S labeling α hα hsmall data hgood N.val N.property)
 
 /-- Every complete visible datum selected by the actual witness event pays the
 private-decoding success constant. Good advice and a nonempty transferred

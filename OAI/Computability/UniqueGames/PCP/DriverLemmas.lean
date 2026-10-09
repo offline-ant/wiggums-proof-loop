@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.CleanupLemmas
 import OAI.Computability.UniqueGames.PCP.CompareLoop
 import OAI.Computability.UniqueGames.PCP.EmitRows
@@ -123,9 +124,6 @@ def afterReversal (base : Tape → List Bool) (word : List Bool) : Tape → List
     afterReversal base word .output = word := by
   simp [afterReversal, Reduction.MachineTransfer.tapesAt]
 
-@[simp] theorem afterReversal_reversed (base : Tape → List Bool) (word : List Bool) :
-    afterReversal base word .reversed = [] := by
-  simp [afterReversal, Reduction.MachineTransfer.tapesAt]
 
 def finishBudget (base : Tape → List Bool) (word : List Bool) : Nat :=
   word.length + 1 + (∑ i : Fin 15, (afterReversal base word (cleanupPorts i)).length) + 16

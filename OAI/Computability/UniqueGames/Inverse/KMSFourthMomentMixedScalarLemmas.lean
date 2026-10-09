@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Lean.Elab.Tactic.Omega
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Order.Archimedean.Real.Basic
@@ -124,16 +125,10 @@ def beta : ℕ := Nat.card {J : I →ₗ[F2] E // Function.Injective J}
 /-- A domain basis turns injective maps into independent image families. -/
 def injectiveEquivIndependent {ι : Type*} (b : Module.Basis ι F2 I) :
     {J : I →ₗ[F2] E // Function.Injective J} ≃
-      {s : ι → E // LinearIndependent F2 s} where
-  toFun J := ⟨J.val ∘ b, b.linearIndependent.map' J.val (LinearMap.ker_eq_bot.mpr J.property)⟩
-  invFun s := ⟨b.constr F2 s.val, b.injective_constr_of_linearIndependent s.property⟩
-  left_inv J := by
-    apply Subtype.ext
-    exact b.constr_self F2 J.val
-  right_inv s := by
-    apply Subtype.ext
-    funext i
-    exact b.constr_basis F2 s.val i
+      {s : ι → E // LinearIndependent F2 s} :=
+  (b.constr F2).symm.toEquiv.subtypeEquiv fun J =>
+    ⟨fun h => b.linearIndependent.map' J (LinearMap.ker_eq_bot.mpr h),
+      fun h => by simpa using b.injective_constr_of_linearIndependent (R₂ := F2) h⟩
 
 /-- Exact binary injection count, including the zero-dimensional domain. -/
 theorem beta_eq_product [FiniteDimensional F2 I] [Finite E]
@@ -198,9 +193,6 @@ theorem beta_ge_pow (hdim : Module.finrank F2 I ≤ Module.finrank F2 E) :
       intro j _
       exact binary_factor_lower j.isLt hdim
 
-theorem beta_positive (hdim : Module.finrank F2 I ≤ Module.finrank F2 E) :
-    0 < beta I E :=
-  lt_of_lt_of_le (Nat.pow_pos (by decide)) (beta_ge_pow I E hdim)
 
 theorem beta_self_le [Finite I] :
     beta I I ≤ 2 ^ (Module.finrank F2 I * Module.finrank F2 I) :=
@@ -229,45 +221,15 @@ theorem pow_dim_mul_le_pow_sq_mul_beta
     (hdim : Module.finrank F2 I ≤ Module.finrank F2 E) :
     (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 E) ≤
       (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) * (beta I E : ℝ) := by
-  have hexp : Module.finrank F2 I * Module.finrank F2 I +
-      Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I) =
-      Module.finrank F2 I * Module.finrank F2 E := by
-    rw [← Nat.mul_add, Nat.add_sub_of_le hdim]
-  have hnat : 2 ^ (Module.finrank F2 I * Module.finrank F2 E) ≤
-      2 ^ (Module.finrank F2 I * Module.finrank F2 I) * beta I E := by
-    calc
-      _ = 2 ^ (Module.finrank F2 I * Module.finrank F2 I) *
-          2 ^ (Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I)) := by
-        rw [← pow_add, hexp]
-      _ ≤ _ := Nat.mul_le_mul_left _ (beta_ge_pow I E hdim)
-  exact_mod_cast hnat
-
-/-- The small-to-ambient injection ratio, with the full ambient exponent. -/
-theorem beta_ratio_le_pow [Finite I]
-    (hdim : Module.finrank F2 I ≤ Module.finrank F2 E) :
-    (beta I I : ℝ) / (beta I E : ℝ) ≤
-      (2 : ℝ) ^ (2 * (Module.finrank F2 I * Module.finrank F2 I)) /
-        (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 E) := by
-  have hb : 0 < (beta I E : ℝ) := by exact_mod_cast beta_positive I E hdim
-  have hp : 0 < (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 E) :=
-    pow_pos (by norm_num) _
-  have hq : 0 ≤ (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) :=
-    pow_nonneg (by norm_num) _
-  have hself : (beta I I : ℝ) ≤
-      (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) := by
-    exact_mod_cast beta_self_le I
-  apply (div_le_div_iff₀ hb hp).mpr
+  have h : (2 : ℝ) ^ (Module.finrank F2 I *
+      (Module.finrank F2 E - Module.finrank F2 I)) ≤ (beta I E : ℝ) := by
+    exact_mod_cast beta_ge_pow I E hdim
   calc
-    _ ≤ (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) *
-        (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 E) :=
-      mul_le_mul_of_nonneg_right hself hp.le
-    _ ≤ (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) *
-        ((2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) * (beta I E : ℝ)) :=
-      mul_le_mul_of_nonneg_left (pow_dim_mul_le_pow_sq_mul_beta I E hdim) hq
-    _ = _ := by
-      rw [← mul_assoc, ← pow_add]
-      congr 2
-      omega
+    _ = (2 : ℝ) ^ (Module.finrank F2 I * Module.finrank F2 I) *
+        2 ^ (Module.finrank F2 I * (Module.finrank F2 E - Module.finrank F2 I)) := by
+      rw [← pow_add, ← Nat.mul_add, Nat.add_sub_of_le hdim]
+    _ ≤ _ := mul_le_mul_of_nonneg_left h (by positivity)
+
 
 /-- Convert a count-weighted energy identity into a clean dimension bound. -/
 theorem pow_mul_le_of_beta_cross_mul [Finite I]
@@ -429,21 +391,9 @@ variable {F E I J : Type*}
 injective linear maps. -/
 def injectionEquivOfDomainEquiv (e : J ≃ₗ[F2] I) :
     {u : J →ₗ[F2] E // Function.Injective u} ≃
-      {u : I →ₗ[F2] E // Function.Injective u} where
-  toFun u := ⟨u.val.comp e.symm.toLinearMap, u.property.comp e.symm.injective⟩
-  invFun u := ⟨u.val.comp e.toLinearMap, u.property.comp e.injective⟩
-  left_inv u := by
-    apply Subtype.ext
-    apply LinearMap.ext
-    intro x
-    change u.val (e.symm (e x)) = u.val x
-    rw [e.symm_apply_apply]
-  right_inv u := by
-    apply Subtype.ext
-    apply LinearMap.ext
-    intro x
-    change u.val (e (e.symm x)) = u.val x
-    rw [e.apply_symm_apply]
+      {u : I →ₗ[F2] E // Function.Injective u} :=
+  (e.arrowCongr (LinearEquiv.refl F2 E)).toEquiv.subtypeEquiv fun u =>
+    (e.symm.toEquiv.injective_comp u).symm
 
 variable [FiniteDimensional F2 F] [FiniteDimensional F2 I]
 
@@ -455,26 +405,13 @@ def fixedKernelEquivInjection (K : KernelClass F I) :
   (fixedKernelEquivQuotientInjection K.val).trans
     (injectionEquivOfDomainEquiv (quotientEquiv K))
 
-/-- Exact fixed-kernel count, without a chosen finite enumeration. -/
-theorem natCard_fixedKernel_eq_beta (K : KernelClass F I) :
-    Nat.card {S : F →ₗ[F2] E // S.ker = K.val} = beta I E :=
-  Nat.card_congr (fixedKernelEquivInjection K)
-
 /-- The kernel condition already forces the rank condition. -/
 def rankFiberEquivFixedKernel (K : KernelClass F I) :
     {S : RankFrequency F E I // rankKernel S = K} ≃
-      {S : F →ₗ[F2] E // S.ker = K.val} where
-  toFun S := ⟨S.val.val, congrArg Subtype.val S.property⟩
-  invFun S := ⟨⟨S.val,
-    (fixedKernel_finrank_eq_quotient K.val S).trans K.property⟩,
-    Subtype.ext S.property⟩
-  left_inv S := by
-    apply Subtype.ext
-    apply Subtype.ext
-    rfl
-  right_inv S := by
-    apply Subtype.ext
-    rfl
+      {S : F →ₗ[F2] E // S.ker = K.val} :=
+  (Equiv.subtypeEquivRight fun _ => Subtype.ext_iff).trans
+    (Equiv.subtypeSubtypeEquivSubtype (q := fun S : F →ₗ[F2] E => S.ker = K.val)
+      fun h => (fixedKernel_finrank_eq_quotient K.val ⟨_, h⟩).trans K.property)
 
 omit [FiniteDimensional F2 F] in
 /-- A map into the comparison space with this kernel has full range. -/
@@ -488,45 +425,25 @@ theorem surjective_of_kernel_class (K : KernelClass F I)
 space. -/
 def fullFiberEquivFixedKernel (K : KernelClass F I) :
     {T : FullFrequency F I // fullKernel T = K} ≃
-      {T : F →ₗ[F2] I // T.ker = K.val} where
-  toFun T := ⟨T.val.val, congrArg Subtype.val T.property⟩
-  invFun T := ⟨⟨T.val, surjective_of_kernel_class K T.val T.property⟩,
-    Subtype.ext T.property⟩
-  left_inv T := by
-    apply Subtype.ext
-    apply Subtype.ext
-    rfl
-  right_inv T := by
-    apply Subtype.ext
-    rfl
+      {T : F →ₗ[F2] I // T.ker = K.val} :=
+  (Equiv.subtypeEquivRight fun _ => Subtype.ext_iff).trans
+    (Equiv.subtypeSubtypeEquivSubtype (surjective_of_kernel_class K _))
 
 /-- Every rank-frequency kernel fiber has the same actual cardinality. -/
 theorem rankKernel_fiber_card [Fintype (F →ₗ[F2] E)]
     (K : KernelClass F I) :
     (Finset.univ.filter (fun S : RankFrequency F E I => rankKernel S = K)).card =
       beta I E := by
-  calc
-    _ = Fintype.card {S : RankFrequency F E I // rankKernel S = K} :=
-      (Fintype.card_subtype _).symm
-    _ = Nat.card {S : RankFrequency F E I // rankKernel S = K} :=
-      Nat.card_eq_fintype_card.symm
-    _ = Nat.card {S : F →ₗ[F2] E // S.ker = K.val} :=
-      Nat.card_congr (rankFiberEquivFixedKernel K)
-    _ = beta I E := natCard_fixedKernel_eq_beta K
+  rw [← Fintype.card_subtype, ← Nat.card_eq_fintype_card]
+  exact Nat.card_congr ((rankFiberEquivFixedKernel K).trans (fixedKernelEquivInjection K))
 
 /-- Every surjective-frequency kernel fiber has the square injection count. -/
 theorem fullKernel_fiber_card [Fintype (F →ₗ[F2] I)]
     (K : KernelClass F I) :
     (Finset.univ.filter (fun T : FullFrequency F I => fullKernel T = K)).card =
       beta I I := by
-  calc
-    _ = Fintype.card {T : FullFrequency F I // fullKernel T = K} :=
-      (Fintype.card_subtype _).symm
-    _ = Nat.card {T : FullFrequency F I // fullKernel T = K} :=
-      Nat.card_eq_fintype_card.symm
-    _ = Nat.card {T : F →ₗ[F2] I // T.ker = K.val} :=
-      Nat.card_congr (fullFiberEquivFixedKernel K)
-    _ = beta I I := natCard_fixedKernel_eq_beta K
+  rw [← Fintype.card_subtype, ← Nat.card_eq_fintype_card]
+  exact Nat.card_congr ((fullFiberEquivFixedKernel K).trans (fixedKernelEquivInjection K))
 
 end
 end UniqueGamesTheorem.Inverse.KMSKernelFiberCard
@@ -559,12 +476,7 @@ def rangeEquivOfKerEq (S T : F →ₗ[K] E) (hker : S.ker = T.ker) :
 the kernel and maps of rank zero. -/
 theorem rangeEquivOfKerEq_apply (S T : F →ₗ[K] E) (hker : S.ker = T.ker) (x : F) :
     (rangeEquivOfKerEq S T hker ⟨S x, ⟨x, rfl⟩⟩ : E) = T x := by
-  change (T.quotKerEquivRange ((Submodule.quotEquivOfEq S.ker T.ker hker)
-    (S.quotKerEquivRange.symm ⟨S x, ⟨x, rfl⟩⟩)) : E) = T x
-  have hs : (⟨S x, ⟨x, rfl⟩⟩ : S.range) =
-      S.quotKerEquivRange (Submodule.Quotient.mk x) := rfl
-  rw [hs, LinearEquiv.symm_apply_apply]
-  rfl
+  simp [rangeEquivOfKerEq, ← LinearMap.quotKerEquivRange_apply_mk]
 
 /-- Finite-dimensional image suffices: the ambient codomain and domain may
 otherwise be infinite-dimensional. -/
@@ -578,16 +490,6 @@ theorem exists_postcomp_equiv_of_ker_eq (S T : F →ₗ[K] E)
   change g (S x) = T x
   exact (hg ⟨S x, ⟨x, rfl⟩⟩).symm.trans (rangeEquivOfKerEq_apply S T hker x)
 
-/-- Invertible postcomposition never changes the kernel. Thus the kernel is
-an exact orbit invariant, rather than only a necessary condition. -/
-theorem ker_eq_iff_exists_postcomp_equiv (S T : F →ₗ[K] E)
-    [FiniteDimensional K S.range] :
-    S.ker = T.ker ↔ ∃ g : E ≃ₗ[K] E, g.toLinearMap.comp S = T := by
-  constructor
-  · exact exists_postcomp_equiv_of_ker_eq S T
-  · rintro ⟨g, rfl⟩
-    ext x
-    simp
 
 end
 end UniqueGamesTheorem.Inverse.KMSKernelOrbits
@@ -627,26 +529,9 @@ theorem boolean_fourth_holder {f : X → ℝ} (hf : IsBoolean f) (g : X → ℝ)
     (𝔼 x, g x * f x) ^ 4 ≤ (𝔼 x, g x ^ 4) * (𝔼 x, f x) ^ 3 := by
   have h₁ := Finset.expect_mul_sq_le_sq_mul_sq Finset.univ
     (fun x => g x * f x) f
-  have hleft : (𝔼 x, (g x * f x) * f x) = 𝔼 x, g x * f x := by
-    apply Finset.expect_congr rfl
-    intro x _
-    calc
-      _ = g x * f x ^ 2 := by ring
-      _ = _ := by rw [boolean_sq hf]
-  have hright : (𝔼 x, (g x * f x) ^ 2) = 𝔼 x, g x ^ 2 * f x := by
-    apply Finset.expect_congr rfl
-    intro x _
-    rw [mul_pow, boolean_sq hf]
-  rw [hleft, hright, boolean_squared_average hf] at h₁
+  simp only [mul_assoc, ← sq, mul_pow, boolean_sq hf] at h₁
   have h₂ := Finset.expect_mul_sq_le_sq_mul_sq Finset.univ (fun x => g x ^ 2) f
-  have hpow : (𝔼 x, (g x ^ 2) ^ 2) = 𝔼 x, g x ^ 4 := by
-    apply Finset.expect_congr rfl
-    intro x _
-    ring
-  rw [hpow, boolean_squared_average hf] at h₂
-  have hδ := boolean_average_nonneg hf
-  have hweighted : 0 ≤ 𝔼 x, g x ^ 2 * f x :=
-    Finset.expect_nonneg fun x _ => mul_nonneg (sq_nonneg _) (boolean_nonneg hf x)
+  simp only [← pow_mul, boolean_sq hf] at h₂
   have hsquare := mul_self_le_mul_self (sq_nonneg (𝔼 x, g x * f x)) h₁
   have hscaled := mul_le_mul_of_nonneg_right h₂ (sq_nonneg (𝔼 x, f x))
   nlinarith only [hsquare, hscaled]
@@ -685,102 +570,12 @@ theorem fourth_root_power {ε : ℝ} (hε : 0 ≤ ε) :
   norm_num
 
 theorem le_of_fourth_power_le {a b : ℝ} (_ha : 0 ≤ a) (hb : 0 ≤ b)
-    (h : a ^ 4 ≤ b ^ 4) : a ≤ b := by
-  by_contra hle
-  have hlt : b < a := lt_of_not_ge hle
-  have := pow_lt_pow_left₀ hlt hb (by decide : (4 : ℕ) ≠ 0)
-  exact (not_lt_of_ge h) this
+    (h : a ^ 4 ≤ b ^ 4) : a ≤ b :=
+  le_of_pow_le_pow_left₀ (by decide) hb h
 
-theorem lowLevel_bound_of_fourthMoment {f : X → ℝ} (hf : IsBoolean f)
-    (g : X → ℝ) (r : ℕ) (ε : ℝ) (hε : 0 ≤ ε)
-    (hprojection : (𝔼 x, g x ^ 2) = 𝔼 x, g x * f x)
-    (hupper : (𝔼 x, g x ^ 4) ≤
-      (2 : ℝ) ^ (25 * r ^ 3) * (𝔼 x, g x ^ 2) * ε) :
-    (𝔼 x, g x ^ 2) ≤
-      (2 : ℝ) ^ (7 * r ^ 3 + 3) * ε ^ ((1 : ℝ) / 4) * (𝔼 x, f x) := by
-  let η : ℝ := 𝔼 x, g x ^ 2
-  let δ : ℝ := 𝔼 x, f x
-  have hη : 0 ≤ η := Finset.expect_nonneg fun x _ => sq_nonneg _
-  have hδ : 0 ≤ δ := boolean_average_nonneg hf
-  have hlow := projection_fifth_le_density_fourth_moment hf g hprojection
-  change η ^ 5 ≤ δ ^ 4 * (𝔼 x, g x ^ 4) at hlow
-  have hupper' := mul_le_mul_of_nonneg_left hupper (pow_nonneg hδ 4)
-  have hsmall : η ^ 4 ≤ (2 : ℝ) ^ (25 * r ^ 3) * ε * δ ^ 4 := by
-    by_cases hz : η = 0
-    · simpa only [hz, zero_pow (by decide : (4 : ℕ) ≠ 0)] using
-        mul_nonneg (mul_nonneg (pow_nonneg (by norm_num : (0 : ℝ) ≤ 2) _) hε)
-          (pow_nonneg hδ 4)
-    · have hηpos : 0 < η := lt_of_le_of_ne hη (Ne.symm hz)
-      apply (mul_le_mul_iff_right₀ hηpos).mp
-      nlinarith only [hlow, hupper']
-  have hexponent : 25 * r ^ 3 ≤ (7 * r ^ 3 + 3) * 4 := by omega
-  have hconstant : (2 : ℝ) ^ (25 * r ^ 3) ≤
-      ((2 : ℝ) ^ (7 * r ^ 3 + 3)) ^ 4 := by
-    rw [← pow_mul]
-    exact pow_le_pow_right₀ (by norm_num) hexponent
-  apply le_of_fourth_power_le hη (by positivity)
-  calc
-    η ^ 4 ≤ (2 : ℝ) ^ (25 * r ^ 3) * ε * δ ^ 4 := hsmall
-    _ ≤ ((2 : ℝ) ^ (7 * r ^ 3 + 3)) ^ 4 * ε * δ ^ 4 := by
-      exact mul_le_mul_of_nonneg_right
-        (mul_le_mul_of_nonneg_right hconstant hε) (pow_nonneg hδ 4)
-    _ = _ := by rw [mul_pow, mul_pow, fourth_root_power hε]
 
 end
 end UniqueGamesTheorem.Inverse.KMSMomentScalar
-
-end
-
-section
-
-/-! Dimension-independent choices for the KMS low-level/spectral contradiction.
-These are scalar choices only; they do not supply the upper moment theorem. -/
-
-namespace UniqueGamesTheorem.Inverse.KMSLowLevel
-noncomputable section
-open KMSMomentScalar
-
-/-- The level cutoff and pseudorandomness tolerance are selected before either
-matrix dimension. The inequality leaves half the retention budget for model
-comparison errors. -/
-theorem exists_cutoff_parameters {ζ : ℝ} (hζ : 0 < ζ) :
-    ∃ r : ℕ, 1 ≤ r ∧ ∃ ε : ℝ, 0 < ε ∧ ε ≤ 1 ∧
-      (r + 1 : ℕ) * ((2 : ℝ) ^ (7 * r ^ 3 + 3) * ε ^ ((1 : ℝ) / 4)) +
-        ((2 : ℝ) ^ (r + 1))⁻¹ ≤ ζ / 2 := by
-  obtain ⟨N, hN⟩ := exists_pow_lt_of_lt_one
-    (show (0 : ℝ) < ζ / 4 by positivity) (show (1 / 2 : ℝ) < 1 by norm_num)
-  let r := max 1 N
-  let C : ℝ := (2 : ℝ) ^ (7 * r ^ 3 + 3)
-  let t : ℝ := min 1 (ζ / (4 * (r + 1 : ℕ) * C))
-  let ε : ℝ := t ^ 4
-  have hC : 0 < C := by dsimp [C]; positivity
-  have hr : 1 ≤ r := le_max_left _ _
-  have hden : 0 < 4 * (r + 1 : ℕ) * C := by positivity
-  have ht : 0 < t := lt_min (by norm_num) (div_pos hζ hden)
-  have ht1 : t ≤ 1 := min_le_left _ _
-  have hε : 0 < ε := pow_pos ht _
-  have hε1 : ε ≤ 1 := pow_le_one₀ ht.le ht1
-  have hroot : ε ^ ((1 : ℝ) / 4) = t := by
-    have hpow : (ε ^ ((1 : ℝ) / 4)) ^ 4 = t ^ 4 := fourth_root_power hε.le
-    have hroot_nonneg : 0 ≤ ε ^ ((1 : ℝ) / 4) := Real.rpow_nonneg hε.le _
-    exact le_antisymm (le_of_fourth_power_le hroot_nonneg ht.le hpow.le)
-      (le_of_fourth_power_le ht.le hroot_nonneg hpow.symm.le)
-  have hlow : (r + 1 : ℕ) * (C * ε ^ ((1 : ℝ) / 4)) ≤ ζ / 4 := by
-    rw [hroot]
-    have ht' : t ≤ ζ / (4 * (r + 1 : ℕ) * C) := min_le_right _ _
-    have hm := (le_div_iff₀ hden).mp ht'
-    nlinarith only [hm]
-  have htail : ((2 : ℝ) ^ (r + 1))⁻¹ < ζ / 4 := by
-    have hmon : (1 / 2 : ℝ) ^ (r + 1) ≤ (1 / 2 : ℝ) ^ N :=
-      pow_le_pow_of_le_one (by norm_num) (by norm_num)
-        (le_trans (le_max_right 1 N) (Nat.le_succ r))
-    simpa only [one_div, inv_pow] using hmon.trans_lt hN
-  refine ⟨r, hr, ε, hε, hε1, ?_⟩
-  change (r + 1 : ℕ) * (C * ε ^ ((1 : ℝ) / 4)) + _ ≤ ζ / 2
-  linarith
-
-end
-end UniqueGamesTheorem.Inverse.KMSLowLevel
 
 end
 

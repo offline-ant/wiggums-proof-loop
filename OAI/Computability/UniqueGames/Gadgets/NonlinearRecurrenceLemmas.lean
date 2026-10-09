@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.LinearAlgebra.Pi
@@ -240,14 +241,6 @@ theorem noise_change_iff (s : Stage k B) (u : s.Input) (t : s.Noise) :
       s.output (u + s.noise t) ≠ s.output u :=
   Quotient.change_iff (shifts s) (logical s) s.output (equivariant s) u (s.noise t)
 
-theorem character_logical (s : Stage k B) (g : Space s →ₗ[k] k) (h : s.Shift) :
-    (g.comp (projection s)) (s.embed h) = (g.comp (shift s)) (s.logical h) := by
-  simp only [LinearMap.comp_apply, shift_logical]
-
-theorem noise_detection_iff {I : Type*} (s : Stage k B)
-    (family : I → Space s →ₗ[k] k) (t : s.Noise) :
-    (∃ i, family i (noise s t) ≠ 0) ↔
-      ∃ i, (family i).comp (projection s) (s.noise t) ≠ 0 := Iff.rfl
 
 /-- The quotient is again a finite stage; its logical map is now the identity. -/
 noncomputable def toStage [Finite B] (s : Stage k B) : Stage k B where

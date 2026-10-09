@@ -1,9 +1,9 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Data.Fintype.Pi
 import Mathlib.Data.Fintype.Prod
 import Mathlib.Basic.Real.Basic
 import Mathlib.Logic.Equiv.Prod
-import Mathlib.Tactic.FieldSimp
 import Mathlib.Tactic.NormNum
 import Mathlib.Tactic.Positivity
 import OAI.Computability.UniqueGames.PCP.AlphabetRetractionLemmas
@@ -43,11 +43,6 @@ def decodeLabeling {vertices : Nat} (d n : Nat) (labels : EncodedLabeling vertic
     RawLabeling vertices d n :=
   fun v => decodeLabel d (n + 1) 64 (labels v)
 
-@[simp] theorem decodeLabeling_encodeLabeling {vertices : Nat} (d n : Nat)
-    (labels : RawLabeling vertices d n) :
-    decodeLabeling d n (encodeLabeling d n labels) = labels := by
-  funext v
-  exact decodeLabel_encodeLabel d (n + 1) 64 (labels v)
 
 @[simp] theorem encodeLabeling_decodeLabeling {vertices : Nat} (d n : Nat)
     (labels : EncodedLabeling vertices d n) :
@@ -68,33 +63,6 @@ theorem edgeSatisfied_encoded {vertices d : Nat} (input : PortTables.Table verti
     GenericGraphTables.enumeratedGraph_edgeSatisfied (mathematicalGraph input n)
       (Equiv.refl _) (dartEquiv vertices d n) (paddedLabelEquiv d (n + 1) 64) labels e
 
-/-- The equality also holds for every encoded assignment and every stored row. -/
-theorem edgeSatisfied_decoded {vertices d : Nat} (input : PortTables.Table vertices d)
-    (n : Nat) (labels : EncodedLabeling vertices d n) (i : Fin (dartCount vertices d n)) :
-    (GenericGraphTables.semantics (table input n)).edgeSatisfied labels i =
-      (mathematicalGraph input n).edgeSatisfied (decodeLabeling d n labels)
-        (decodeDart vertices d n i) := by
-  have h := edgeSatisfied_encoded input n (decodeLabeling d n labels)
-    (decodeDart vertices d n i)
-  erw [encodeLabeling_decodeLabeling d n labels,
-    encodeDart_decodeDart vertices d n i] at h
-  exact h
-
-/-- The stored Boolean test is exactly the path test at the recorded endpoints. -/
-theorem edgeSatisfied_eq_path {vertices d : Nat} (input : PortTables.Table vertices d)
-    (n : Nat) (labels : EncodedLabeling vertices d n) (direction : Bool)
-    (w : Walk (Fin vertices) (Fin d) (n + 1)) :
-    (GenericGraphTables.semantics (table input n)).edgeSatisfied labels
-      (encodeDart vertices d n (direction, w)) =
-    PoweringTest.pathAccepts (PortTables.portGraph input) (PortTables.accepts input) n
-      (finitePortSelector (PortTables.portGraph input) (n + 1)) w
-      (decodeLabeling d n labels w.1)
-      (decodeLabeling d n labels (endpoint (PortTables.portGraph input) w)) := by
-  rw [edgeSatisfied_decoded input n labels (encodeDart vertices d n (direction, w)),
-    decodeDart_encodeDart vertices d n (direction, w)]
-  exact PoweringTest.poweredGraph_edgeSatisfied (PortTables.portGraph input)
-    (PortTables.accepts input) n (finitePortSelector (PortTables.portGraph input) (n + 1))
-    (decodeLabeling d n labels) direction w
 
 /-- Exact rejected-dart counting, retaining both orientations and repeated walks. -/
 theorem rejectionCount_encoded {vertices d : Nat} (input : PortTables.Table vertices d)
@@ -127,19 +95,10 @@ theorem card_darts_eq_table {vertices d : Nat} (input : PortTables.Table vertice
 theorem satisfiable_iff {vertices d : Nat} (input : PortTables.Table vertices d) (n : Nat) :
     (GenericGraphTables.semantics (table input n)).Satisfiable ↔
       (mathematicalGraph input n).Satisfiable := by
-  constructor
-  · rintro ⟨labels, satisfies⟩
-    refine ⟨decodeLabeling d n labels, ?_⟩
-    intro e
-    have h := edgeSatisfied_encoded input n (decodeLabeling d n labels) e
-    erw [encodeLabeling_decodeLabeling d n labels] at h
-    exact h.symm.trans (satisfies (encodeDart vertices d n e))
-  · rintro ⟨labels, satisfies⟩
-    refine ⟨encodeLabeling d n labels, ?_⟩
-    intro i
-    have h := edgeSatisfied_encoded input n labels (decodeDart vertices d n i)
-    rw [encodeDart_decodeDart vertices d n i] at h
-    exact h.trans (satisfies (decodeDart vertices d n i))
+  classical
+  rw [semantics_table]
+  exact (mathematicalGraph input n).satisfiable_reindex (Equiv.refl _)
+    (dartEquiv vertices d n) (paddedLabelEquiv d (n + 1) 64)
 
 /-- Perfect completeness from the actual stored base predicates. -/
 theorem preserves_satisfiability {vertices d : Nat} (input : PortTables.Table vertices d)
@@ -150,21 +109,6 @@ theorem preserves_satisfiability {vertices d : Nat} (input : PortTables.Table ve
     (PortTables.accepts input) (PortTables.accepts_rotation input) n
     (finitePortSelector (PortTables.portGraph input) (n + 1)) h
 
-/-- The path rejection average equals the encoded table's actual rejection fraction. -/
-theorem path_rejection_mean_eq_table_fraction {vertices d : Nat}
-    (input : PortTables.Table vertices d) (n : Nat) (labels : EncodedLabeling vertices d n) :
-    SpectralReturn.mean (fun w : Walk (Fin vertices) (Fin d) (n + 1) =>
-      PoweringMoment.bit
-        (PoweringTest.pathAccepts (PortTables.portGraph input) (PortTables.accepts input) n
-          (finitePortSelector (PortTables.portGraph input) (n + 1)) w
-          (decodeLabeling d n labels w.1)
-          (decodeLabeling d n labels (endpoint (PortTables.portGraph input) w)) = false)) =
-      ((GenericGraphTables.semantics (table input n)).rejectionCount labels : ℝ) /
-        ((table input n).darts : ℝ) := by
-  rw [rejectionCount_decoded input n labels, ← card_darts_eq_table input n]
-  exact PoweringCounting.path_rejection_mean_eq_count (PortTables.portGraph input)
-    (PortTables.accepts input) n (finitePortSelector (PortTables.portGraph input) (n + 1))
-    (decodeLabeling d n labels)
 
 /-- Uniform actual rejection-count gaps are invariant under the executable encoding. -/
 theorem uniform_count_gap_iff {vertices d : Nat} (input : PortTables.Table vertices d)
@@ -258,15 +202,10 @@ theorem endpoint_lower_bound [Fintype V] [Fintype D] [Nonempty D]
     unfold endpointWitness
     rw [mean_edge_endpoints G n k (fun e x => bit (bad e = true) * φ e x) ψ]
     simp_rw [iterate_mul_const]
-  have hbitMean : mean (fun e : Edge V D => bit (bad e = true)) = edgeDensity bad := by
-    calc
-      _ = mean (fun v : V => mean (fun d : D => bit (bad (v, d) = true))) :=
-        mean_prod (A := V) (B := D) (fun e => bit (bad e = true))
-      _ = edgeDensity bad := by simp only [mean_edge_bit, edgeDensity]
   calc
     edgeDensity bad * a ^ 2 =
         mean (fun e : Edge V D => bit (bad e = true) * a ^ 2) := by
-      rw [mean_mul_right, hbitMean]
+      rw [mean_mul_right, ← PoweringCounting.edgeDensity_eq_bit_mean]
     _ ≤ mean (fun e : Edge V D =>
         (bit (bad e = true) * iterateOperator G k.val (φ e) e.1) *
           iterateOperator G (n - k.val) (ψ e) (next G e.1 e.2)) := by
@@ -668,38 +607,19 @@ theorem cut_density_ge_quarter
   have hprod := mul_nonneg hp0 (sub_nonneg.mpr hp)
   nlinarith
 
-/-- The real cardinal estimate before removing denominators. -/
-theorem cut_card_ge_quarter_degree
-    (certificate : SpectralCertificate G (1/2)) (S : Finset V)
-    (hsmall : 2 * S.card ≤ Fintype.card V) :
-    (Fintype.card D : ℝ) * (S.card : ℝ) / 4 ≤ ((cut G S).card : ℝ) := by
-  have hN : (0:ℝ) < Fintype.card V := by exact_mod_cast Fintype.card_pos
-  have hD : (0:ℝ) < Fintype.card D := by exact_mod_cast Fintype.card_pos
-  have h := cut_density_ge_quarter G certificate S hsmall
-  rw [Fintype.card_prod, Nat.cast_mul] at h
-  have hh := (le_div_iff₀ (mul_pos hN hD)).mp h
-  have he : mean (indicator S) / 4 *
-      ((Fintype.card V : ℝ) * (Fintype.card D : ℝ)) =
-        (Fintype.card D : ℝ) * (S.card : ℝ) / 4 := by
-    rw [mean_indicator]
-    field_simp [ne_of_gt hN]
-  rw [he] at hh
-  exact hh
-
 theorem degree_mul_card_le_four_cut
     (certificate : SpectralCertificate G (1/2)) (S : Finset V)
     (hsmall : 2 * S.card ≤ Fintype.card V) :
     Fintype.card D * S.card ≤ 4 * (cut G S).card := by
-  have h := cut_card_ge_quarter_degree G certificate S hsmall
-  have hr : (Fintype.card D : ℝ) * (S.card : ℝ) ≤ 4 * ((cut G S).card : ℝ) := by
-    linarith
-  exact_mod_cast hr
+  have hN : (0 : ℝ) < Fintype.card V := Nat.cast_pos.mpr Fintype.card_pos
+  have hD : (0 : ℝ) < Fintype.card D := Nat.cast_pos.mpr Fintype.card_pos
+  have h := cut_density_ge_quarter G certificate S hsmall
+  rw [mean_indicator, Fintype.card_prod, Nat.cast_mul, div_right_comm,
+    mul_comm (Fintype.card V : ℝ), ← div_div, div_le_div_iff_of_pos_right hN,
+    div_le_div_iff₀ (by norm_num : (0 : ℝ) < 4) hD] at h
+  exact_mod_cast (by simpa only [mul_comm] using h :
+    (Fintype.card D : ℝ) * S.card ≤ 4 * (cut G S).card)
 
-theorem cut_card_ge_quarter_degree_of_card_le_half
-    (certificate : SpectralCertificate G (1/2)) (S : Finset V)
-    (hsmall : S.card ≤ Fintype.card V / 2) :
-    (Fintype.card D : ℝ) * (S.card : ℝ) / 4 ≤ ((cut G S).card : ℝ) :=
-  cut_card_ge_quarter_degree G certificate S (by omega)
 end Nonempty
 
 /-- The natural-number expansion used in cloud rounding. Empty vertex sets
@@ -745,8 +665,6 @@ variable [DecidablePred p]
 def extend (g : {b // p b} → Bool) : B → Bool :=
   fun b => if hb : p b then g ⟨b, hb⟩ else false
 
-/-- Replace the values outside the legal coordinates by false. -/
-def canonicalize (f : B → Bool) : B → Bool := extend p (restrict p f)
 
 omit [DecidablePred p] in
 @[simp] theorem restrict_apply (f : B → Bool) (b : {b // p b}) :
@@ -756,38 +674,12 @@ omit [DecidablePred p] in
     extend p g b = g ⟨b, hb⟩ := by
   simp [extend, hb]
 
-@[simp] theorem extend_apply_of_not_mem (g : {b // p b} → Bool) (b : B)
-    (hb : ¬ p b) : extend p g b = false := by
-  simp [extend, hb]
 
 @[simp] theorem restrict_extend (g : {b // p b} → Bool) :
     restrict p (extend p g) = g := by
   funext b
   simp [restrict, extend, b.property]
 
-@[simp] theorem canonicalize_apply_of_mem (f : B → Bool) (b : B) (hb : p b) :
-    canonicalize p f b = f b := by
-  simp [canonicalize, hb]
-
-@[simp] theorem canonicalize_apply_of_not_mem (f : B → Bool) (b : B)
-    (hb : ¬ p b) : canonicalize p f b = false := by
-  simp [canonicalize, hb]
-
-@[simp] theorem restrict_canonicalize (f : B → Bool) :
-    restrict p (canonicalize p f) = restrict p f := by
-  exact restrict_extend p (restrict p f)
-
-@[simp] theorem canonicalize_idempotent (f : B → Bool) :
-    canonicalize p (canonicalize p f) = canonicalize p f := by
-  simp only [canonicalize, restrict_extend]
-
-theorem canonicalize_eq_iff (f g : B → Bool) :
-    canonicalize p f = canonicalize p g ↔ restrict p f = restrict p g := by
-  constructor
-  · intro h
-    simpa only [restrict_canonicalize] using congrArg (restrict p) h
-  · intro h
-    exact congrArg (extend p) h
 
 variable [Fintype B] [DecidableEq B]
 
@@ -808,22 +700,6 @@ theorem expect_restrict (h : ({b // p b} → Bool) → ℝ) :
     _ = 𝔼 g : {b // p b} → Bool, h g := by
       simp only [Fintype.expect_const]
 
-/-- The same law after choosing the canonical full-domain oracle address. -/
-theorem expect_canonicalize (h : (B → Bool) → ℝ) :
-    (𝔼 f : B → Bool, h (canonicalize p f)) =
-      𝔼 g : {b // p b} → Bool, h (extend p g) :=
-  expect_restrict p (fun g => h (extend p g))
-
-/-- Two independent full tapes restrict to two independent uniform legal tapes. -/
-theorem expect_restrict_pair (h : ({b // p b} → Bool) → ({b // p b} → Bool) → ℝ) :
-    (𝔼 f : B → Bool, 𝔼 g : B → Bool, h (restrict p f) (restrict p g)) =
-      𝔼 f : {b // p b} → Bool, 𝔼 g : {b // p b} → Bool, h f g := by
-  calc
-    _ = 𝔼 f : B → Bool, 𝔼 g : {b // p b} → Bool, h (restrict p f) g := by
-      apply Finset.expect_congr rfl
-      intro f _
-      exact expect_restrict p (h (restrict p f))
-    _ = _ := expect_restrict p (fun f => 𝔼 g : {b // p b} → Bool, h f g)
 
 end UniqueGamesTheorem.Foundations.PCP.UniformRestriction
 

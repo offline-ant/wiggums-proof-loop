@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Ring
 import OAI.Computability.UniqueGames.Machines.MachinePaddedOverlayRuntimeLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalBody
@@ -14,17 +15,11 @@ open Turing MachineComposition PCP PreprocessingCloudIndex PreprocessingRegularT
 open PreprocessingMachineBounds MachineRegularOriginalBody
 
 noncomputable def wide : Polynomial Nat := Polynomial.C (ExpanderFamily.growth + 1) * Polynomial.X
-noncomputable def rowPolynomial (q : Nat) : Polynomial Nat :=
-  wide + wide * Polynomial.C (q + 1) + 8192
-noncomputable def outputPolynomial (q : Nat) : Polynomial Nat :=
-  wide + Polynomial.C q * rowPolynomial q
-noncomputable def corePolynomial (q : Nat) : Polynomial Nat :=
-  Polynomial.C (5*q+32) * rotorPolynomial q + 10*wide + 2*wide + 13*wide + 5*wide +
-    Polynomial.C (5*q+10)*(wide+wide) + 4*wide + 2*outputPolynomial q +
-      Polynomial.C (8*q+41066)
+/-- Evaluate the same semiring cost expression at polynomial inputs. -/
 noncomputable def blockPolynomial (q : Nat) : Polynomial Nat :=
-  Polynomial.C q * corePolynomial q + Polynomial.C (5*q+20)*wide +
-    2*outputPolynomial q + Polynomial.C (5*q+40995)
+  MachineRegularVertexBlock.originalTimeBound (Polynomial.C q) wide (rotorPolynomial q)
+    wide wide wide wide wide wide wide wide
+
 noncomputable def cleanupPolynomial (q : Nat) : Polynomial Nat := 6*wide + rotorPolynomial q + 13
 noncomputable def timePolynomial : Polynomial Nat :=
   MachineRegularMetadata.timePolynomial + MachineRegularExecutionBounds.familyPolynomial +
@@ -41,12 +36,11 @@ theorem blockPolynomial_eval (q L : Nat) :
         ((ExpanderFamily.growth+1)*L) ((ExpanderFamily.growth+1)*L)
         ((ExpanderFamily.growth+1)*L) ((ExpanderFamily.growth+1)*L)
         ((ExpanderFamily.growth+1)*L) ((ExpanderFamily.growth+1)*L) := by
-  simp only [blockPolynomial, corePolynomial, outputPolynomial, rowPolynomial, wide,
+  simp only [blockPolynomial, wide,
     Polynomial.eval_add, Polynomial.eval_mul, Polynomial.eval_C, Polynomial.eval_X,
-    Polynomial.eval_ofNat, MachineRegularVertexBlock.originalTimeBound,
+    Polynomial.eval_ofNat, Polynomial.eval_one, MachineRegularVertexBlock.originalTimeBound,
     MachineRegularVertexBlock.portTimeBound, MachineRegularInternalRow.coreTimeBound,
     MachineRegularOriginalClean.timeBound, MachineRegularVertexBlock.rowSizeBound]
-  ring
 
 theorem originalTimeBound_le (q L R x v i k o m O V W R' : Nat)
     (hL : L ≤ W) (hR : R ≤ R') (hx : x ≤ W) (hv : v ≤ W)
@@ -151,15 +145,6 @@ theorem totalSteps_le (H : PreprocessingRegularTables.BaseTable) (t : GraphTable
   simp only [totalSteps, familySteps, timePolynomial, Polynomial.eval_add]
   omega
 
-noncomputable def originalInTime (H : PreprocessingRegularTables.BaseTable) (t : GraphTables.Table) (e : Fin t.darts)
-    (output : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program H))
-      (cfg H (some entry) (initialData t e output))
-      (some (cfg H none (initialData t e (output ++ emittedBits H t e))))
-      (timePolynomial.eval (bodySize t output)) where
-  steps := totalSteps H t e output
-  evals_in_steps := originalTrace H t e output
-  steps_le_m := totalSteps_le H t e output
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOriginalBodyBounds
 

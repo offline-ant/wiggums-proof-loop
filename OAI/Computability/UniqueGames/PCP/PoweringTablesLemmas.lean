@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.PoweringMachineRow
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.GenericGraphTables
@@ -129,24 +130,13 @@ open PoweringOpinionTables PoweringEnumeration
 variable {vertices d : Nat}
 
 /-- The row machine scans the same increasing address-index order. -/
-theorem firstMatch_of_first {S : Nat} (mask : Fin S → Bool) (i : Fin S)
-    (hi : mask i = true) (hfirst : ∀ j : Fin S, j.val < i.val → mask j = false) :
-    firstMatch mask = some i := by
-  unfold firstMatch
-  apply List.find?_ofFn_eq_some.mpr
-  refine ⟨hi, i, rfl, ?_⟩
-  intro j hj
-  change ¬mask j = true
-  simp [hfirst j hj]
-
 theorem firstMatch_firstIndex {X : Type*} (p : X → Prop) [DecidablePred p]
     (xs : List X) (h : ∃ a ∈ xs, p a) :
     firstMatch (fun i : Fin xs.length => decide (p (xs.get i))) =
       some (firstIndex p xs h) := by
-  apply firstMatch_of_first
-  · exact decide_eq_true (firstIndex_matches p xs h)
-  · intro j hj
-    exact decide_eq_false (firstIndex_is_first p xs h j hj)
+  apply (List.find?_ofFn_eq_some_of_injective Function.injective_id).mpr
+  refine ⟨List.findIdx_getElem (p := fun a => decide (p a)), fun j hj => ?_⟩
+  exact Bool.eq_false_iff.mp (List.not_of_lt_findIdx hj)
 
 /-- An actual endpoint comparison; it has no reachability oracle input. -/
 def endpointMask (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
@@ -322,12 +312,6 @@ theorem rowBits_packData (input : PortTables.Table vertices d) (n : Nat)
   cases direction <;> funext i <;>
     simp [rowBits, rowData, transposeBits, walkBits, packData]
 
-@[simp] theorem rowBits_field (input : PortTables.Table vertices d) (n : Nat)
-    (e : PoweringTest.Dart (Fin vertices) (Fin d) n)
-    (k : Fin (n + 1)) (field : Field (slotCount d n)) :
-    rowBits input n e (inputEquiv (n + 1) (slotCount d n) (k, field)) =
-      rowData input n e k field := by
-  rw [rowBits_packData, packData_inputEquiv]
 
 /-- No match-mask or base-relation premise remains in the evaluator bridge. -/
 theorem rowAccept_rowBits (input : PortTables.Table vertices d) (n : Nat)
@@ -340,13 +324,6 @@ theorem rowAccept_rowBits (input : PortTables.Table vertices d) (n : Nat)
     simp only [rowBits, Bool.false_eq_true, ite_false, ite_true,
       rowAccept_transposeBits, rowAccept_walkBits, PoweringTables.rowAccepts]
 
-theorem rowBlock_at_rowBits (input : PortTables.Table vertices d) (n : Nat)
-    (e : PoweringTest.Dart (Fin vertices) (Fin d) n)
-    (a b : Fin (PoweringTables.labelCount d n)) :
-    rowBlock (fixedLabelAt d n) (rowBits input n e)
-        (GenericGraphTables.relationIndex (PoweringTables.labelCount d n) (a, b)) =
-      PoweringTables.rowAccepts input n e a b := by
-  rw [rowBlock_at, rowAccept_rowBits]
 
 def dataWords (input : PortTables.Table vertices d) (n : Nat)
     (e : PoweringTest.Dart (Fin vertices) (Fin d) n) : List Nat :=
@@ -361,30 +338,12 @@ theorem dataTape_eq (input : PortTables.Table vertices d) (n : Nat)
     dataTape input n e = encodeBits (List.ofFn (rowBits input n e)) :=
   (encodeBits_graphWords _).symm
 
-theorem dataWords_length (input : PortTables.Table vertices d) (n : Nat)
-    (e : PoweringTest.Dart (Fin vertices) (Fin d) n) :
-    (dataWords input n e).length = (n + 1) * (4096 + (slotCount d n + slotCount d n)) := by
-  rw [dataWords, List.length_map]
-  simpa only [inputSize] using (List.length_ofFn (f := rowBits input n e))
-
-theorem dataTape_length_le (input : PortTables.Table vertices d) (n : Nat)
-    (e : PoweringTest.Dart (Fin vertices) (Fin d) n) :
-    (dataTape input n e).length ≤ 2 * inputSize (n + 1) (slotCount d n) := by
-  rw [dataTape_eq]
-  simpa only [List.length_ofFn] using encodeBits_length_le (List.ofFn (rowBits input n e))
 
 def emittedRelation (input : PortTables.Table vertices d) (n : Nat)
     (e : PoweringTest.Dart (Fin vertices) (Fin d) n) :
     GenericGraphTables.RelationTable (PoweringTables.labelCount d n) :=
   Vector.ofFn (rowBlock (fixedLabelAt d n) (rowBits input n e))
 
-theorem emittedRelation_eq (input : PortTables.Table vertices d) (n : Nat)
-    (e : PoweringTest.Dart (Fin vertices) (Fin d) n) :
-    emittedRelation input n e = GenericGraphTables.relationOf (PoweringTables.rowAccepts input n e) := by
-  unfold emittedRelation GenericGraphTables.relationOf
-  apply congrArg Vector.ofFn
-  funext i
-  exact rowAccept_rowBits input n e _ _
 
 theorem rowBlock_unary (input : PortTables.Table vertices d) (n : Nat)
     (e : PoweringTest.Dart (Fin vertices) (Fin d) n) :
@@ -408,50 +367,10 @@ theorem emittedRelation_table (input : PortTables.Table vertices d) (n : Nat)
   have h := PoweringTables.table_accepts input n i
     ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).1
     ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).2
-  have hindex : GenericGraphTables.relationIndex (PoweringTables.labelCount d n)
-      (((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).1,
-        ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).2) =
-        ⟨j, hj⟩ := by
-    change GenericGraphTables.relationIndex (PoweringTables.labelCount d n)
-      ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩) = _
-    exact Equiv.apply_symm_apply _ _
-  simp only [GenericGraphTables.acceptsAt, GenericGraphTables.relationAt, hindex,
-    Fin.getElem_fin] at h
-  simp only [emittedRelation, Vector.getElem_ofFn]
-  change rowBlock (fixedLabelAt d n) (rowBits input n (decodeDart vertices d n i)) ⟨j, hj⟩ =
-    (PoweringTables.table input n).rows[i].relation[j]
-  change rowAccept (fixedLabelAt d n) (rowBits input n (decodeDart vertices d n i))
-    ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).1
-    ((GenericGraphTables.relationIndex (PoweringTables.labelCount d n)).symm ⟨j, hj⟩).2 = _
-  rw [rowAccept_rowBits]
-  exact h.symm
+  simpa only [emittedRelation, Vector.getElem_ofFn, rowBlock, rowAccept_rowBits,
+    GenericGraphTables.acceptsAt, GenericGraphTables.relationAt, Prod.mk.eta,
+    Equiv.apply_symm_apply, Fin.getElem_fin] using! h.symm
 
-theorem rowBlock_unary_table (input : PortTables.Table vertices d) (n : Nat)
-    (i : Fin (PoweringTables.dartCount vertices d n)) :
-    encodeBits (List.ofFn (rowBlock (fixedLabelAt d n)
-      (rowBits input n (decodeDart vertices d n i)))) =
-      encodeWords (GenericGraphTables.relationWords (PoweringTables.table input n).rows[i].relation) := by
-  rw [rowBlock_unary, emittedRelation_table]
-
-/-- With the actual computed data on its input tape, the existing finite row
-machine emits precisely the serialized relation of the actual output table.
-The unread input suffix and prior output tape are preserved as specified. -/
-def tableRowMachineInTime (input : PortTables.Table vertices d) (n : Nat)
-    (i : Fin (PoweringTables.dartCount vertices d n)) (suffix : List Bool)
-    (register : RowBuffer d n) (tapes : Bool → List Bool)
-    (hinput : tapes false = dataTape input n (decodeDart vertices d n i) ++ suffix) :
-    StateTransition.EvalsToInTime (PoweringMachineRow.machine (t := n + 1) (fixedLabelAt d n)).step
-      ⟨some (), ((), register), tapes⟩
-      (some ⟨none, ((), emptyBuffer (inputSize (n + 1) (slotCount d n))),
-        Function.update (Function.update tapes false suffix) true
-          (encodeWords (GenericGraphTables.relationWords
-            (PoweringTables.table input n).rows[i].relation) ++ tapes true)⟩) 1 := by
-  have hinput' : tapes false =
-      encodeBits (List.ofFn (rowBits input n (decodeDart vertices d n i))) ++ suffix := by
-    simpa only [dataTape_eq] using hinput
-  have h := PoweringMachineRow.machineInTime (fixedLabelAt d n)
-    (rowBits input n (decodeDart vertices d n i)) suffix register tapes hinput'
-  simpa only [rowBlock_unary_table] using h
 
 end UniqueGamesTheorem.Foundations.PCP.PoweringRowData
 

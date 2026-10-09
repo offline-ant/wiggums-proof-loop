@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Tactic.Positivity
 import Mathlib.Tactic.Tauto
@@ -75,10 +76,6 @@ theorem pairDimension_eq_zero_iff (p : Submodule F2 V × Submodule F2 W) :
   · intro h
     exact ⟨congrArg Prod.fst h, congrArg Prod.snd h⟩
 
-omit [Finite W] [Finite V] [Fintype (Submodule F2 V)] [Fintype (Submodule F2 W)] in
-theorem pairDimension_pos_iff (p : Submodule F2 V × Submodule F2 W) :
-    0 < pairDimension p ↔ p ≠ (⊥,⊤) := by
-  rw [Nat.pos_iff_ne_zero, ne_eq, pairDimension_eq_zero_iff]
 
 theorem lower_mobius_sum (I : Submodule F2 V) :
     (∑ A : Submodule F2 V, if A ≤ I then mobius (finrank F2 A) else 0) =

@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import Mathlib.Algebra.CharP.Pi
 import Mathlib.Data.Fintype.Card
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.Tactic.FieldSimp
@@ -34,47 +36,16 @@ theorem blockObservable_difference (p u : Vec F × Vec F) :
       ac_rfl
     _ = _ := by rw [vec_add_self, vec_add_self, add_zero, add_zero]
 
-omit [Algebra (ZMod 2) F] in
-theorem blockObservable_difference_parametrized (p : Vec F × Vec F) (a w : Vec F) :
-    blockObservable (p + (a, Q a + w)) + blockObservable p = w + D p.1 a := by
-  rw [blockObservable_difference]
-  change (Q a + w) + Q a + D p.1 a = _
-  have h : (Q a + w) + Q a = w + (Q a + Q a) := by ac_rfl
-  rw [h, vec_add_self, add_zero]
 
 /-- Translation by the polar term permutes the vertical hyperplane. -/
 def hyperplaneNoiseShift (v x a : Vec F) (ha : a ∈ line v) :
-    hyperplane v ≃ hyperplane v where
-  toFun w := ⟨(w : Vec F) + D x a,
-    (hyperplane v).add_mem w.property (D_mem_hyperplane v x a ha)⟩
-  invFun w := ⟨(w : Vec F) + D x a,
-    (hyperplane v).add_mem w.property (D_mem_hyperplane v x a ha)⟩
-  left_inv w := by
-    apply Subtype.ext
-    change ((w : Vec F) + D x a) + D x a = w
-    rw [add_assoc, vec_add_self, add_zero]
-  right_inv w := by
-    apply Subtype.ext
-    change ((w : Vec F) + D x a) + D x a = w
-    rw [add_assoc, vec_add_self, add_zero]
+    hyperplane v ≃ hyperplane v :=
+  Equiv.addRight ⟨D x a, D_mem_hyperplane v x a ha⟩
 
-/-- The polar shear preserves the first coordinate and is its own inverse. -/
+/-- The polar shear preserves the first coordinate. -/
 def noiseParameterShift (v x : Vec F) :
-    (lineBinary v × hyperplaneBinary v) ≃ (lineBinary v × hyperplaneBinary v) where
-  toFun p := (p.1, hyperplaneNoiseShift v x p.1 p.1.property p.2)
-  invFun p := (p.1, hyperplaneNoiseShift v x p.1 p.1.property p.2)
-  left_inv p := by
-    apply Prod.ext
-    · rfl
-    · apply Subtype.ext
-      change ((p.2 : Vec F) + D x p.1) + D x p.1 = p.2
-      rw [add_assoc, vec_add_self, add_zero]
-  right_inv p := by
-    apply Prod.ext
-    · rfl
-    · apply Subtype.ext
-      change ((p.2 : Vec F) + D x p.1) + D x p.1 = p.2
-      rw [add_assoc, vec_add_self, add_zero]
+    (lineBinary v × hyperplaneBinary v) ≃ (lineBinary v × hyperplaneBinary v) :=
+  Equiv.prodCongrRight fun a => hyperplaneNoiseShift v x a a.property
 
 /-- Coordinates in which the nonlinear output difference is just the second
 coordinate, for every fixed input `x`. -/
@@ -87,20 +58,11 @@ theorem blockObservable_difference_eq_noiseCoordinate
       ((blockNoiseCoordinates v p.1 u).2 : Vec F) :=
   blockObservable_difference p u
 
-omit [Algebra (ZMod 2) F] in
-private theorem vec_add_eq_zero_iff (x y : Vec F) : x + y = 0 ↔ x = y := by
-  constructor
-  · intro h
-    have h' := congrArg (fun z : Vec F => z + y) h
-    simpa only [add_assoc, vec_add_self, add_zero, zero_add] using h'
-  · rintro rfl
-    exact vec_add_self _
-
 theorem blockObservable_changes_iff (v : Vec F) (p : Vec F × Vec F) (u : U v) :
     blockObservable (p + (u : Vec F × Vec F)) ≠ blockObservable p ↔
       (blockNoiseCoordinates v p.1 u).2 ≠ 0 := by
   apply not_congr
-  rw [← vec_add_eq_zero_iff, blockObservable_difference_eq_noiseCoordinate]
+  rw [← CharTwo.add_eq_zero, blockObservable_difference_eq_noiseCoordinate]
   constructor
   · intro h
     exact Subtype.ext h

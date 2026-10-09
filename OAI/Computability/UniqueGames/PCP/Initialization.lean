@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.DriverLemmas
 
 namespace OAI
@@ -142,9 +143,6 @@ def headerInTime (input : GenericGraphTables.Table q) :
 
 def time (N : Nat) : Nat := (6 * N + 11) + (7 * (3 * (N + 1) + 3) + 1)
 
-theorem time_eq (N : Nat) : time N = 27 * N + 54 := by
-  unfold time
-  omega
 
 /-- Actual initialization of the complete finite driver, ending at its first
 guard with the exact input, counter, cursor, index, and reversed headers. -/

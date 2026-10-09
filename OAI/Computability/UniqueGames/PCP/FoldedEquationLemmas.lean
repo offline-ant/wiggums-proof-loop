@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
@@ -65,25 +66,6 @@ theorem equation_satisfied (π : J → I) (i₀ : I) (j₀ : J)
   rw [← correction_eq π i₀ j₀ f g μ]
   exact xor_corrections _ _ _ _ _ _
 
-theorem equation_satisfied_iff (π : J → I) (i₀ : I) (j₀ : J)
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J) :
-    satisfied (equation π i₀ j₀ f g μ) (storedAssignment tableA tableB) = true ↔
-      (foldedAnswer i₀ tableA f ^^ foldedAnswer j₀ tableB g ^^
-        foldedAnswer j₀ tableB (thirdQuery π f g μ)) = false := by
-  rw [equation_satisfied]
-  simp
-
-theorem equation_indicator (π : J → I) (i₀ : I) (j₀ : J)
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J) :
-    (if satisfied (equation π i₀ j₀ f g μ) (storedAssignment tableA tableB)
-      then (1 : ℝ) else 0) =
-    (if foldedAnswer i₀ tableA f ^^ foldedAnswer j₀ tableB g ^^
-      foldedAnswer j₀ tableB (thirdQuery π f g μ) then 0 else 1) := by
-  rw [equation_satisfied]
-  cases foldedAnswer i₀ tableA f ^^ foldedAnswer j₀ tableB g ^^
-    foldedAnswer j₀ tableB (thirdQuery π f g μ) <;> rfl
 
 /-- Repeated variable occurrences retain XOR multiplicity and cancel in pairs. -/
 theorem satisfied_repeated_right {Name : Type} (e : Equation Name)
@@ -93,14 +75,6 @@ theorem satisfied_repeated_right {Name : Type} (e : Equation Name)
   rw [← h]
   cases assignment e.first <;> cases assignment e.second <;> cases e.rhs <;> rfl
 
-theorem equation_repeated_right (π : J → I) (i₀ : I) (j₀ : J)
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J)
-    (h : canonicalInput j₀ g = canonicalInput j₀ (thirdQuery π f g μ)) :
-    satisfied (equation π i₀ j₀ f g μ) (storedAssignment tableA tableB) =
-      (tableA (canonicalInput i₀ f) == rhsCorrection π i₀ j₀ f μ) := by
-  apply satisfied_repeated_right
-  exact congrArg Sum.inr h
 
 theorem restrict_thirdQuery (valid : J → Bool) (π : J → I)
     (f : Cube I) (g μ : Cube J) :
@@ -115,10 +89,6 @@ def conditionedEquation (valid : J → Bool) (π : J → I)
     (f : Cube I) (g μ : Cube J) : Equation (Address i₀ j₀) :=
   equation (fun j => π j.val) i₀ j₀ f (restrictQuery valid g) (restrictQuery valid μ)
 
-theorem conditionedEquation_rhs (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true}) (f : Cube I) (g μ : Cube J) :
-    (conditionedEquation valid π i₀ j₀ f g μ).rhs =
-      (f i₀ ^^ f (π j₀.val) ^^ μ j₀.val) := rfl
 
 theorem conditionedEquation_satisfied (valid : J → Bool) (π : J → I)
     (i₀ : I) (j₀ : {j : J // valid j = true})
@@ -131,72 +101,11 @@ theorem conditionedEquation_satisfied (valid : J → Bool) (π : J → I)
   rw [equation_satisfied]
   simp only [conditionedFoldedAnswer, restrict_thirdQuery]
 
-theorem conditionedEquation_satisfied_iff (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true})
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J) :
-    satisfied (conditionedEquation valid π i₀ j₀ f g μ) (storedAssignment tableA tableB) = true ↔
-      (foldedAnswer i₀ tableA f ^^ conditionedFoldedAnswer valid j₀ tableB g ^^
-        conditionedFoldedAnswer valid j₀ tableB (thirdQuery π f g μ)) = false := by
-  rw [conditionedEquation_satisfied]
-  simp
-
-theorem conditionedEquation_indicator (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true})
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J) :
-    (if satisfied (conditionedEquation valid π i₀ j₀ f g μ) (storedAssignment tableA tableB)
-      then (1 : ℝ) else 0) =
-    (if foldedAnswer i₀ tableA f ^^ conditionedFoldedAnswer valid j₀ tableB g ^^
-      conditionedFoldedAnswer valid j₀ tableB (thirdQuery π f g μ) then 0 else 1) := by
-  rw [conditionedEquation_satisfied]
-  cases foldedAnswer i₀ tableA f ^^ conditionedFoldedAnswer valid j₀ tableB g ^^
-    conditionedFoldedAnswer valid j₀ tableB (thirdQuery π f g μ) <;> rfl
-
-theorem conditionedEquation_repeated_right (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true})
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool)
-    (f : Cube I) (g μ : Cube J)
-    (h : canonicalInput j₀ (restrictQuery valid g) =
-      canonicalInput j₀ (restrictQuery valid (thirdQuery π f g μ))) :
-    satisfied (conditionedEquation valid π i₀ j₀ f g μ) (storedAssignment tableA tableB) =
-      (tableA (canonicalInput i₀ f) == (f i₀ ^^ f (π j₀.val) ^^ μ j₀.val)) := by
-  apply satisfied_repeated_right
-  exact congrArg Sum.inr h
 
 variable [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J]
 
 noncomputable section
 
-/-- Actual weighted acceptance of the emitted equation family. -/
-def equationAcceptance (ε : ℝ) (π : J → I) (i₀ : I) (j₀ : J)
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool) : ℝ :=
-  𝔼 f, ∑ μ, noiseWeight ε μ *
-    (𝔼 g, if satisfied (equation π i₀ j₀ f g μ) (storedAssignment tableA tableB)
-      then (1 : ℝ) else 0)
-
-theorem equationAcceptance_eq (ε : ℝ) (π : J → I) (i₀ : I) (j₀ : J)
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool) :
-    equationAcceptance ε π i₀ j₀ tableA tableB =
-      testAcceptance ε π (foldedAnswer i₀ tableA) (foldedAnswer j₀ tableB) := by
-  unfold equationAcceptance testAcceptance
-  simp_rw [equation_indicator]
-
-def conditionedEquationAcceptance (ε : ℝ) (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true})
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool) : ℝ :=
-  𝔼 f, ∑ μ, noiseWeight ε μ *
-    (𝔼 g, if satisfied (conditionedEquation valid π i₀ j₀ f g μ)
-      (storedAssignment tableA tableB) then (1 : ℝ) else 0)
-
-theorem conditionedEquationAcceptance_eq (ε : ℝ) (valid : J → Bool) (π : J → I)
-    (i₀ : I) (j₀ : {j : J // valid j = true})
-    (tableA : HalfCube i₀ → Bool) (tableB : HalfCube j₀ → Bool) :
-    conditionedEquationAcceptance ε valid π i₀ j₀ tableA tableB =
-      testAcceptance ε π (foldedAnswer i₀ tableA)
-        (conditionedFoldedAnswer valid j₀ tableB) := by
-  unfold conditionedEquationAcceptance testAcceptance
-  simp_rw [conditionedEquation_indicator]
 
 end
 
@@ -259,25 +168,6 @@ theorem equation_satisfied (i₀ : I) (assignment : Address i₀ → Bool) (f : 
     !(assignment (.inl (canonicalInput i₀ f)) ^^ f i₀)
   cases assignment (.inl (canonicalInput i₀ f)) <;> cases f i₀ <;> rfl
 
-theorem equation_storedAssignment_satisfied (i₀ : I) (table : HalfCube i₀ → Bool)
-    (dummy : Bool) (f : Cube I) :
-    satisfied (equation i₀ f) (storedAssignment table dummy) =
-      !(foldedAnswer i₀ table f) := equation_satisfied i₀ _ f
-
-/-- Flipping the query preserves all three addresses and reverses the RHS. -/
-theorem equation_flip_first (i₀ : I) (f : Cube I) :
-    (equation i₀ (cubeFlip f)).first = (equation i₀ f).first := by
-  change Sum.inl (canonicalInput i₀ (cubeFlip f)) = Sum.inl (canonicalInput i₀ f)
-  rw [canonicalInput_flip]
-
-theorem equation_flip_rhs (i₀ : I) (f : Cube I) :
-    (equation i₀ (cubeFlip f)).rhs = !(equation i₀ f).rhs := rfl
-
-theorem equation_satisfied_flip (i₀ : I) (assignment : Address i₀ → Bool)
-    (f : Cube I) :
-    satisfied (equation i₀ (cubeFlip f)) assignment =
-      !(satisfied (equation i₀ f) assignment) := by
-  rw [equation_satisfied, foldedAnswer_flip, equation_satisfied]
 
 /-- The two opposite queries give an explicit balanced list of equations. -/
 def pairedEquations (i₀ : I) (f : Cube I) : List (Equation (Address i₀)) :=
@@ -286,70 +176,11 @@ def pairedEquations (i₀ : I) (f : Cube I) : List (Equation (Address i₀)) :=
 @[simp] theorem pairedEquations_length (i₀ : I) (f : Cube I) :
     (pairedEquations i₀ f).length = 2 := rfl
 
-theorem pairedEquations_ne_nil (i₀ : I) (f : Cube I) :
-    pairedEquations i₀ f ≠ [] := by simp [pairedEquations]
-
-/-- Exactly one actual equation in the pair accepts every fixed proof. -/
-theorem pairedEquations_acceptedCount (i₀ : I) (assignment : Address i₀ → Bool)
-    (f : Cube I) :
-    (pairedEquations i₀ f).countP (fun e => satisfied e assignment) = 1 := by
-  simp only [pairedEquations, List.countP_cons, List.countP_nil, equation_satisfied_flip]
-  cases satisfied (equation i₀ f) assignment <;> rfl
-
-theorem pairedEquations_failureCount (i₀ : I) (assignment : Address i₀ → Bool)
-    (f : Cube I) :
-    (pairedEquations i₀ f).countP (fun e => !(satisfied e assignment)) = 1 := by
-  simp only [pairedEquations, List.countP_cons, List.countP_nil, equation_satisfied_flip]
-  cases satisfied (equation i₀ f) assignment <;> rfl
 
 variable [Fintype I] [DecidableEq I]
 
 noncomputable section
 
-def equationAcceptance (i₀ : I) (assignment : Address i₀ → Bool) : ℝ :=
-  𝔼 f : Cube I, if satisfied (equation i₀ f) assignment then (1 : ℝ) else 0
-
-def equationBias (i₀ : I) (assignment : Address i₀ → Bool) : ℝ :=
-  𝔼 f : Cube I, if satisfied (equation i₀ f) assignment then (1 : ℝ) else -1
-
-theorem foldedMean_eq_zero (i₀ : I) (table : HalfCube i₀ → Bool) :
-    (𝔼 f : Cube I, bitSign (foldedAnswer i₀ table f)) = 0 := by
-  simpa [coefficient, walsh, bitSign] using foldedAnswer_zero_coefficient i₀ table
-
-omit [Fintype I] [DecidableEq I] in
-theorem equation_indicator (i₀ : I) (assignment : Address i₀ → Bool) (f : Cube I) :
-    (if satisfied (equation i₀ f) assignment then (1 : ℝ) else 0) =
-      (1 + bitSign (foldedAnswer i₀ (fun h => assignment (.inl h)) f)) / 2 := by
-  rw [equation_satisfied]
-  cases foldedAnswer i₀ (fun h => assignment (.inl h)) f <;> norm_num [bitSign]
-
-/-- Uniform queries accept with probability exactly one half. No right
-folding anchor, valid right assignment, or placeholder response is assumed. -/
-theorem equationAcceptance_eq_half (i₀ : I) (assignment : Address i₀ → Bool) :
-    equationAcceptance i₀ assignment = 1 / 2 := by
-  unfold equationAcceptance
-  simp_rw [equation_indicator, div_eq_mul_inv, ← Finset.expect_mul,
-    Finset.expect_add_distrib, Fintype.expect_const, foldedMean_eq_zero]
-  norm_num
-
-/-- The signed acceptance of the actual emitted equations has zero bias. -/
-theorem equationBias_eq_zero (i₀ : I) (assignment : Address i₀ → Bool) :
-    equationBias i₀ assignment = 0 := by
-  unfold equationBias
-  have hi (f : Cube I) :
-      (if satisfied (equation i₀ f) assignment then (1 : ℝ) else -1) =
-        bitSign (foldedAnswer i₀ (fun h => assignment (.inl h)) f) := by
-    rw [equation_satisfied]
-    cases foldedAnswer i₀ (fun h => assignment (.inl h)) f <;> norm_num [bitSign]
-  simp_rw [hi]
-  exact foldedMean_eq_zero i₀ _
-
-theorem mapped_equationAcceptance_eq_half {Name : Type} (i₀ : I)
-    (rename : Address i₀ → Name) (assignment : Name → Bool) :
-    (𝔼 f : Cube I, if satisfied (mapEquation rename (equation i₀ f)) assignment
-      then (1 : ℝ) else 0) = 1 / 2 := by
-  simp only [satisfied_mapEquation]
-  exact equationAcceptance_eq_half i₀ (assignment ∘ rename)
 
 end
 end EmptyContext

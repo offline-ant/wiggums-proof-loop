@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.PreprocessingRegularLoopWordsLemmas
 
 namespace OAI
@@ -55,16 +56,6 @@ theorem loadSigns_step (base : Tape → List Bool) (a b c : Bool)
   change some (TM2.stepAux (program .loadSigns) state base) = _
   simp only [program, TM2.stepAux, ha, hb, hc, bitWord_head, Option.getD_some]
 
-def loadSignsInTime (base : Tape → List Bool) (a b c : Bool)
-    (ha : base (.field 1) = encodeWord (if a then 1 else 0))
-    (hb : base (.field 3) = encodeWord (if b then 1 else 0))
-    (hc : base (.field 5) = encodeWord (if c then 1 else 0)) (state : State) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some .loadSigns, state, base⟩
-      (some ⟨some (.scan (.tailVariables 0)), ((a, b, c), none), base⟩) 1 where
-  steps := 1
-  evals_in_steps := loadSigns_step base a b c ha hb hc state
-  steps_le_m := Nat.le_refl _
 
 def cleanupFieldInTime (slot : Fin 6) (base : Tape → List Bool) (state : State) :
     StateTransition.EvalsToInTime (TM2.step program)

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.ProdSigma
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.ExpanderRowControlLemmas
@@ -240,18 +241,6 @@ def liftedLabel (t : GraphTables.Table) (padding : Fin t.vertices → Nat)
   fun z => labels (paddedOwner (GraphTables.semantics t) (fun v => Fin (padding v))
     ((vertexOrder t padding).symm z))
 
-theorem rejectionCount_liftedLabel (t : GraphTables.Table)
-    (padding : Fin t.vertices → Nat) {q : Nat}
-    (tables : ∀ v, ExpanderTables.Table
-      (PreprocessingCloudIndex.cloudSize t v + padding v) q)
-    (labels : Fin t.vertices → GraphTables.Label) :
-    (PortTables.baseGraph (ofCloudTables t padding tables)).rejectionCount
-        (liftedLabel t padding labels) = (GraphTables.semantics t).rejectionCount labels := by
-  rw [rejectionCount_ofCloudTables]
-  simp only [liftedLabel, Equiv.symm_apply_apply]
-  convert paddedReplacement_rejectionCount (GraphTables.semantics t)
-    (fun v => Fin (padding v)) (cloudGraphs t padding tables) labels using 1
-  rfl
 
 /-- An empty cloud has a total, vacuous rotation table. -/
 def emptyTable (q : Nat) : ExpanderTables.Table 0 q :=
@@ -289,11 +278,6 @@ theorem vertexCount_le (t : GraphTables.Table) :
     Finset.mul_sum]
   exact Finset.sum_le_sum (fun v _ => (PreprocessingLevels.cloudPaddedSize_bounds _).2)
 
-theorem vertexCount_eq_zero_of_no_darts (t : GraphTables.Table) (h : t.darts = 0) :
-    vertexCount t (padding t) = 0 := by
-  have hle := vertexCount_le t
-  rw [h, Nat.mul_zero] at hle
-  exact Nat.eq_zero_of_le_zero hle
 
 /-- Select the family level by the bounded multiplication search. -/
 def familyCloudTable (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vertices) :
@@ -314,9 +298,6 @@ def regularize (H : BaseTable) (t : GraphTables.Table) :
     PortTables.Table (vertexCount t (padding t)) (internalDegree + 1) :=
   ofCloudTables t (padding t) (familyCloudTable H t)
 
-def regularizeInput (H : BaseTable) (t : GraphTables.Table) :
-    PortTables.Input (internalDegree + 1) :=
-  ⟨vertexCount t (padding t), regularize H t⟩
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingRegularTables
 
@@ -374,25 +355,6 @@ theorem cloudSize_pos_of_dummy (t : GraphTables.Table) (v : Fin t.vertices)
   have hj := j.isLt
   omega
 
-/-- The same positivity fact for the common local coordinate interface. -/
-theorem cloudSize_pos_of_paddedCloud (t : GraphTables.Table) (v : Fin t.vertices)
-    (x : PaddedCloud t (padding t) v) : 0 < cloudSize t v := by
-  by_contra h
-  have hk := Nat.eq_zero_of_not_pos h
-  have hp := padding_zero_of_cloudSize_zero t v hk
-  have hx := (paddedCloudRank t (padding t) v x).isLt
-  omega
-
-/-- The zero-cloud branch remains genuinely empty, including its serialized
-rotor archive. It is not replaced by the geometric family at request zero. -/
-theorem familyCloudWords_of_zero (H : BaseTable) (t : GraphTables.Table)
-    (v : Fin t.vertices) (hk : cloudSize t v = 0) :
-    encodeWords (rotationWords (familyCloudTable H t v)) = [] := by
-  have hl : (rotationWords (familyCloudTable H t v)).length = 0 := by
-    rw [rotationWords_length, cloudSize_add_padding, hk,
-      PreprocessingLevels.cloudPaddedSize_zero, Nat.zero_mul]
-  rw [List.length_eq_zero_iff.mp hl]
-  rfl
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingFamilyBridge
 

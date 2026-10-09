@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Basic.Real.Basic
@@ -175,11 +176,6 @@ theorem mem_samples_iff [Finite E] [Finite C] (t : Witness E C)
   classical
   simp [samples]
 
-theorem samples_nodup [Finite E] [Finite C] (t : Witness E C) :
-    (samples t).Nodup := by
-  classical
-  exact List.Nodup.map (translate_injective t.vanishing t.target t.base)
-    (Finset.nodup_toList _)
 
 /-- Actual affine matrix restrictions instantiate the generic deletion interface. -/
 noncomputable def system [Finite E] [Finite C] (r : Nat) :
@@ -237,19 +233,6 @@ theorem density_eq_count_div [Finite E] [Finite C]
   rw [density, Finset.expect_eq_sum_div_card, samples_trueCount]
   simp
 
-theorem dense_iff_lt_density [Finite E] [Finite C]
-    (H : (E →ₗ[F2] C) → Bool) (r p q : Nat) (hq : 0 < q)
-    (t : Witness E C) :
-    Deletion.Dense (system r) H p q t ↔ (p : ℝ) / q < density H t := by
-  rw [density_eq_count_div]
-  have hq' : (0 : ℝ) < q := by exact_mod_cast hq
-  have hcard : (0 : ℝ) < Fintype.card (Parameter t.vanishing t.target) := by
-    exact_mod_cast parameter_card_pos t.vanishing t.target
-  rw [div_lt_div_iff₀ hq' hcard]
-  rw [mul_comm (Deletion.trueCount H (samples t) : ℝ) (q : ℝ)]
-  change p * (samples t).length < q * Deletion.trueCount H (samples t) ↔ _
-  rw [samples_length]
-  constructor <;> intro h <;> exact_mod_cast h
 
 /-- Whole-row deletion gives the normalized real restriction bound on every
 actual affine restriction of the permitted dimension and codimension. -/
@@ -316,52 +299,6 @@ theorem quotientKernel_card (W : Submodule F2 E)
       Fintype.card (C →ₗ[F2] W) :=
   Fintype.card_congr (quotientKernelEquiv W)
 
-open scoped Classical in
-theorem quotientKernel_filter_card (W : Submodule F2 E)
-    [Fintype (C →ₗ[F2] E)] [Fintype (C →ₗ[F2] W)] :
-    (Finset.univ.filter fun T : C →ₗ[F2] E => W.mkQ.comp T = 0).card =
-      Fintype.card (C →ₗ[F2] W) := by
-  classical
-  rw [← Fintype.card_subtype]
-  exact quotientKernel_card W
-
-/-- Every deleted point determines its row once the target subspace is fixed.
-Thus the union bound ranges over target subspaces, not over row values. -/
-theorem deletedSet_iff_exists_target [Finite E] [Finite C]
-    (H : (E →ₗ[F2] C) → Bool) (r p q : Nat) (X : E →ₗ[F2] C) :
-    Deletion.DeletedSet (system r) H p q X ↔
-      ∃ C' : Submodule F2 C,
-        Deletion.BadRow (system r) H p q ⟨C', C'.mkQ.comp X⟩ := by
-  constructor
-  · rintro ⟨⟨C', Z⟩, hbad, hX⟩
-    change C'.mkQ.comp X = Z at hX
-    subst Z
-    exact ⟨C', hbad⟩
-  · rintro ⟨C', hbad⟩
-    exact ⟨⟨C', C'.mkQ.comp X⟩, hbad, rfl⟩
-
-theorem badRow_codim_le [Finite E] [Finite C]
-    (H : (E →ₗ[F2] C) → Bool) (r p q : Nat) (row : Row E C)
-    (hbad : Deletion.BadRow (system r) H p q row) :
-    Module.finrank F2 (C ⧸ row.target) ≤ r := by
-  rcases hbad with ⟨t, ht, heq, _⟩
-  have ht' : Module.finrank F2 t.vanishing +
-      Module.finrank F2 (C ⧸ t.target) ≤ r := ht
-  have htarget : t.target = row.target := congrArg Row.target heq
-  rw [← htarget]
-  omega
-
-theorem deletedSet_iff_exists_admissible_target [Finite E] [Finite C]
-    (H : (E →ₗ[F2] C) → Bool) (r p q : Nat) (X : E →ₗ[F2] C) :
-    Deletion.DeletedSet (system r) H p q X ↔
-      ∃ C' : Submodule F2 C, Module.finrank F2 (C ⧸ C') ≤ r ∧
-        Deletion.BadRow (system r) H p q ⟨C', C'.mkQ.comp X⟩ := by
-  rw [deletedSet_iff_exists_target]
-  constructor
-  · rintro ⟨C', hb⟩
-    exact ⟨C', badRow_codim_le H r p q ⟨C', C'.mkQ.comp X⟩ hb, hb⟩
-  · rintro ⟨C', _, hb⟩
-    exact ⟨C', hb⟩
 
 end UniqueGamesTheorem.Fourier.MatrixRestrictions
 

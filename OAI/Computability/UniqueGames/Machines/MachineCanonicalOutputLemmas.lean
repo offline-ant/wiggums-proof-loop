@@ -1,8 +1,10 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineAppendAt
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Machines.MachineFiniteAlphabet
+import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.PCP.GraphTables
 import OAI.Computability.UniqueGames.Reduction.MachineSubstitution
 
@@ -33,60 +35,6 @@ structure Program (K Λ σ : Type) where
   initial : σ
   code : Λ → TM2.Stmt (fun _ : K => Bool) Λ σ
 
-section Structural
-
-variable {K Λ Λ' σ : Type} [DecidableEq K]
-
-def extendedLabel (labels : Λ → Λ') (haltTarget : Option Λ') : Option Λ → Option Λ'
-  | none => haltTarget
-  | some label => some (labels label)
-
-def extendedCfg (labels : Λ → Λ') (haltTarget : Option Λ') (register : Option Bool)
-    (cfg : TM2.Cfg (fun _ : K => Bool) Λ σ) :
-    TM2.Cfg (fun _ : K => Bool) Λ' (σ × Option Bool) :=
-  ⟨extendedLabel labels haltTarget cfg.l, (cfg.var, register), cfg.stk⟩
-
-/-- Add one finite scratch register while preserving each raw transition. -/
-def extendedStmt (labels : Λ → Λ') (haltTarget : Option Λ') :
-    TM2.Stmt (fun _ : K => Bool) Λ σ →
-      TM2.Stmt (fun _ : K => Bool) Λ' (σ × Option Bool)
-  | .push k f next => .push k (fun state => f state.1)
-      (extendedStmt labels haltTarget next)
-  | .peek k f next => .peek k (fun state symbol => (f state.1 symbol, state.2))
-      (extendedStmt labels haltTarget next)
-  | .pop k f next => .pop k (fun state symbol => (f state.1 symbol, state.2))
-      (extendedStmt labels haltTarget next)
-  | .load f next => .load (fun state => (f state.1, state.2))
-      (extendedStmt labels haltTarget next)
-  | .branch test yes no => .branch (fun state => test state.1)
-      (extendedStmt labels haltTarget yes) (extendedStmt labels haltTarget no)
-  | .goto label => .goto (fun state => labels (label state.1))
-  | .halt => match haltTarget with
-    | none => .halt
-    | some label => .goto (fun _ => label)
-
-theorem stepAux_extended (labels : Λ → Λ') (haltTarget : Option Λ')
-    (stmt : TM2.Stmt (fun _ : K => Bool) Λ σ) (state : σ)
-    (register : Option Bool) (tapes : K → List Bool) :
-    TM2.stepAux (extendedStmt labels haltTarget stmt) (state, register) tapes =
-      extendedCfg labels haltTarget register (TM2.stepAux stmt state tapes) := by
-  induction stmt generalizing state tapes with
-  | push k f next ih => exact ih state (Function.update tapes k (f state :: tapes k))
-  | peek k f next ih => exact ih (f state (tapes k).head?) tapes
-  | pop k f next ih =>
-      exact ih (f state (tapes k).head?) (Function.update tapes k (tapes k).tail)
-  | load f next ih => exact ih (f state) tapes
-  | branch test yes no ihYes ihNo =>
-      cases h : test state with
-      | false =>
-          simpa only [extendedStmt, TM2.stepAux, h, Bool.cond_false] using ihNo state tapes
-      | true =>
-          simpa only [extendedStmt, TM2.stepAux, h, Bool.cond_true] using ihYes state tapes
-  | goto label => rfl
-  | halt => cases haltTarget <;> rfl
-
-end Structural
-
 variable {K Λ σ : Type} [DecidableEq K] [Fintype K] [Fintype Λ] [Fintype σ]
 
 def sourceMachine (P : Program K Λ σ) : FinTM2 where
@@ -112,7 +60,7 @@ def cleanupEntry (chosen : List K) : Option (Label Λ chosen) :=
 
 def completedProgram (P : Program K Λ σ) (chosen : List K) :
     Label Λ chosen → TM2.Stmt (fun _ : K => Bool) (Label Λ chosen) (σ × Option Bool)
-  | .inl label => extendedStmt Sum.inl (cleanupEntry chosen) (P.code label)
+  | .inl label => MachineStateFrame.statement Sum.inl (cleanupEntry chosen) (P.code label)
   | .inr (.inl label) => MachineDrainMany.instruction chosen (cleanupLabel chosen)
       (some (resetLabel chosen)) label
   | .inr (.inr _) => .load (fun _ => (P.initial, none)) .halt
@@ -133,30 +81,6 @@ theorem finiteAlphabet (P : Program K Λ σ) (chosen : List K) :
     MachineFiniteAlphabet.FiniteAlphabet (completedMachine P chosen) := by
   intro k
   exact inferInstanceAs (Finite Bool)
-
-def embeddedCfg (P : Program K Λ σ) (chosen : List K)
-    (cfg : (sourceMachine P).Cfg) : (completedMachine P chosen).Cfg :=
-  extendedCfg Sum.inl (cleanupEntry chosen) none cfg
-
-theorem step_simulation (P : Program K Λ σ) (chosen : List K)
-    (a b : (sourceMachine P).Cfg) (step : (sourceMachine P).step a = some b) :
-    (completedMachine P chosen).step (embeddedCfg P chosen a) =
-      some (embeddedCfg P chosen b) := by
-  cases a with
-  | mk label state tapes =>
-    cases label with
-    | none => simp [FinTM2.step, TM2.step] at step
-    | some label =>
-      have hb : TM2.stepAux (P.code label) state tapes = b := Option.some.inj step
-      rw [← hb]
-      change some (TM2.stepAux
-        (extendedStmt Sum.inl (cleanupEntry chosen) (P.code label)) (state, none) tapes) = _
-      erw [stepAux_extended]
-      rfl
-
-@[simp] theorem embedded_init (P : Program K Λ σ) (chosen : List K) (input : List Bool) :
-    embeddedCfg P chosen (initList (sourceMachine P) input) =
-      initList (completedMachine P chosen) input := rfl
 
 omit [Fintype K] [Fintype Λ] [Fintype σ] in
 theorem finalTapes_eq (P : Program K Λ σ) (chosen : List K)
@@ -183,29 +107,12 @@ def cleanupExecution (P : Program K Λ σ) (chosen : List K)
       ⟨cleanupEntry chosen, (state, register), base⟩
       (some (haltList (completedMachine P chosen) (base P.output)))
       (MachineDrainMany.steps chosen base + 1) := by
-  let after : (completedMachine P chosen).Cfg :=
-    ⟨some (resetLabel chosen), (state, MachineDrainMany.finalRegister chosen register),
-      MachineDrainMany.finalTapes chosen base⟩
-  have drains : StateTransition.EvalsToInTime (completedMachine P chosen).step
-      ⟨cleanupEntry chosen, (state, register), base⟩ (some after)
-      (MachineDrainMany.steps chosen base) := {
-    steps := MachineDrainMany.steps chosen base
-    evals_in_steps := MachineDrainMany.trace chosen (cleanupLabel chosen)
-      (some (resetLabel chosen)) (completedProgram P chosen) (fun _ => rfl) base state register
-    steps_le_m := le_rfl }
-  have reset : StateTransition.EvalsToInTime (completedMachine P chosen).step
-      after (some (haltList (completedMachine P chosen) (base P.output))) 1 := {
-    steps := 1
-    evals_in_steps := by
-      change some (⟨none, (P.initial, none), MachineDrainMany.finalTapes chosen base⟩ :
-          (completedMachine P chosen).Cfg) =
-        some (haltList (completedMachine P chosen) (base P.output))
-      erw [finalTapes_eq P chosen complete, haltList_eq]
-      rfl
-    steps_le_m := le_rfl }
-  simpa only [Nat.add_comm] using
-    StateTransition.EvalsToInTime.trans _ (MachineDrainMany.steps chosen base) 1
-      _ after _ drains reset
+  have run := MachineDrainMany.executionWithReset chosen (cleanupLabel chosen)
+    (resetLabel chosen) (completedProgram P chosen) (fun _ => rfl)
+    (P.initial, none) rfl base (state, register)
+  rw [haltList_eq]
+  erw [finalTapes_eq P chosen complete] at run
+  exact run
 
 /-- No assumption about cleanup execution or clean raw work tapes is required. -/
 def outputsInTime (P : Program K Λ σ) (chosen : List K)
@@ -217,8 +124,8 @@ def outputsInTime (P : Program K Λ σ) (chosen : List K)
     TM2OutputsInTime (completedMachine P chosen) input (some output)
       (budget + chosen.length *
         (input.length + budget * Runtime.programPushBound (sourceMachine P) + 1) + 1) := by
-  let lifted := liftExecutionInTime (sourceMachine P).step
-    (completedMachine P chosen).step (embeddedCfg P chosen) (step_simulation P chosen) raw
+  let lifted := MachineStateFrame.execution Sum.inl (cleanupEntry chosen) none
+    P.code (completedProgram P chosen) (fun _ => rfl) raw
   have joined := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ lifted
     (cleanupExecution P chosen complete state none base)
   have stackBound : ∀ k, (base k).length ≤
@@ -229,7 +136,7 @@ def outputsInTime (P : Program K Λ σ) (chosen : List K)
       (Runtime.stepStackLength (sourceMachine P) k) raw
     exact h.trans (Nat.add_le_add_right (Runtime.initialStackLength (sourceMachine P) input k) _)
   have cleanupBound := MachineDrainMany.steps_le_uniform chosen base _ stackBound
-  rw [embedded_init, correctOutput] at joined
+  rw [correctOutput] at joined
   exact { toEvalsTo := joined.toEvalsTo
           steps_le_m := joined.steps_le_m.trans (by omega) }
 
@@ -284,17 +191,6 @@ theorem computableInPolyTime_finite_alphabet {α β : Type}
       (computableInPolyTime P chosen complete encodeIn encodeOut f rawTime run).tm :=
   finiteAlphabet P chosen
 
-/-- An explicit finite enumeration supplies the fixed cleanup list. -/
-noncomputable def computableInPolyTimeOfEnumeration {α β : Type} {N : Nat}
-    (P : Program K Λ σ) (enumeration : Fin N ≃ K)
-    (encodeIn : α → List Bool) (encodeOut : β → List Bool) (f : α → β)
-    (rawTime : Polynomial Nat)
-    (run : ∀ a, TerminalRun P (encodeIn a) (encodeOut (f a))
-      (rawTime.eval (encodeIn a).length)) :
-    TM2ComputableInPolyTime encodeIn encodeOut f :=
-  computableInPolyTime P (MachineDrainMany.workTapes enumeration P.output)
-    (fun k => MachineDrainMany.mem_workTapes enumeration P.output k)
-    encodeIn encodeOut f rawTime run
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCanonicalOutput
 
@@ -308,18 +204,10 @@ inductive Label
   | tailRead | tailRestore | appendOld | appendRow | appendBack
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.relationRead, .relationRestore, .reverseRead,
-  .reverseRestore, .tailRead, .tailRestore, .appendOld, .appendRow, .appendBack]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.relationRead, .relationRestore, .reverseRead,
+  .reverseRestore, .tailRead, .tailRestore, .appendOld, .appendRow, .appendBack}
+  complete x := by cases x <;> simp
 
 variable {K Λ σ : Type} [DecidableEq K]
 
@@ -467,51 +355,9 @@ theorem rowBits_eq {n m : Nat} (r : DartRow n m) :
       encodeWord r.reverseIndex.val ++ encodeWords (relationWords r.relation) := by
   simp [rowWords, encodeWords]
 
-omit [DecidableEq K] in
-theorem fieldBits_eq_rowBits {n m : Nat} (r : DartRow n m)
-    (fields : Fin 3 → K) (base : K → List Bool)
-    (htail : base (fields 0) = encodeWord r.tail.val)
-    (hreverse : base (fields 1) = encodeWord r.reverseIndex.val)
-    (hrelation : base (fields 2) = encodeWords (relationWords r.relation)) :
-    fieldBits fields base = encodeWords (rowWords r) := by
-  rw [fieldBits, htail, hreverse, hrelation, rowBits_eq]
 
 noncomputable def timePolynomial : Polynomial Nat := Polynomial.C 4 * Polynomial.X + Polynomial.C 9
 
-omit [DecidableEq K] in
-theorem timePolynomial_bounds (fields : Fin 3 → K) (base : K → List Bool) (output : K) :
-    4 * fieldSize fields base + 2 * (base output).length + 9 ≤
-      timePolynomial.eval (fieldSize fields base + (base output).length) := by
-  simp only [timePolynomial, Polynomial.eval_add, Polynomial.eval_mul, Polynomial.eval_C,
-    Polynomial.eval_X]
-  omega
-
-/-- A composable actual execution certificate for a correctly encoded row.
-The program is fixed; row data occur only in the input-tape equalities. -/
-def rowAppendInTime {n m : Nat} (r : DartRow n m)
-    (fields : Fin 3 → K) (row output scratch : K)
-    (hfields : ∀ i, fields i ≠ row ∧ fields i ≠ scratch)
-    (hrowOutput : row ≠ output) (hrowScratch : row ≠ scratch)
-    (houtputScratch : output ≠ scratch) (labels : Label → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (hprogram : ∀ label, program (labels label) = routine fields row output scratch labels exit label)
-    (base : K → List Bool) (hrow : base row = []) (hscratch : base scratch = [])
-    (htail : base (fields 0) = encodeWord r.tail.val)
-    (hreverse : base (fields 1) = encodeWord r.reverseIndex.val)
-    (hrelation : base (fields 2) = encodeWords (relationWords r.relation))
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .relationRead), (ambient, register), base⟩
-      (some ⟨exit, (ambient, none),
-        Function.update base output (base output ++ encodeWords (rowWords r))⟩)
-      (timePolynomial.eval (fieldSize fields base + (base output).length)) where
-  steps := 4 * fieldSize fields base + 2 * (base output).length + 9
-  evals_in_steps := by
-    change (MachineComposition.advance (TM2.step program))^[_] _ = _
-    rw [← fieldBits_eq_rowBits r fields base htail hreverse hrelation]
-    exact appendTrace fields row output scratch hfields hrowOutput hrowScratch
-      houtputScratch labels exit program hprogram base hrow hscratch ambient register
-  steps_le_m := timePolynomial_bounds fields base output
 
 /-- A fixed nine-label six-stack finite machine implementing the routine.
 Its inputs may be supplied in a caller's distributed tape configuration. -/
@@ -526,42 +372,6 @@ def machine : FinTM2 where
   initialState := ((), none)
   m := routine (fun i : Fin 3 => i.castLE (by decide)) 3 4 5 id none
 
-/-- Direct execution of the concrete finite machine on caller-supplied unary
-fields. This instantiates all program equations; no execution premise remains. -/
-def machineRowInTime {n m : Nat} (r : DartRow n m) (base : Fin 6 → List Bool)
-    (hrow : base 3 = []) (hscratch : base 5 = [])
-    (htail : base 0 = encodeWord r.tail.val)
-    (hreverse : base 1 = encodeWord r.reverseIndex.val)
-    (hrelation : base 2 = encodeWords (relationWords r.relation)) (register : Option Bool) :
-    StateTransition.EvalsToInTime machine.step
-      ⟨some .relationRead, ((), register), base⟩
-      (some ⟨none, ((), none),
-        Function.update base (4 : Fin 6) (base 4 ++ encodeWords (rowWords r))⟩)
-      (timePolynomial.eval ((encodeWords (rowWords r)).length + (base 4).length)) := by
-  let fields : Fin 3 → Fin 6 := fun i => i.castLE (by decide)
-  have hfields (i : Fin 3) : fields i ≠ 3 ∧ fields i ≠ 5 := by
-    constructor
-    · intro h
-      have he := congrArg Fin.val h
-      change i.val = 3 at he
-      omega
-    · intro h
-      have he := congrArg Fin.val h
-      change i.val = 5 at he
-      omega
-  have hsize : fieldSize fields base = (encodeWords (rowWords r)).length := by
-    rw [← fieldBits_length, fieldBits_eq_rowBits r fields base htail hreverse hrelation]
-  have run := rowAppendInTime r fields (3 : Fin 6) 4 5 hfields (by decide) (by decide)
-    (by decide) id none machine.m (fun _ => rfl) base hrow hscratch
-    htail hreverse hrelation () register
-  rw [hsize] at run
-  convert run using 1
-  rfl
-
-theorem outputFrame (base : K → List Bool) (output k : K) (hk : k ≠ output)
-    (bits : List Bool) :
-    Function.update base output (base output ++ bits) k = base k := by
-  simp [hk]
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineTableRows
 
@@ -765,53 +575,6 @@ theorem allTrace (d v e : Nat) (output : List Bool) (ambient : σ) (register : O
     subst d
     simp [entry, steps, rowsBits]
 
-/-- Actual finite graph rows in increasing reverse-index order. -/
-def graphRows {n m : Nat} (v : Fin n) (e : Nat) :
-    (count : Nat) → e + count ≤ m → List (DartRow n m)
-  | 0, _ => []
-  | count + 1, h =>
-      ⟨v, ⟨e, by omega⟩, trueRelation⟩ ::
-        graphRows v (e + 1) count (by omega)
-
-theorem graphRows_length {n m : Nat} (v : Fin n) (e count : Nat) (h : e + count ≤ m) :
-    (graphRows v e count h).length = count := by
-  induction count generalizing e with
-  | zero => rfl
-  | succ count ih => simp [graphRows, ih]
-
-/-- The machine's bit stream is exactly the existing codec on the actual
-ordered row list, including both index fields and every predicate entry. -/
-theorem rowsBits_eq_graphRows {n m : Nat} (v : Fin n) (e count : Nat)
-    (h : e + count ≤ m) :
-    rowsBits v.val e count = encodeWords ((graphRows v e count h).flatMap rowWords) := by
-  induction count generalizing e with
-  | zero => rfl
-  | succ count ih =>
-    simp [rowsBits, graphRows, encodeWords_append, MachineTableRows.rowBits_eq,
-      rowBits, trueBits]
-    exact ih (e + 1) (by omega)
-
-/-- For one vertex of an `n`-vertex degree-`d` graph, every dummy dart is its
-own reverse. The caller's initial index is the actual unary value `d * v`. -/
-def dummyRows {n : Nat} (d : Nat) (v : Fin n) : List (DartRow n (n * d)) :=
-  graphRows v (d * v.val) d (by
-    have h := Nat.mul_le_mul_right d (Nat.succ_le_of_lt v.isLt)
-    simpa only [Nat.succ_mul, Nat.mul_comm] using h)
-
-theorem dummyRows_length {n : Nat} (d : Nat) (v : Fin n) :
-    (dummyRows d v).length = d := graphRows_length _ _ _ _
-
-theorem dummyRowsTrace {n : Nat} (d : Nat) (v : Fin n) (output : List Bool)
-    (ambient : σ) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step (program d)))^[steps v.val (d * v.val) output d + 1]
-      (some ⟨some (start d), (ambient, register), initialTapes v.val (d * v.val) output⟩) =
-      some ⟨none, (ambient, none), fieldTapes v.val (d * v.val + d)
-        (output ++ encodeWords ((dummyRows d v).flatMap rowWords))⟩ := by
-  have h := allTrace d v.val (d * v.val) output ambient register
-  rw [rowsBits_eq_graphRows v (d * v.val) d (by
-    have h := Nat.mul_le_mul_right d (Nat.succ_le_of_lt v.isLt)
-    simpa only [Nat.succ_mul, Nat.mul_comm] using h)] at h
-  exact h
 
 /-- Every actual row cost is bounded by the largest row and accumulated
 output encountered during this finite loop. -/
@@ -847,10 +610,6 @@ theorem steps_le_bound (v e : Nat) (output : List Bool) (count : Nat) :
       _ ≤ C + count * C := Nat.add_le_add hbody hremaining
       _ = (count + 1) * C := by rw [Nat.add_mul, Nat.one_mul]; omega
 
-/-- The variable-size input is exactly the two physical unary fields and
-existing output. The relation field is a fixed program constant. -/
-def inputSize (v e : Nat) (output : List Bool) : Nat :=
-  (encodeWord v).length + (encodeWord e).length + output.length
 
 /-- A linear polynomial for each fixed port count `d`. -/
 noncomputable def timePolynomial (d : Nat) : Polynomial Nat :=
@@ -859,26 +618,6 @@ noncomputable def timePolynomial (d : Nat) : Polynomial Nat :=
       Polynomial.C 2 * (Polynomial.X + Polynomial.C d *
         (Polynomial.X + Polynomial.C (d + 8192))) + Polynomial.C 10) + 1
 
-theorem timePolynomial_bounds (d v e : Nat) (output : List Bool) :
-    steps v e output d + 1 ≤ (timePolynomial d).eval (inputSize v e output) := by
-  have h := steps_le_bound v e output d
-  have hB : v + e + d + 8194 ≤ inputSize v e output + d + 8192 := by
-    simp only [inputSize, encodeWord_length]
-    omega
-  have hO : output.length ≤ inputSize v e output := by
-    simp only [inputSize, encodeWord_length]
-    omega
-  have hm := Nat.mul_le_mul_left d hB
-  have hinner :
-      4 * (v + e + d + 8194) + 2 * (output.length + d * (v + e + d + 8194)) + 10 ≤
-      4 * (inputSize v e output + d + 8192) +
-        2 * (inputSize v e output + d * (inputSize v e output + d + 8192)) + 10 := by
-    exact Nat.add_le_add_right (Nat.add_le_add (Nat.mul_le_mul_left 4 hB)
-      (Nat.mul_le_mul_left 2 (Nat.add_le_add hO hm))) 10
-  have htotal := h.trans (Nat.mul_le_mul_left d hinner)
-  simp only [timePolynomial, Polynomial.eval_add, Polynomial.eval_mul,
-    Polynomial.eval_C, Polynomial.eval_X, Polynomial.eval_one]
-  simpa only [Nat.add_assoc] using Nat.add_le_add_right htotal 1
 
 /-- A fixed finite machine. Its control stores only the fixed port position;
 vertex and reverse-index values reside on the tapes. -/
@@ -893,33 +632,6 @@ def machine (d : Nat) : FinTM2 where
   initialState := ((), none)
   m := program d
 
-/-- The full actual finite-machine execution, including initialization and
-all rows. No body trace or runtime hypothesis is an input to this certificate. -/
-def machineInTime (d v e : Nat) (output : List Bool) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine d).step
-      ⟨some (start d), ((), register), initialTapes v e output⟩
-      (some ⟨none, ((), none), fieldTapes v (e + d) (output ++ rowsBits v e d)⟩)
-      ((timePolynomial d).eval (inputSize v e output)) where
-  steps := steps v e output d + 1
-  evals_in_steps := by
-    convert allTrace d v e output () register using 1
-    rfl
-  steps_le_m := timePolynomial_bounds d v e output
-
-/-- The same actual machine on the padding invariant `e = d * v`, with
-its exact existing-codec graph-row output. -/
-def machineDummyInTime {n : Nat} (d : Nat) (v : Fin n)
-    (output : List Bool) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine d).step
-      ⟨some (start d), ((), register), initialTapes v.val (d * v.val) output⟩
-      (some ⟨none, ((), none), fieldTapes v.val (d * v.val + d)
-        (output ++ encodeWords ((dummyRows d v).flatMap rowWords))⟩)
-      ((timePolynomial d).eval (inputSize v.val (d * v.val) output)) where
-  steps := steps v.val (d * v.val) output d + 1
-  evals_in_steps := by
-    convert dummyRowsTrace d v output () register using 1
-    rfl
-  steps_le_m := timePolynomial_bounds d v.val (d * v.val) output
 
 /-- Input tail and both work tapes retain their required contents. The
 relation tape keeps the one initialized fixed field for subsequent use. -/

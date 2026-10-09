@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineSubstitution
@@ -48,19 +49,6 @@ def emitter (d : Nat) (positive : 0 < d) (remainder : K) (exit : Option Λ)
     (.load (fun state => ((state.1.1, residue d positive 0), none))
       (Reduction.MachineTransfer.exitAt remainder exit))
 
-omit [DecidableEq K] in
-theorem scanPushBound (d : Nat) (positive : 0 < d) (source quotient : K)
-    (scanLabel : Λ) (emitterLabel : Fin d → Λ) :
-    Runtime.statementPushBound (scanLoop (σ := σ) d positive source quotient scanLabel
-      emitterLabel) = 1 := rfl
-
-omit [DecidableEq K] in
-theorem emitterPushBound (d : Nat) (positive : 0 < d) (remainder : K)
-    (exit : Option Λ) (r : Fin d) :
-    Runtime.statementPushBound (emitter (σ := σ) d positive remainder exit r) = r.val := by
-  cases exit <;>
-    simp [emitter, statementPushBound_pushWord, Runtime.statementPushBound,
-      Reduction.MachineTransfer.exitAt]
 
 /-- Three designated tapes, with the complete surrounding tape family retained. -/
 abbrev tapes (source quotient remainder : K) (base : K → List Bool)
@@ -72,73 +60,6 @@ def unaryTapes (source quotient remainder : K) (base : K → List Bool)
   tapes source quotient remainder base (encodeWord n ++ sourceSuffix)
     (encodeWord q ++ quotientSuffix) (encodeWord r ++ remainderSuffix)
 
-@[simp] theorem unaryTapes_source (source quotient remainder : K)
-    (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
-    (base : K → List Bool) (n q r : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool) :
-    unaryTapes source quotient remainder base n q r sourceSuffix quotientSuffix
-      remainderSuffix source = encodeWord n ++ sourceSuffix := by
-  simp [unaryTapes, sourceQuotient, sourceRemainder]
-
-@[simp] theorem unaryTapes_quotient (source quotient remainder : K)
-    (quotientRemainder : quotient ≠ remainder) (base : K → List Bool) (n q r : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool) :
-    unaryTapes source quotient remainder base n q r sourceSuffix quotientSuffix
-      remainderSuffix quotient = encodeWord q ++ quotientSuffix := by
-  simp [unaryTapes, quotientRemainder]
-
-@[simp] theorem unaryTapes_remainder (source quotient remainder : K)
-    (base : K → List Bool) (n q r : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool) :
-    unaryTapes source quotient remainder base n q r sourceSuffix quotientSuffix
-      remainderSuffix remainder = encodeWord r ++ remainderSuffix := by
-  simp [unaryTapes]
-
-theorem unaryTapes_other (source quotient remainder other : K)
-    (notSource : other ≠ source) (notQuotient : other ≠ quotient)
-    (notRemainder : other ≠ remainder) (base : K → List Bool) (n q r : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool) :
-    unaryTapes source quotient remainder base n q r sourceSuffix quotientSuffix
-      remainderSuffix other = base other := by
-  simp [unaryTapes, tapes, MachineCopy.forkTapes, notSource, notQuotient, notRemainder]
-
-private theorem update_source (source quotient remainder : K)
-    (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
-    (quotientRemainder : quotient ≠ remainder) (base : K → List Bool)
-    (input quotientWord remainderWord replacement : List Bool) :
-    Function.update (tapes source quotient remainder base input quotientWord remainderWord)
-      source replacement = tapes source quotient remainder base replacement quotientWord remainderWord := by
-  funext k
-  by_cases hs : k = source
-  · subst k
-    simp [tapes, MachineCopy.forkTapes, sourceQuotient, sourceRemainder]
-  · by_cases hq : k = quotient
-    · subst k
-      simp [tapes, MachineCopy.forkTapes, Ne.symm sourceQuotient, quotientRemainder]
-    · by_cases hr : k = remainder
-      · subst k
-        simp [tapes, MachineCopy.forkTapes, Ne.symm sourceRemainder]
-      · simp [tapes, MachineCopy.forkTapes, hs, hq, hr]
-
-private theorem update_quotient (source quotient remainder : K)
-    (quotientRemainder : quotient ≠ remainder) (base : K → List Bool)
-    (input quotientWord remainderWord replacement : List Bool) :
-    Function.update (tapes source quotient remainder base input quotientWord remainderWord)
-      quotient replacement = tapes source quotient remainder base input replacement remainderWord := by
-  funext k
-  by_cases hq : k = quotient
-  · subst k
-    simp [tapes, MachineCopy.forkTapes, quotientRemainder]
-  · by_cases hr : k = remainder
-    · subst k
-      simp [tapes, MachineCopy.forkTapes, Ne.symm quotientRemainder]
-    · simp [tapes, MachineCopy.forkTapes, hq, hr]
-
-private theorem update_remainder (source quotient remainder : K) (base : K → List Bool)
-    (input quotientWord remainderWord replacement : List Bool) :
-    Function.update (tapes source quotient remainder base input quotientWord remainderWord)
-      remainder replacement = tapes source quotient remainder base input quotientWord replacement := by
-  simp [tapes, MachineCopy.forkTapes]
 
 theorem scanAux_true (d : Nat) (positive : 0 < d) (source quotient remainder : K)
     (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
@@ -154,7 +75,7 @@ theorem scanAux_true (d : Nat) (positive : 0 < d) (source quotient remainder : K
           remainderWord⟩ := by
   by_cases hcarry : (nextResidue d positive r).val = 0 <;>
     simp [scanLoop, TM2.stepAux, sourceQuotient, sourceRemainder, quotientRemainder,
-      update_source, update_quotient, hcarry]
+      MachineCopy.update_fork_source, MachineCopy.update_fork_left, hcarry]
 
 theorem scanAux_false (d : Nat) (positive : 0 < d) (source quotient remainder : K)
     (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
@@ -167,7 +88,7 @@ theorem scanAux_false (d : Nat) (positive : 0 < d) (source quotient remainder : 
       ⟨some (emitterLabel r), ((ambient, r), some false),
         tapes source quotient remainder base (false :: input) quotientWord remainderWord⟩ := by
   simp [scanLoop, TM2.stepAux, sourceQuotient, sourceRemainder, quotientRemainder,
-    update_source]
+    MachineCopy.update_fork_source]
 
 /-- A scan transition updates the actual quotient and finite residue of the
 already-processed count. The count itself is a proof index, not machine state. -/
@@ -241,7 +162,7 @@ theorem emitterStep (d : Nat) (positive : 0 < d) (source quotient remainder : K)
   unfold emitter
   rw [stepAux_pushWord]
   simp only [unaryTapes, MachineCopy.forkTapes_right, List.reverse_replicate]
-  rw [update_remainder]
+  rw [MachineCopy.update_fork_right]
   cases exit <;>
     simp [TM2.stepAux, Reduction.MachineTransfer.exitAt, encodeWord, List.append_assoc]
 
@@ -306,57 +227,6 @@ theorem divModTrace (d : Nat) (positive : 0 < d) (source quotient remainder : K)
       quotientRemainder scanLabel emitterLabel exit program atScan atEmitter base n 0
       sourceSuffix quotientSuffix remainderSuffix ambient register
 
-/-- Caller-frame form: the only initial tape hypotheses are the three unary prefixes. -/
-theorem divModFromTapes (d : Nat) (positive : 0 < d) (source quotient remainder : K)
-    (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
-    (quotientRemainder : quotient ≠ remainder) (scanLabel : Λ) (emitterLabel : Fin d → Λ)
-    (exit : Option Λ) (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ d))
-    (atScan : program scanLabel = scanLoop d positive source quotient scanLabel emitterLabel)
-    (atEmitter : ∀ r, program (emitterLabel r) = emitter d positive remainder exit r)
-    (base : K → List Bool) (n : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool)
-    (sourceInput : base source = encodeWord n ++ sourceSuffix)
-    (quotientInput : base quotient = encodeWord 0 ++ quotientSuffix)
-    (remainderInput : base remainder = encodeWord 0 ++ remainderSuffix)
-    (ambient : σ) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step program))^[n + 2]
-      (some ⟨some scanLabel, ((ambient, residue d positive 0), register), base⟩) =
-      some ⟨exit, ((ambient, residue d positive 0), none),
-        unaryTapes source quotient remainder base 0 (n / d) (n % d)
-          sourceSuffix quotientSuffix remainderSuffix⟩ := by
-  have hbase : unaryTapes source quotient remainder base n 0 0 sourceSuffix quotientSuffix
-      remainderSuffix = base := by
-    simp only [unaryTapes, ← sourceInput, ← quotientInput, ← remainderInput,
-      MachineCopy.forkTapes_self]
-  have h := divModTrace d positive source quotient remainder sourceQuotient sourceRemainder
-    quotientRemainder scanLabel emitterLabel exit program atScan atEmitter base n
-    sourceSuffix quotientSuffix remainderSuffix ambient register
-  rw [hbase] at h
-  exact h
-
-def divModInTime (d : Nat) (positive : 0 < d) (source quotient remainder : K)
-    (sourceQuotient : source ≠ quotient) (sourceRemainder : source ≠ remainder)
-    (quotientRemainder : quotient ≠ remainder) (scanLabel : Λ) (emitterLabel : Fin d → Λ)
-    (exit : Option Λ) (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ d))
-    (atScan : program scanLabel = scanLoop d positive source quotient scanLabel emitterLabel)
-    (atEmitter : ∀ r, program (emitterLabel r) = emitter d positive remainder exit r)
-    (base : K → List Bool) (n : Nat)
-    (sourceSuffix quotientSuffix remainderSuffix : List Bool)
-    (sourceInput : base source = encodeWord n ++ sourceSuffix)
-    (quotientInput : base quotient = encodeWord 0 ++ quotientSuffix)
-    (remainderInput : base remainder = encodeWord 0 ++ remainderSuffix)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some scanLabel, ((ambient, residue d positive 0), register), base⟩
-      (some ⟨exit, ((ambient, residue d positive 0), none),
-        unaryTapes source quotient remainder base 0 (n / d) (n % d)
-          sourceSuffix quotientSuffix remainderSuffix⟩) (n + 2) where
-  steps := n + 2
-  evals_in_steps := divModFromTapes d positive source quotient remainder sourceQuotient
-    sourceRemainder quotientRemainder scanLabel emitterLabel exit program atScan atEmitter
-    base n sourceSuffix quotientSuffix remainderSuffix sourceInput quotientInput remainderInput
-    ambient register
-  steps_le_m := Nat.le_refl _
 
 /-- Stop just before emission, retaining the final finite residue as actual control. -/
 theorem scanTrace_fromCount (d : Nat) (positive : 0 < d) (source quotient remainder : K)
@@ -400,14 +270,6 @@ def emitterWithFinish [Fintype σ] (d : Nat) (positive : 0 < d) (remainder : K)
     (.load (fun state => ((finish state.1.1 r, residue d positive 0), none))
       (Reduction.MachineTransfer.exitAt remainder exit))
 
-omit [DecidableEq K] in
-theorem emitterWithFinishPushBound [Fintype σ] (d : Nat) (positive : 0 < d)
-    (remainder : K) (exit : Option Λ) (finish : σ → Fin d → σ) (r : Fin d) :
-    Runtime.statementPushBound (emitterWithFinish d positive remainder exit finish r) =
-      r.val := by
-  cases exit <;>
-    simp [emitterWithFinish, statementPushBound_pushWord, Runtime.statementPushBound,
-      Reduction.MachineTransfer.exitAt]
 
 theorem emitterWithFinishStep [Fintype σ] (d : Nat) (positive : 0 < d)
     (source quotient remainder : K) (emitterLabel : Fin d → Λ) (exit : Option Λ)
@@ -431,7 +293,7 @@ theorem emitterWithFinishStep [Fintype σ] (d : Nat) (positive : 0 < d)
   unfold emitterWithFinish
   rw [stepAux_pushWord]
   simp only [unaryTapes, MachineCopy.forkTapes_right, List.reverse_replicate]
-  rw [update_remainder]
+  rw [MachineCopy.update_fork_right]
   cases exit <;>
     simp [TM2.stepAux, Reduction.MachineTransfer.exitAt, encodeWord, List.append_assoc]
 

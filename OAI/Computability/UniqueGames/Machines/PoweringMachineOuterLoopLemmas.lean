@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringGlobalEnumerationLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMachineFinish
@@ -422,9 +423,6 @@ def machine (d n : Nat) : FinTM2 where
 @[simp] theorem machine_initialState (d n : Nat) :
     (machine d n).initialState = PoweringMasterState.clean (PoweringMachineRowBody.bufferSize d n) := rfl
 
-theorem input_ne_output (n : Nat) : inputTape n ≠ outputTape n :=
-  PoweringMachineInitialize.commonPlacement_ne_finalOutput (PoweringMachineRowBody.capacity n)
-    (PoweringMachineTapes.table (PoweringMachineRowBody.capacity n))
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineGlobal
 
@@ -440,18 +438,6 @@ namespace UniqueGamesTheorem.Foundations.Complexity.PoweringGlobalConfiguration
 
 open Turing PoweringMachineGlobal
 
-theorem placement_injective (n : Nat) : Function.Injective (placement n) :=
-  PoweringMachineInitialize.commonPlacement_injective (PoweringMachineRowBody.capacity n)
-
-theorem placement_ne_output (n : Nat)
-    (tape : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n)) :
-    placement n tape ≠ outputTape n :=
-  PoweringMachineInitialize.commonPlacement_ne_finalOutput
-    (PoweringMachineRowBody.capacity n) tape
-
-theorem output_ne_placement (n : Nat)
-    (tape : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n)) :
-    outputTape n ≠ placement n tape := Ne.symm (placement_ne_output n tape)
 
 theorem headerVertices_ne_placement (n : Nat)
     (tape : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n)) :
@@ -465,16 +451,6 @@ theorem headerDarts_ne_placement (n : Nat)
   Ne.symm (PoweringMachineInitialize.commonPlacement_ne_header
     (PoweringMachineRowBody.capacity n) tape .darts (by decide))
 
-theorem placement_ne_headerVertices (n : Nat)
-    (tape : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n)) :
-    placement n tape ≠ headerVertices n := Ne.symm (headerVertices_ne_placement n tape)
-
-theorem placement_ne_headerDarts (n : Nat)
-    (tape : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n)) :
-    placement n tape ≠ headerDarts n := Ne.symm (headerDarts_ne_placement n tape)
-
-theorem headerVertices_ne_headerDarts (n : Nat) : headerVertices n ≠ headerDarts n := by
-  simp [headerVertices, headerDarts]
 
 theorem headerVertices_ne_output (n : Nat) : headerVertices n ≠ outputTape n := by
   simp [headerVertices, outputTape, PoweringMachineInitialize.finalOutput]
@@ -492,15 +468,6 @@ theorem headerDarts_ne_scratch (n : Nat) :
       placement n (PoweringMachineTapes.scratch (PoweringMachineRowBody.capacity n)) :=
   headerDarts_ne_placement n _
 
-theorem scratch_ne_output (n : Nat) :
-    placement n (PoweringMachineTapes.scratch (PoweringMachineRowBody.capacity n)) ≠
-      outputTape n :=
-  placement_ne_output n _
-
-/-- A Boolean tape alphabet is constant, so the type-equality transport in
-the bundled machine's dependent stack specification leaves its word intact. -/
-@[simp] theorem boolList_mpr_eq (h : List Bool = List Bool) (bits : List Bool) :
-    h.mpr bits = bits := rfl
 
 /-- The dependent stack definition in `haltList` is exactly the Boolean output
 tape shape produced by the checked finite cleanup program. -/

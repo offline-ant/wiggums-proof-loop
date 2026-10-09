@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.PoweringLabelsLemmas
 import OAI.Computability.UniqueGames.PCP.PoweringOpinionsLemmas
 
@@ -25,56 +26,16 @@ open scoped BigOperators
 
 variable {X A : Type*}
 
-private theorem match_in_tail (p : X → Prop) {a : X} {xs : List X}
-    (h : ∃ b ∈ a :: xs, p b) (ha : ¬p a) : ∃ b ∈ xs, p b := by
-  obtain ⟨b, hb, hp⟩ := h
-  rcases List.mem_cons.mp hb with he | hm
-  · exact False.elim (ha (he ▸ hp))
-  · exact ⟨b, hm, hp⟩
-
-def firstIndex (p : X → Prop) [DecidablePred p] :
-    (xs : List X) → (∃ a ∈ xs, p a) → Fin xs.length
-  | [], h => False.elim (by simp at h)
-  | a :: xs, h =>
-    if ha : p a then ⟨0, Nat.zero_lt_succ xs.length⟩ else
-      (firstIndex p xs (match_in_tail p h ha)).succ
+/-- The standard first-match search, with its index certified in bounds. -/
+def firstIndex (p : X → Prop) [DecidablePred p]
+    (xs : List X) (h : ∃ a ∈ xs, p a) : Fin xs.length :=
+  ⟨xs.findIdx (fun a => decide (p a)), List.findIdx_lt_length_of_exists (by simpa using h)⟩
 
 /-- The stored index selects the very same first address as `scanWitness`,
 not just an address with the same endpoint. -/
 theorem get_firstIndex (p : X → Prop) [DecidablePred p] :
     ∀ (xs : List X) (h : ∃ a ∈ xs, p a),
-      xs.get (firstIndex p xs h) = (scanWitness p xs h).val := by
-  intro xs
-  induction xs with
-  | nil => intro h; simp at h
-  | cons a xs ih =>
-    intro h
-    by_cases ha : p a
-    · simp [firstIndex, scanWitness, ha]
-    · simpa only [firstIndex, scanWitness, ha, dite_false, List.get_cons_succ'] using
-        ih (match_in_tail p h ha)
-
-theorem firstIndex_matches (p : X → Prop) [DecidablePred p]
-    (xs : List X) (h : ∃ a ∈ xs, p a) : p (xs.get (firstIndex p xs h)) := by
-  rw [get_firstIndex]
-  exact (scanWitness p xs h).property
-
-/-- Every earlier stored address fails the matching predicate. -/
-theorem firstIndex_is_first (p : X → Prop) [DecidablePred p] :
-    ∀ (xs : List X) (h : ∃ a ∈ xs, p a) (j : Fin xs.length),
-      j.val < (firstIndex p xs h).val → ¬p (xs.get j) := by
-  intro xs
-  induction xs with
-  | nil => intro h; simp at h
-  | cons a xs ih =>
-    intro h j
-    by_cases ha : p a
-    · simp [firstIndex, ha]
-    · refine Fin.cases (by intro _; exact ha) (fun i => ?_) j
-      intro hi
-      apply ih (match_in_tail p h ha) i
-      exact Nat.lt_of_succ_lt_succ (by
-        simpa only [firstIndex, ha, dite_false, Fin.val_succ] using hi)
+      xs.get (firstIndex p xs h) = (scanWitness p xs h).val := fun _ _ => rfl
 
 /-- A local label slot is an index into the explicit bounded address list. -/
 abbrev AddressIndex (d t : Nat) := Fin (allAddresses d t).length
@@ -91,30 +52,8 @@ def addressIndex (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
 theorem addressIndex_get (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
     (center : Fin vertices) (u : Ball G t center) :
     (allAddresses d t).get (addressIndex G t center u) =
-      (finitePortSelector G t center).address u := by
-  change (allAddresses d t).get (firstIndex
-    (fun w => (wordToBall G t center w).val = u.val) (allAddresses d t) _) =
-      (scanWitness _ _ _).val
-  exact get_firstIndex _ _ _
+      (finitePortSelector G t center).address u := rfl
 
-theorem addressIndex_matches (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
-    (center : Fin vertices) (u : Ball G t center) :
-    wordToBall G t center ((allAddresses d t).get (addressIndex G t center u)) = u := by
-  rw [addressIndex_get]
-  exact (finitePortSelector G t center).correct u
-
-theorem addressIndex_is_first (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
-    (center : Fin vertices) (u : Ball G t center) (j : AddressIndex d t)
-    (hj : j.val < (addressIndex G t center u).val) :
-    (wordToBall G t center ((allAddresses d t).get j)).val ≠ u.val := by
-  exact firstIndex_is_first _ _ _ j hj
-
-/-- The address bound depends on degree and radius, not the vertex count. -/
-theorem addressIndex_lt (G : PortGraph (Fin vertices) (Fin d)) (t : Nat)
-    (center : Fin vertices) (u : Ball G t center) :
-    (addressIndex G t center u).val < ∑ n : Fin (t + 1), d ^ n.val := by
-  rw [← length_allAddresses]
-  exact (addressIndex G t center u).isLt
 
 abbrev LabelTable (d t : Nat) (A : Type*) := Vector A (allAddresses d t).length
 
@@ -173,10 +112,6 @@ def walkRows (G : PortGraph (Fin vertices) (Fin d)) (n : Nat)
   simpa only [walkRows, Fin.getElem_fin, Vector.getElem_ofFn] using
     labelTable_addressIndex G (n + 1) (endpoint G w) (headFromEnd G n w k) b
 
-theorem walkRows_length (G : PortGraph (Fin vertices) (Fin d)) (n : Nat)
-    (w : Walk (Fin vertices) (Fin d) (n + 1)) :
-    (walkRows G n w).toList.length = n + 1 := by
-  simp
 
 /-- Evaluate an already stored row vector by finite label lookups. The only
 quantified type is the bounded set of walk positions. -/

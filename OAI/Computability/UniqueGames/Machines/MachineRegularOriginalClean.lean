@@ -1,4 +1,5 @@
-import OAI.Computability.UniqueGames.Machines.MachineDrain
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Research.R22MachinesRegular
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalRow
 
 namespace OAI
@@ -43,10 +44,6 @@ def cleanupSteps (base : Tape → List Bool) : Nat :=
   ((base 2).length + 1) + ((base 3).length + 1) + ((base 4).length + 1) +
     ((base 6).length + 1) + ((base 7).length + 1)
 
-private theorem join_trace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
-
 theorem cleanupTraceAt {σ Λ : Type} (q : Nat) (labels : Label → Λ) (exit : Option Λ)
     (program : Λ → TM2.Stmt Alphabet Λ (State σ))
     (code : ∀ l, program (labels l) = instruction q labels exit l)
@@ -54,51 +51,52 @@ theorem cleanupTraceAt {σ Λ : Type} (q : Nat) (labels : Label → Λ) (exit : 
     (advance (TM2.step program))^[cleanupSteps base]
       (some ⟨some (labels .query), state, base⟩) =
       some ⟨exit, (state.1, none), cleanupTapes base⟩ := by
-  let t1 := Function.update base (2 : Tape) []
-  let t2 := Function.update t1 (3 : Tape) []
-  let t3 := Function.update t2 (4 : Tape) []
-  let t4 := Function.update t3 (6 : Tape) []
-  have h0 := MachineDrain.drainTrace (2 : Tape) (labels .query) (some (labels .scan))
-    program (code .query) base (base 2) state.1 state.2
-  have h1 := MachineDrain.drainTrace (3 : Tape) (labels .scan) (some (labels .rawReverse))
-    program (code .scan) t1 (t1 3) state.1 none
-  have h2 := MachineDrain.drainTrace (4 : Tape) (labels .rawReverse) (some (labels .computedReverse))
-    program (code .rawReverse) t2 (t2 4) state.1 none
-  have h3 := MachineDrain.drainTrace (6 : Tape) (labels .computedReverse) (some (labels .relation))
-    program (code .computedReverse) t3 (t3 6) state.1 none
-  have h4 := MachineDrain.drainTrace (7 : Tape) (labels .relation) exit
-    program (code .relation) t4 (t4 7) state.1 none
-  simp only [Function.update_eq_self] at h0 h1 h2 h3 h4
-  simp only [t1, t2, t3, t4, Function.update_of_ne (by decide : (3 : Tape) ≠ 2),
-    Function.update_of_ne (by decide : (4 : Tape) ≠ 3),
-    Function.update_of_ne (by decide : (4 : Tape) ≠ 2),
-    Function.update_of_ne (by decide : (6 : Tape) ≠ 4),
-    Function.update_of_ne (by decide : (6 : Tape) ≠ 3),
-    Function.update_of_ne (by decide : (6 : Tape) ≠ 2),
-    Function.update_of_ne (by decide : (7 : Tape) ≠ 6),
-    Function.update_of_ne (by decide : (7 : Tape) ≠ 4),
-    Function.update_of_ne (by decide : (7 : Tape) ≠ 3),
-    Function.update_of_ne (by decide : (7 : Tape) ≠ 2)] at h1 h2 h3 h4
-  exact join_trace (join_trace (join_trace (join_trace h0 h1) h2) h3) h4
+  let chosen : List Tape := [2, 3, 4, 6, 7]
+  let drainLabels := fun l : MachineDrainMany.Label chosen =>
+    labels (![Label.query, .scan, .rawReverse, .computedReverse, .relation]
+      (MachineDrainMany.labelIndex chosen l))
+  have run := MachineDrainMany.trace chosen drainLabels exit program
+    (by
+      intro l
+      rcases l with (_ | _ | _ | _ | _ | l)
+      all_goals first | exact nomatch l | exact code _)
+    base state.1 state.2
+  simpa [MachineDrainMany.steps, MachineDrainMany.finalTapes, MachineDrainMany.entry,
+    MachineFiniteSequence.entry, MachineDrainMany.labelIndex, chosen, drainLabels,
+    MachineDrainMany.finalRegister, cleanupSteps, cleanupTapes, Nat.add_assoc] using run
 
 structure Input (t : Table) (e : Fin t.darts) (base : Tape → List Bool) : Prop
     extends MachineRegularOriginalRow.Input t e base where
   queryEmpty : base 2 = []
   scanEmpty : base 3 = []
 
+/-- One complete stack invariant serves both cleanup correctness and its cost. -/
+theorem rowFinalTapes (q : Nat) (t : Table) (e : Fin t.darts)
+    (base : Tape → List Bool) (input : Input t e base) :
+    MachineRegularOriginalRow.finalTapes q t e base =
+      ![base 0, base 1, encodeWord 0,
+        encodeWords (MachineRegularOriginalRow.suffixWords t e),
+        encodeWord t.rows[e].reverseIndex.val, base 5,
+        encodeWord ((q + 1) * t.rows[e].reverseIndex.val + q),
+        encodeWords (relationWords t.rows[e].relation), base 8,
+        base 9 ++ encodeWords (MachineRegularOriginalRow.emittedWords q t e)] := by
+  funext k
+  fin_cases k <;>
+    simp [MachineRegularOriginalRow.finalTapes, MachineRegularOriginalRow.affined,
+      MachineRegularOriginalRow.copied, MachineRegularOriginalRow.looked,
+      MachineAffineLookup.finalTapes, MachinePreservingLookup.finalTapes, MachineLookup.tapes,
+      MachineRegularOriginalRow.lookupTape, input.queryEmpty, input.scanEmpty,
+      input.reverseEmpty, input.computedEmpty, input.relationEmpty]
+
 theorem cleanup_frame (q : Nat) (t : Table) (e : Fin t.darts)
     (base : Tape → List Bool) (input : Input t e base) :
     cleanupTapes (MachineRegularOriginalRow.finalTapes q t e base) =
       Function.update base 9
         (base 9 ++ encodeWords (MachineRegularOriginalRow.emittedWords q t e)) := by
+  rw [rowFinalTapes q t e base input]
   funext k
-  fin_cases k <;>
-    simp [cleanupTapes, MachineRegularOriginalRow.finalTapes,
-      MachineRegularOriginalRow.affined, MachineRegularOriginalRow.copied,
-      MachineRegularOriginalRow.looked, MachineAffineLookup.finalTapes,
-      MachinePreservingLookup.finalTapes, MachineLookup.tapes,
-      MachineRegularOriginalRow.lookupTape, input.queryEmpty, input.scanEmpty,
-      input.reverseEmpty, input.computedEmpty, input.relationEmpty]
+  fin_cases k <;> simp [cleanupTapes, input.queryEmpty, input.scanEmpty,
+    input.reverseEmpty, input.computedEmpty, input.relationEmpty]
 
 theorem suffix_length_le (t : Table) (e : Fin t.darts) :
     (encodeWords (MachineRegularOriginalRow.suffixWords t e)).length ≤ (tableBits t).length := by
@@ -116,42 +114,8 @@ theorem cleanupSteps_eq (q : Nat) (t : Table) (e : Fin t.darts)
       (encodeWords (MachineRegularOriginalRow.suffixWords t e)).length +
         (q + 2) * t.rows[e].reverseIndex.val + q +
           (encodeWords (relationWords t.rows[e].relation)).length + 8 := by
-  have hquery : MachineRegularOriginalRow.finalTapes q t e base 2 = encodeWord 0 := by
-    simp only [MachineRegularOriginalRow.finalTapes,
-      Function.update_of_ne (by decide : (2 : Tape) ≠ 9), MachineRegularOriginalRow.affined,
-      Function.update_of_ne (by decide : (2 : Tape) ≠ 6), MachineRegularOriginalRow.copied,
-      Function.update_of_ne (by decide : (2 : Tape) ≠ 7),
-      Function.update_of_ne (by decide : (2 : Tape) ≠ 3)]
-    change MachineLookup.tapes (2 : Tape) 3 4 base
-      (encodeWord 0 ++ base 2)
-      (encodeWords ((GraphTables.tableWords t).drop (4098 * e.val + 3 + 1)) ++ base 3)
-      (encodeWord t.rows[e].reverseIndex.val ++ base 4) 2 = _
-    rw [MachineLookup.tapes_index _ _ _ (by decide) (by decide), input.queryEmpty,
-      List.append_nil]
-  have hscan : MachineRegularOriginalRow.finalTapes q t e base 3 =
-      encodeWords (MachineRegularOriginalRow.suffixWords t e) := by
-    simp only [MachineRegularOriginalRow.finalTapes,
-      Function.update_of_ne (by decide : (3 : Tape) ≠ 9), MachineRegularOriginalRow.affined,
-      Function.update_of_ne (by decide : (3 : Tape) ≠ 6), MachineRegularOriginalRow.copied,
-      Function.update_of_ne (by decide : (3 : Tape) ≠ 7), Function.update_self,
-      input.scanEmpty, List.append_nil]
-  have hraw : MachineRegularOriginalRow.finalTapes q t e base 4 =
-      encodeWord t.rows[e].reverseIndex.val := by
-    simp only [MachineRegularOriginalRow.finalTapes,
-      Function.update_of_ne (by decide : (4 : Tape) ≠ 9), MachineRegularOriginalRow.affined,
-      Function.update_of_ne (by decide : (4 : Tape) ≠ 6), MachineRegularOriginalRow.copied_reverse,
-      input.reverseEmpty, List.append_nil]
-  have hcomputed : MachineRegularOriginalRow.finalTapes q t e base 6 =
-      encodeWord ((q + 1) * t.rows[e].reverseIndex.val + q) := by
-    simp only [MachineRegularOriginalRow.finalTapes,
-      Function.update_of_ne (by decide : (6 : Tape) ≠ 9), MachineRegularOriginalRow.affined_reverse,
-      input.computedEmpty, List.append_nil]
-  have hrelation : MachineRegularOriginalRow.finalTapes q t e base 7 =
-      encodeWords (relationWords t.rows[e].relation) := by
-    simp only [MachineRegularOriginalRow.finalTapes,
-      Function.update_of_ne (by decide : (7 : Tape) ≠ 9), MachineRegularOriginalRow.affined_relation,
-      input.relationEmpty, List.append_nil]
-  simp only [cleanupSteps, hquery, hscan, hraw, hcomputed, hrelation, encodeWord_length]
+  rw [rowFinalTapes q t e base input]
+  simp [cleanupSteps, encodeWord_length]
   ring
 
 theorem cleanupSteps_le (q : Nat) (t : Table) (e : Fin t.darts)
@@ -172,7 +136,7 @@ def steps (q : Nat) (t : Table) (e : Fin t.darts) (base : Tape → List Bool) : 
   MachineRegularOriginalRow.steps q t e base +
     cleanupSteps (MachineRegularOriginalRow.finalTapes q t e base)
 
-def timeBound (q inputLength outputLength : Nat) : Nat :=
+def timeBound {R : Type*} [Semiring R] (q inputLength outputLength : R) : R :=
   (5 * q + 20) * inputLength + 2 * outputLength + 5 * q + 40995
 
 theorem steps_le (q : Nat) (t : Table) (e : Fin t.darts)
@@ -200,7 +164,7 @@ theorem traceAt {σ Λ : Type} (q : Nat) (labels : Label → Λ) (exit : Option 
     (MachineRegularOriginalRow.finalTapes q t e base)
     ((ambient, MachineRegularOriginalRow.zeroBuffer), none)
   rw [cleanup_frame q t e base input] at clean
-  exact join_trace row clean
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans row clean
 
 def machine (q : Nat) : FinTM2 where
   K := Tape
@@ -213,22 +177,6 @@ def machine (q : Nat) : FinTM2 where
   initialState := (((), MachineRegularOriginalRow.zeroBuffer), none)
   m := instruction q id none
 
-/-- Exact inherited-row emission with all working tapes restored to empty. -/
-def machineInTime (H : BaseTable) (t : Table) (e : Fin t.darts)
-    (base : Tape → List Bool) (input : Input t e base) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine internalDegree).step
-      ⟨some (.row (.lookup .seed)), (((), MachineRegularOriginalRow.zeroBuffer), register), base⟩
-      (some ⟨none, (((), MachineRegularOriginalRow.zeroBuffer), none),
-        Function.update base (9 : Tape)
-          (base (9 : Tape) ++ encodeWords (rowWords (MachineRegularOriginalRow.inheritedRow H t e)))⟩)
-      (timeBound internalDegree (tableBits t).length (base (9 : Tape)).length) where
-  steps := steps internalDegree t e base
-  evals_in_steps := by
-    change (advance (TM2.step (instruction internalDegree id none)))^[_] _ = _
-    rw [MachineRegularOriginalRow.inheritedRow_words]
-    exact traceAt internalDegree id none (instruction internalDegree id none)
-      (fun _ => rfl) t e base input () register
-  steps_le_m := steps_le internalDegree t e base input
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOriginalClean
 

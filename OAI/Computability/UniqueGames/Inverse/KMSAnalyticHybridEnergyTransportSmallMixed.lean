@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticHybridEnergyTransportSmall
 import OAI.Computability.UniqueGames.Inverse.KMSFourthMomentMixedEnergyLemmas
 
@@ -36,24 +37,7 @@ theorem partialRestrict_codomain_pullback (b : F ≃ₗ[F2] F')
     partialRestrict (fun Y => g (b.toLinearMap.comp Y)) u =
       fun X => partialRestrict g (b.toLinearMap.comp u) (b.toLinearMap.comp X) := by
   funext X
-  change g (b.toLinearMap.comp (u.coprod X)) =
-    g ((b.toLinearMap.comp u).coprod (b.toLinearMap.comp X))
-  apply congrArg g
-  apply LinearMap.ext
-  intro p
-  change b (u p.1 + X p.2) = b (u p.1) + b (X p.2)
-  exact b.map_add _ _
-
-private theorem arrowCongr_refl_left_apply (b : F ≃ₗ[F2] F') (X : I →ₗ[F2] F) :
-    LinearEquiv.arrowCongr (LinearEquiv.refl F2 I) b X = b.toLinearMap.comp X := by
-  ext x
-  rfl
-
-private theorem arrowCongr_refl_right_apply (b : F ≃ₗ[F2] F') (T : F →ₗ[F2] I) :
-    LinearEquiv.arrowCongr b (LinearEquiv.refl F2 I) T =
-      T.comp b.symm.toLinearMap := by
-  ext x
-  rfl
+  exact congrArg g (LinearMap.comp_coprod _ _ _)
 
 variable [FiniteDimensional F2 I] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
   [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)]
@@ -67,8 +51,7 @@ theorem linearCoeff_postcomp_equiv (b : F ≃ₗ[F2] F')
     (g : (I →ₗ[F2] F') → ℝ) (T : F →ₗ[F2] I) :
     linearCoeff (fun X => g (b.toLinearMap.comp X)) T =
       linearCoeff g (T.comp b.symm.toLinearMap) := by
-  simpa only [arrowCongr_refl_left_apply, arrowCongr_refl_right_apply] using
-    NaturalTransport.linearCoeff_pullback (LinearEquiv.refl F2 I) b g T
+  exact NaturalTransport.linearCoeff_pullback (LinearEquiv.refl F2 I) b g T
 
 omit [FiniteDimensional F2 I] [FiniteDimensional F2 F] [FiniteDimensional F2 F'] in
 /-- Transport the prescribed frequency with the codomain. This identity
@@ -84,15 +67,12 @@ theorem sliceEnergy_codomain_pullback (b : F ≃ₗ[F2] F')
   intro T
   have hp : π.comp (T.comp b.symm.toLinearMap) = ν.comp b.symm.toLinearMap ↔
       π.comp T = ν := by
-    constructor
-    · intro h
-      ext x
-      have hx := congrArg (fun M : F' →ₗ[F2] J => M (b x)) h
-      simpa using hx
-    · intro h
-      rw [← LinearMap.comp_assoc, h]
-  simp only [LinearEquiv.coe_toEquiv, arrowCongr_refl_right_apply,
-    linearCoeff_postcomp_equiv, hp]
+    rw [← LinearMap.comp_assoc]
+    exact LinearMap.cancel_right b.symm.surjective
+  change (if π.comp T = ν then _ else _) =
+    (if π.comp (T.comp b.symm.toLinearMap) = ν.comp b.symm.toLinearMap then _ else _)
+  rw [hp, linearCoeff_postcomp_equiv]
+  rfl
 
 variable {E E' : Type*}
   [AddCommGroup E] [Module F2 E] [AddCommGroup E'] [Module F2 E']

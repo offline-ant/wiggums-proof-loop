@@ -1,5 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Analysis.Complex.Exponential
-import Mathlib.Analysis.SpecificLimits.Basic
+import Mathlib.Analysis.SpecialFunctions.Log.Basic
 import Mathlib.Tactic.FieldSimp
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
@@ -132,12 +133,6 @@ theorem cleanProbability_ge_of_card_le {β : ℝ} (hβ₀ : 0 ≤ β) {N : ℝ}
   exact div_le_div_of_nonneg_left hβ₀
     (Nat.cast_pos.mpr Fintype.card_pos) hcard
 
-theorem cleanProbability_ge_dimension {β : ℝ} (hβ₀ : 0 ≤ β) (dimW rs : ℕ)
-    (hcard : Fintype.card E ≤ 2 ^ (dimW + rs)) :
-    β * (2 : ℝ) ^ (-((dimW + rs : ℕ) : ℤ)) ≤ cleanProbability β E := by
-  rw [zpow_neg, zpow_natCast, ← div_eq_mul_inv]
-  apply cleanProbability_ge_of_card_le hβ₀
-  exact_mod_cast hcard
 
 /-- Larger clean probability decreases the moment for a rate in `[0,1]`. -/
 theorem mask_rate_antitone {p q ρ : ℝ} (hp₀ : 0 ≤ p) (hp₁ : p ≤ 1)
@@ -187,24 +182,6 @@ theorem mask_rate_le_exp {x : ℝ} (hx : x ≤ 1) (k : ℕ) :
       congr 1
       ring
 
-theorem clean_mask_moment_le_exp (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (origin : E) (k : ℕ) {N : ℝ} (hcard : (Fintype.card E : ℝ) ≤ N) :
-    ((singletonSlopeLaw (E := E) β hβ₀ hβ₁).iid k).expectation
-        (fun sample => (1 - (1 : ℝ) / 3600) ^
-          maskCount (fun i => cleanBit origin (sample i))) ≤
-      Real.exp (-(k : ℝ) * (β / N) / 3600) := by
-  have hN : 1 ≤ N := by
-    have hc : (1 : ℝ) ≤ Fintype.card E := by
-      exact_mod_cast Fintype.card_pos (α := E)
-    exact hc.trans hcard
-  have hq : β / N ≤ 1 := (div_le_iff₀ (by linarith)).mpr (by simpa using hβ₁.trans hN)
-  have hx : β / N / 3600 ≤ 1 := (div_le_iff₀ (by norm_num)).mpr (by linarith)
-  have h := (clean_mask_moment_le β hβ₀ hβ₁ origin k hcard).trans
-    (mask_rate_le_exp hx k)
-  simpa only [mul_div_assoc] using h
-
-theorem cube_singleton_probability_nonneg (n : ℕ) : 0 ≤ (1 / (n : ℝ)) ^ 2 :=
-  sq_nonneg _
 
 theorem cube_singleton_probability_le_one {n : ℕ} (hn : 1 ≤ n) :
     (1 / (n : ℝ)) ^ 2 ≤ 1 := by
@@ -241,28 +218,13 @@ theorem cube_mask_rate_le_exp {n : ℕ} (hn : 1 ≤ n) {N : ℝ} (hN : 1 ≤ N) 
 bound and the required error. This is a scalar fact, not a game-value theorem. -/
 theorem exists_cube_exponential_lt {N error : ℝ} (hN : 0 < N) (herror : 0 < error) :
     ∃ n : ℕ, 1 ≤ n ∧ Real.exp (-(n : ℝ) / (3600 * N)) < error := by
-  let rate := Real.exp (-(1 / (3600 * N)))
-  have hrate₀ : 0 ≤ rate := (Real.exp_pos _).le
-  have hrate₁ : rate < 1 := Real.exp_lt_one_iff.mpr
-    (neg_lt_zero.mpr (one_div_pos.mpr (mul_pos (by norm_num) hN)))
-  have ht := tendsto_pow_atTop_nhds_zero_of_lt_one hrate₀ hrate₁
-  obtain ⟨m, hm⟩ := (ht.eventually (gt_mem_nhds herror)).exists
-  refine ⟨m + 1, Nat.succ_le_succ (Nat.zero_le m), ?_⟩
-  have hp : rate ^ (m + 1) < error :=
-    lt_of_le_of_lt (by
-      rw [pow_succ]
-      exact mul_le_of_le_one_right (pow_nonneg hrate₀ m) hrate₁.le) hm
-  have he : Real.exp (-((m + 1 : ℕ) : ℝ) / (3600 * N)) = rate ^ (m + 1) := by
-    rw [← Real.exp_nat_mul]
-    congr 1
-    ring
-  rwa [he]
+  obtain ⟨n, hn⟩ := exists_nat_gt (max 0 (-(3600 * N) * Real.log error))
+  have hnpos : (0 : ℝ) < n := (le_max_left _ _).trans_lt hn
+  refine ⟨n, Nat.cast_pos.mp hnpos, (Real.lt_log_iff_exp_lt herror).mp ?_⟩
+  apply (div_lt_iff₀ (mul_pos (by norm_num) hN)).mpr
+  have hlarge := (le_max_right _ _).trans_lt hn
+  linarith
 
-theorem exists_cube_mask_rate_lt {N error : ℝ} (hN : 1 ≤ N) (herror : 0 < error) :
-    ∃ n : ℕ, 1 ≤ n ∧
-      (1 - ((1 / (n : ℝ)) ^ 2 / N) / 3600) ^ (n ^ 3) < error := by
-  obtain ⟨n, hn, he⟩ := exists_cube_exponential_lt (by linarith : 0 < N) herror
-  exact ⟨n, hn, (cube_mask_rate_le_exp hn hN).trans_lt he⟩
 
 end
 end UniqueGamesTheorem.Clean
@@ -292,102 +254,6 @@ noncomputable section
 variable {Ω Q₁ Q₂ A₁ A₂ : Type*}
 variable [Fintype Ω] [Fintype Q₁] [Fintype Q₂] [Fintype A₁] [Fintype A₂]
 
-def observedGame (law : FiniteDistribution Ω) (leftObservation : Ω → Q₁)
-    (rightObservation : Ω → Q₂) (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool) :
-    Game Q₁ Q₂ A₁ A₂ where
-  questions := law.pushforward (fun ω => (leftObservation ω, rightObservation ω))
-  accepts := accepts
-
-def conditionalAgreement (left : Q₁ → FiniteDistribution A₁)
-    (right : Q₂ → FiniteDistribution A₂)
-    (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool) (q₁ : Q₁) (q₂ : Q₂) : ℝ :=
-  ((left q₁).product (right q₂)).probability (fun a => accepts q₁ q₂ a.1 a.2)
-
-omit [Fintype Q₁] [Fintype Q₂] in
-theorem conditionalAgreement_nonnegative (left : Q₁ → FiniteDistribution A₁)
-    (right : Q₂ → FiniteDistribution A₂)
-    (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool) (q₁ : Q₁) (q₂ : Q₂) :
-    0 ≤ conditionalAgreement left right accepts q₁ q₂ :=
-  FiniteDistribution.probability_nonnegative _ _
-
-omit [Fintype Q₁] [Fintype Q₂] in
-theorem conditionalAgreement_le_one (left : Q₁ → FiniteDistribution A₁)
-    (right : Q₂ → FiniteDistribution A₂)
-    (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool) (q₁ : Q₁) (q₂ : Q₂) :
-    conditionalAgreement left right accepts q₁ q₂ ≤ 1 :=
-  FiniteDistribution.probability_le_one _ _
-
-theorem stochasticSuccess_eq_actual_expectation
-    [DecidableEq Q₁] [DecidableEq Q₂]
-    (law : FiniteDistribution Ω) (leftObservation : Ω → Q₁)
-    (rightObservation : Ω → Q₂) (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool)
-    (left : Q₁ → FiniteDistribution A₁) (right : Q₂ → FiniteDistribution A₂) :
-    (observedGame law leftObservation rightObservation accepts).stochasticSuccess left right =
-      law.expectation (fun ω => conditionalAgreement left right accepts
-        (leftObservation ω) (rightObservation ω)) := by
-  unfold Game.stochasticSuccess observedGame
-  rw [FiniteDistribution.expectation_pushforward]
-  apply FiniteDistribution.expectation_congr
-  intro ω
-  simp only [conditionalAgreement, FiniteDistribution.probability,
-    FiniteDistribution.product, FiniteDistribution.expectation, Fintype.sum_prod_type]
-  apply Finset.sum_congr rfl
-  intro a _
-  rw [Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro b _
-  by_cases h : accepts (leftObservation ω) (rightObservation ω) a b = true <;> simp [h]
-
-/-- Averaging conditional independent decoder success over the actual advice
-draw multiplies the two positive lower bounds. -/
-theorem good_data_mass_lower
-    [DecidableEq Q₁] [DecidableEq Q₂]
-    (law : FiniteDistribution Ω) (leftObservation : Ω → Q₁)
-    (rightObservation : Ω → Q₂) (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool)
-    (left : Q₁ → FiniteDistribution A₁) (right : Q₂ → FiniteDistribution A₂)
-    (good : Ω → Bool) (γ₁ γ₂ : ℝ) (hγ₂ : 0 ≤ γ₂)
-    (hmass : γ₁ ≤ law.probability good)
-    (hagreement : ∀ ω, good ω = true → γ₂ ≤
-      conditionalAgreement left right accepts (leftObservation ω) (rightObservation ω)) :
-    γ₁ * γ₂ ≤
-      (observedGame law leftObservation rightObservation accepts).stochasticSuccess left right := by
-  rw [stochasticSuccess_eq_actual_expectation]
-  have hweighted : law.probability good * γ₂ ≤ law.expectation
-      (fun ω => conditionalAgreement left right accepts
-        (leftObservation ω) (rightObservation ω)) := by
-    unfold FiniteDistribution.probability FiniteDistribution.expectation
-    rw [Finset.sum_mul]
-    apply Finset.sum_le_sum
-    intro ω _
-    by_cases hgood : good ω = true
-    · simp only [hgood, ↓reduceIte]
-      exact mul_le_mul_of_nonneg_left (hagreement ω hgood) (law.nonnegative ω)
-    · simp only [hgood, Bool.false_eq_true, ↓reduceIte, zero_mul]
-      exact mul_nonneg (law.nonnegative ω) (conditionalAgreement_nonnegative _ _ _ _ _)
-  exact (mul_le_mul_of_nonneg_right hmass hγ₂).trans hweighted
-
-/-- The final strategies receive precisely their local observations. Private
-sampling is eliminated by the existing finite response-table construction. -/
-theorem exists_local_deterministic_strategies
-    [DecidableEq Q₁] [DecidableEq Q₂] [Nonempty A₁] [Nonempty A₂]
-    (law : FiniteDistribution Ω) (leftObservation : Ω → Q₁)
-    (rightObservation : Ω → Q₂) (accepts : Q₁ → Q₂ → A₁ → A₂ → Bool)
-    (left : Q₁ → FiniteDistribution A₁) (right : Q₂ → FiniteDistribution A₂)
-    (good : Ω → Bool) (γ₁ γ₂ : ℝ) (hγ₂ : 0 ≤ γ₂)
-    (hmass : γ₁ ≤ law.probability good)
-    (hagreement : ∀ ω, good ω = true → γ₂ ≤
-      conditionalAgreement left right accepts (leftObservation ω) (rightObservation ω)) :
-    ∃ leftStrategy : Q₁ → A₁, ∃ rightStrategy : Q₂ → A₂,
-      γ₁ * γ₂ ≤ law.probability (fun ω => accepts
-        (leftObservation ω) (rightObservation ω)
-        (leftStrategy (leftObservation ω)) (rightStrategy (rightObservation ω))) := by
-  let G := observedGame law leftObservation rightObservation accepts
-  obtain ⟨strategy, hstrategy⟩ := G.exists_deterministic_ge_stochastic left right
-  refine ⟨strategy.1, strategy.2, ?_⟩
-  have h := (good_data_mass_lower law leftObservation rightObservation accepts
-    left right good γ₁ γ₂ hγ₂ hmass hagreement).trans hstrategy
-  simpa only [G, Game.success, observedGame, FiniteDistribution.probability_pushforward,
-    Game.wins] using h
 
 end
 end UniqueGamesTheorem.Decoder.StrategyAssembly

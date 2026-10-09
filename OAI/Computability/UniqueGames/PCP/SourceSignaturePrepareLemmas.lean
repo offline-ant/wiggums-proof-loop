@@ -1,4 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
+import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.PCP.HonestTestLemmas
 import OAI.Computability.UniqueGames.PCP.SourceContextLoad
 import OAI.Computability.UniqueGames.PCP.SourceDescriptorEmissionLemmas
@@ -66,58 +68,29 @@ theorem place_injective : Function.Injective (place (u := u) (Extra := Extra)) :
 theorem place_unplace (a : Arena u Extra) (k : MachineFieldProfile.Tape (Width u))
     (h : unplace a = some k) : place k = a := by
   cases a with
-  | formula => simp [unplace] at h
-  | index => cases Option.some.inj h; rfl
-  | work => cases Option.some.inj h; rfl
-  | scratch => cases Option.some.inj h; rfl
-  | copyScratch => simp [unplace] at h
-  | current t => simp [unplace] at h
-  | remaining t => simp [unplace] at h
-  | extra e => simp [unplace] at h
   | field t s =>
-    by_cases h0 : s = 0
-    · subst s
-      simp only [unplace, ↓reduceIte] at h
-      cases Option.some.inj h
-      simp only [place, Equiv.symm_apply_apply]
-      rfl
-    · by_cases h2 : s = 2
-      · subst s
-        simp only [unplace, ↓reduceIte] at h
-        cases Option.some.inj h
-        simp only [place, Equiv.symm_apply_apply]
-        rfl
-      · by_cases h4 : s = 4
-        · subst s
-          simp only [unplace, ↓reduceIte] at h
-          cases Option.some.inj h
-          simp only [place, Equiv.symm_apply_apply]
-          rfl
-        · simp [unplace, h0, h2, h4] at h
+    fin_cases s <;> simp only [unplace] at h <;>
+      cases h <;> simp only [place, Equiv.symm_apply_apply] <;> rfl
+  | _ => cases h <;> rfl
 
 def fill (base : Arena u Extra → List Bool)
     (localTapes : MachineFieldProfile.Tape (Width u) → List Bool) : Arena u Extra → List Bool :=
-  fun a => match unplace a with
-    | some k => localTapes k
-    | none => base a
+  MachineCloudPadding.Placement.tapes unplace localTapes base
 
 @[simp] theorem fill_place (base : Arena u Extra → List Bool)
     (localTapes : MachineFieldProfile.Tape (Width u) → List Bool)
     (k : MachineFieldProfile.Tape (Width u)) : fill base localTapes (place k) = localTapes k := by
-  simp only [fill, unplace_place]
+  exact MachineCloudPadding.Placement.tapes_apply place unplace unplace_place localTapes base k
 
 @[simp] theorem fill_self (base : Arena u Extra → List Bool) :
     fill base (base ∘ place) = base := by
   funext a
   cases h : unplace a with
-  | none => simp only [fill, h]
+  | none => simp only [fill, MachineCloudPadding.Placement.tapes, h]
   | some k =>
-    simp only [fill, h, Function.comp_apply, place_unplace a k h]
+    simp only [fill, MachineCloudPadding.Placement.tapes, h, Function.comp_apply,
+      place_unplace a k h]
 
-theorem fill_frame (base : Arena u Extra → List Bool)
-    (localTapes : MachineFieldProfile.Tape (Width u) → List Bool)
-    (a : Arena u Extra) (h : unplace a = none) : fill base localTapes a = base a := by
-  simp only [fill, h]
 
 variable [DecidableEq Extra]
 
@@ -126,23 +99,8 @@ theorem fill_update (base : Arena u Extra → List Bool)
     (k : MachineFieldProfile.Tape (Width u)) (value : List Bool) :
     fill base (Function.update localTapes k value) =
       Function.update (fill base localTapes) (place k) value := by
-  funext a
-  cases hu : unplace a with
-  | none =>
-    have hne : a ≠ place k := by
-      intro h
-      rw [h, unplace_place] at hu
-      contradiction
-    simp only [fill, hu, Function.update_of_ne hne]
-  | some j =>
-    have ha := place_unplace a j hu
-    rw [← ha]
-    by_cases h : j = k
-    · subst j
-      simp only [fill_place]
-      simp [Function.update]
-    · have hne : place (Extra := Extra) j ≠ place k := fun h' => h (place_injective h')
-      simp only [fill_place, Function.update_of_ne h, Function.update_of_ne hne]
+  exact MachineCloudPadding.Placement.tapes_update place unplace unplace_place
+    place_unplace localTapes base k value
 
 def placedLabel : Option (ProfileLabel u) → Option (Label u)
   | none => some .commit
@@ -157,17 +115,9 @@ def placedConfiguration (base : Arena u Extra → List Bool) (metadata : Signatu
 def placedStatement :
     TM2.Stmt (fun _ : MachineFieldProfile.Tape (Width u) => Bool)
       (ProfileLabel u) (ProfileState u) →
-    TM2.Stmt (fun _ : Arena u Extra => Bool) (Label u) (State u τ)
-  | .push k f next => .push (place k) (fun state => f state.1) (placedStatement next)
-  | .peek k f next => .peek (place k) (fun state bit => (f state.1 bit, state.2))
-      (placedStatement next)
-  | .pop k f next => .pop (place k) (fun state bit => (f state.1 bit, state.2))
-      (placedStatement next)
-  | .load f next => .load (fun state => (f state.1, state.2)) (placedStatement next)
-  | .branch f yes no => .branch (fun state => f state.1)
-      (placedStatement yes) (placedStatement no)
-  | .goto f => .goto (fun state => .profile (f state.1))
-  | .halt => .goto (fun _ => .commit)
+    TM2.Stmt (fun _ : Arena u Extra => Bool) (Label u) (State u τ) :=
+  fun q => MachineStateFrame.frameStatement
+    (MachineCloudPadding.Placement.statement place Label.profile (some .commit) q)
 
 theorem placed_stepAux (base : Arena u Extra → List Bool) (metadata : Signature u × τ)
     (q : TM2.Stmt (fun _ : MachineFieldProfile.Tape (Width u) => Bool)
@@ -175,26 +125,10 @@ theorem placed_stepAux (base : Arena u Extra → List Bool) (metadata : Signatur
     (state : ProfileState u) (localTapes : MachineFieldProfile.Tape (Width u) → List Bool) :
     TM2.stepAux (placedStatement q) (state, metadata) (fill base localTapes) =
       placedConfiguration base metadata (TM2.stepAux q state localTapes) := by
-  induction q generalizing state localTapes with
-  | push k f next ih =>
-    simp only [placedStatement, TM2.stepAux, fill_place]
-    rw [← fill_update]
-    exact ih state _
-  | peek k f next ih =>
-    simpa only [placedStatement, TM2.stepAux, fill_place] using
-      ih (f state (localTapes k).head?) localTapes
-  | pop k f next ih =>
-    simp only [placedStatement, TM2.stepAux, fill_place]
-    rw [← fill_update]
-    exact ih (f state (localTapes k).head?) _
-  | load f next ih =>
-    simpa only [placedStatement, TM2.stepAux] using ih (f state) localTapes
-  | branch f yes no ihYes ihNo =>
-    cases h : f state
-    · simpa only [placedStatement, TM2.stepAux, h, Bool.cond_false] using ihNo state localTapes
-    · simpa only [placedStatement, TM2.stepAux, h, Bool.cond_true] using ihYes state localTapes
-  | goto f => rfl
-  | halt => rfl
+  rw [placedStatement, MachineStateFrame.frame_stepAux, fill,
+    MachineCloudPadding.Placement.stepAux_simulation place unplace unplace_place place_unplace]
+  cases TM2.stepAux q state localTapes with
+  | mk label state tapes => cases label <;> rfl
 
 /-- Reassociate finite registers without adding a transition. -/
 def signStateEquiv (u : ℕ) (τ : Type) :
@@ -638,75 +572,6 @@ def program (u D : ℕ) (sources : Fin 3 → K) (destination scratch : K)
       SourceEquationEmit.statement sources destination scratch (localEquation u D state)
         (bodyLabel u D state) exit label
 
-/-- The table selector is one real transition; every subsequent copy/push
-transition belongs to the same fixed program. -/
-theorem testTrace (u D : ℕ) (sources : Fin 3 → K) (destination scratch : K)
-    (sourceDestination : ∀ side, sources side ≠ destination)
-    (sourceScratch : ∀ side, sources side ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (exit : Option (Label u D))
-    (state : LocalInput u D) (base : K → List Bool) (values : Fin 3 → ℕ)
-    (sourceWords : ∀ side, base (sources side) = encodeWord (values side))
-    (scratchEmpty : base scratch = []) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step (program u D sources destination scratch exit)))^[
-      SourceEquationEmit.steps values (localEquation u D state) + 1]
-        (some ⟨some (.inl ()), (state, register), base⟩) =
-      some ⟨exit, (state, none),
-        prefixTapes destination base (words values (localEquation u D state))⟩ := by
-  rw [Function.iterate_succ_apply]
-  change (MachineComposition.advance (TM2.step (program u D sources destination scratch exit)))^[
-    SourceEquationEmit.steps values (localEquation u D state)]
-      (some ⟨some (bodyLabel u D state .seed), (state, register), base⟩) = _
-  exact SourceEquationEmit.equationTrace sources destination scratch sourceDestination
-    sourceScratch destinationScratch (localEquation u D state) (bodyLabel u D state) exit
-    (program u D sources destination scratch exit) (fun _ => rfl)
-    base values sourceWords scratchEmpty state register
-
-def testInTime (u D : ℕ) (sources : Fin 3 → K) (destination scratch : K)
-    (sourceDestination : ∀ side, sources side ≠ destination)
-    (sourceScratch : ∀ side, sources side ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (exit : Option (Label u D))
-    (state : LocalInput u D) (base : K → List Bool) (values : Fin 3 → ℕ)
-    (sourceWords : ∀ side, base (sources side) = encodeWord (values side))
-    (scratchEmpty : base scratch = []) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program u D sources destination scratch exit))
-      ⟨some (.inl ()), (state, register), base⟩
-      (some ⟨exit, (state, none),
-        prefixTapes destination base (words values (localEquation u D state))⟩)
-      (SourceEquationEmit.steps values (localEquation u D state) + 1) where
-  steps := SourceEquationEmit.steps values (localEquation u D state) + 1
-  evals_in_steps := testTrace u D sources destination scratch sourceDestination sourceScratch
-    destinationScratch exit state base values sourceWords scratchEmpty register
-  steps_le_m := Nat.le_refl _
-
-def sourceTestInTime (F : Formula) (u D : ℕ) (p : SourceIndex F u D)
-    (sources : Fin 3 → K) (destination scratch : K)
-    (sourceDestination : ∀ side, sources side ≠ destination)
-    (sourceScratch : ∀ side, sources side ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (exit : Option (Label u D))
-    (base : K → List Bool)
-    (sourceWords : ∀ side, base (sources side) = encodeWord
-      (baseValue F u p.1.1 (sampledVariables F p.1.1 p.1.2) side))
-    (scratchEmpty : base scratch = []) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program u D sources destination scratch exit))
-      ⟨some (.inl ()), ((ofContext F p.1.1 p.1.2, p.2), register), base⟩
-      (some ⟨exit, ((ofContext F p.1.1 p.1.2, p.2), none),
-        prefixTapes destination base
-          (UniqueGamesTheorem.Reduction.SourceEncoding.equationWords (sourceEquation F u D p))⟩)
-      (6 * nBits F u + 17) where
-  steps := SourceEquationEmit.steps
-    (baseValue F u p.1.1 (sampledVariables F p.1.1 p.1.2))
-    (localEquation u D (ofContext F p.1.1 p.1.2, p.2)) + 1
-  evals_in_steps := by
-    rw [sourceEquation_words]
-    exact testTrace u D sources destination scratch sourceDestination sourceScratch
-      destinationScratch exit (ofContext F p.1.1 p.1.2, p.2) base
-      (baseValue F u p.1.1 (sampledVariables F p.1.1 p.1.2)) sourceWords scratchEmpty register
-  steps_le_m := by
-    have h := equation_emit_steps_le F u p.1.1 (sampledVariables F p.1.1 p.1.2)
-      (localEquation u D (ofContext F p.1.1 p.1.2, p.2))
-    change _ + 1 ≤ _
-    unfold SourceEquationEmit.steps
-    omega
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceTestEmit
 
@@ -853,33 +718,6 @@ theorem appendTrace (u D : Nat) (layout : Layout K) (labels : Label u D → Λ) 
     Function.iterate_add_apply, hemit]
   exact transferred
 
-def appendInTime (u D : Nat) (layout : Layout K) (labels : Label u D → Λ) (exit : Option Λ)
-    (p : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State u D))
-    (atLabels : ∀ label, p (labels label) = statement u D layout labels exit label)
-    (state : LocalInput u D) (base : K → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (layout.sources side) = encodeWord (values side))
-    (scratchEmpty : base layout.scratch = []) (temporaryEmpty : base layout.temporary = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step p)
-      ⟨some (labels (.test (.inl ()))), (state, register), base⟩
-      (some ⟨exit, (state, none), resultTapes layout base (equationBits u D values state)⟩)
-      (steps u D values state) where
-  steps := steps u D values state
-  evals_in_steps := appendTrace u D layout labels exit p atLabels state base values
-    sourceWords scratchEmpty temporaryEmpty register
-  steps_le_m := Nat.le_refl _
-
-def programInTime (u D : Nat) (layout : Layout K) (exit : Option (Label u D))
-    (state : LocalInput u D) (base : K → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (layout.sources side) = encodeWord (values side))
-    (scratchEmpty : base layout.scratch = []) (temporaryEmpty : base layout.temporary = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program u D layout exit))
-      ⟨some (.test (.inl ())), (state, register), base⟩
-      (some ⟨exit, (state, none), resultTapes layout base (equationBits u D values state)⟩)
-      (steps u D values state) :=
-  appendInTime u D layout id exit (program u D layout exit) (fun _ => rfl) state base values
-    sourceWords scratchEmpty temporaryEmpty register
 
 def sourceAppendInTime (F : Formula) (u D : Nat) (occurrence : SourceIndex F u D)
     (layout : Layout K) (labels : Label u D → Λ) (exit : Option Λ)
@@ -942,16 +780,6 @@ def machine (u D : Nat) (initial : LocalInput u D) : FinTM2 where
   initialState := (initial, none)
   m := program u D standardLayout none
 
-def machineInTime (u D : Nat) (initial state : LocalInput u D)
-    (base : Tape → List Bool) (values : Fin 3 → Nat)
-    (sourceWords : ∀ side, base (.inl side) = encodeWord (values side))
-    (scratchEmpty : base (.inr 1) = []) (temporaryEmpty : base (.inr 0) = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine u D initial).step
-      ⟨some (Label.test (.inl ())), (state, register), base⟩
-      (some ⟨none, (state, none), resultTapes standardLayout base (equationBits u D values state)⟩)
-      (steps u D values state) :=
-  programInTime u D standardLayout none state base values sourceWords scratchEmpty temporaryEmpty register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceTestAppend
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.Basis.Defs
 import Mathlib.LinearAlgebra.Matrix.Rank
 import Mathlib.Tactic.Ring
@@ -48,40 +49,6 @@ theorem dot_lift_eq_alignment_mulVec (b : Basis ι R V)
   intro j hj
   ring
 
-/-- Existence of *any* linear lift aligning on the chosen inputs is one
-column-membership event.  In particular there is no field-size-dependent
-union bound over the possible lifts. -/
-theorem exists_lift_alignment_iff_mem_range (b : Basis ι R V)
-    (point : E → V) (z : V → n → F) (c : E → F) :
-    (∃ g : V →ₗ[R] (n → F), ∀ e,
-      (∑ i, z (point e) i * g (point e) i) = c e) ↔
-      c ∈ LinearMap.range (alignmentMatrix b point z).mulVecLin := by
-  constructor
-  · rintro ⟨g, hg⟩
-    refine ⟨fun ij => g (b ij.2) ij.1, ?_⟩
-    ext e
-    change (alignmentMatrix b point z *ᵥ (fun ij => g (b ij.2) ij.1)) e = c e
-    rw [← dot_lift_eq_alignment_mulVec]
-    exact hg e
-  · rintro ⟨u, hu⟩
-    let g : V →ₗ[R] (n → F) := b.constr R (fun j i => u (i, j))
-    refine ⟨g, ?_⟩
-    intro e
-    rw [dot_lift_eq_alignment_mulVec b point z g e]
-    have hg : (fun ij : n × ι => g (b ij.2) ij.1) = u := by
-      funext ij
-      exact congrFun (b.constr_basis R (fun j i => u (i, j)) ij.2) ij.1
-    rw [hg]
-    exact congrFun hu e
-
-/-- The column-space dimension is at most the number of free basis values.
-For three field coordinates and a binary basis of size `r`, this is `3r`. -/
-theorem finrank_alignment_range_le (b : Basis ι R V)
-    (point : E → V) (z : V → n → F) [Fintype E] :
-    Module.finrank F (LinearMap.range (alignmentMatrix b point z).mulVecLin) ≤
-      Fintype.card n * Fintype.card ι := by
-  simpa only [Module.finrank_fintype_fun_eq_card, Fintype.card_prod] using
-      (LinearMap.finrank_range_le (alignmentMatrix b point z).mulVecLin)
 
 end
 

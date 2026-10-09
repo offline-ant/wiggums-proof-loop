@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
 import OAI.Computability.UniqueGames.Analysis.MatrixCharactersLemmas
 import OAI.Computability.UniqueGames.Analysis.RestrictionLemmas
@@ -96,19 +97,8 @@ theorem image_compression_eq_iff (W D : Submodule F2 U) (h : IsCompl W D)
     change imageCoordinates W D h ((imageCoordinates W D h).symm (S (b, 0)).2) = _
     rw [LinearEquiv.apply_symm_apply]
     rfl
-  constructor
-  · intro he
-    rw [← hc, he, imageCoordinates_frequency]
-  · intro he
-    apply LinearMap.ext
-    intro b
-    apply (imageCoordinates W D h).injective
-    have he' : (imageCoordinates W D h).toLinearMap.comp
-        ((LinearMap.snd F2 A U).comp
-          (((imageAmbientEquiv W D h).toLinearMap.comp S).comp (LinearMap.inl F2 B C))) =
-        (imageCoordinates W D h).toLinearMap.comp (W.subtype.comp z) := by
-      rw [hc, imageCoordinates_frequency, he]
-    exact congrArg (fun L : B →ₗ[F2] (W × D) => L b) he'
+  rw [← hc, ← imageCoordinates_frequency W D h z]
+  exact (LinearMap.cancel_left (imageCoordinates W D h).injective).symm
 
 theorem image_character (W D : Submodule F2 U) (h : IsCompl W D)
     (S : (B × C) →ₗ[F2] (A × (W × D))) (T : (A × U) →ₗ[F2] (B × C)) :
@@ -197,64 +187,6 @@ variable {E F : Type*}
   [FiniteDimensional F2 E] [FiniteDimensional F2 F]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
 
-/-- No dual frequency has image dimension larger than the primal domain. -/
-theorem rankComponent_eq_zero_of_finrank_lt
-    (f : (E →ₗ[F2] F) → ℝ) (i : ℕ) (hi : Module.finrank F2 E < i) :
-    rankComponent i f = 0 := by
-  apply eq_of_coeff_eq
-  intro S
-  have hne : Module.finrank F2 S.range ≠ i :=
-    ne_of_lt (lt_of_le_of_lt S.range.finrank_le hi)
-  rw [rankComponent, coeff_component, ite_eq_right hne]
-  simp [linearCoeff]
-
-/-- The dual frequency rank is also bounded by its domain, the primal
-codomain. This includes rectangular spaces in either orientation. -/
-theorem rankComponent_eq_zero_of_codomain_finrank_lt
-    (f : (E →ₗ[F2] F) → ℝ) (i : ℕ) (hi : Module.finrank F2 F < i) :
-    rankComponent i f = 0 := by
-  apply eq_of_coeff_eq
-  intro S
-  have hne : Module.finrank F2 S.range ≠ i :=
-    ne_of_lt (lt_of_le_of_lt (LinearMap.finrank_range_le S) hi)
-  rw [rankComponent, coeff_component, ite_eq_right hne]
-  simp [linearCoeff]
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-/-- The zero function remains zero under the actual hybrid projection and
-affine restriction. No enumeration of quotient frequencies is required. -/
-theorem hybridDerivative_zero (A : Submodule F2 E) (B : Submodule F2 F)
-    (T : E →ₗ[F2] F) :
-    hybridDerivative A B T (0 : (E →ₗ[F2] F) → ℝ) = 0 := by
-  funext N
-  simp [hybridDerivative, hybridProjector, spectralProjector, restrict, linearCoeff]
-
-theorem hybridDerivative_rankComponent_eq_zero_of_finrank_lt
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (T : E →ₗ[F2] F) (f : (E →ₗ[F2] F) → ℝ) (i : ℕ)
-    (hi : Module.finrank F2 E < i) :
-    hybridDerivative A B T (rankComponent i f) = 0 := by
-  rw [rankComponent_eq_zero_of_finrank_lt f i hi]
-  exact hybridDerivative_zero A B T
-
-theorem hybridDerivative_rankComponent_eq_zero_of_codomain_finrank_lt
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (T : E →ₗ[F2] F) (f : (E →ₗ[F2] F) → ℝ) (i : ℕ)
-    (hi : Module.finrank F2 F < i) :
-    hybridDerivative A B T (rankComponent i f) = 0 := by
-  rw [rankComponent_eq_zero_of_codomain_finrank_lt f i hi]
-  exact hybridDerivative_zero A B T
-
-/-- Finite primal restriction domains suffice to evaluate the zero energy;
-there is no additional `Fintype` requirement on the compressed dual space. -/
-theorem hybridDerivative_rankComponent_energy_eq_zero_of_finrank_lt
-    [Finite E] [Finite F]
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (T : E →ₗ[F2] F) (f : (E →ₗ[F2] F) → ℝ) (i : ℕ)
-    (hi : Module.finrank F2 E < i) :
-    (𝔼 N, hybridDerivative A B T (rankComponent i f) N ^ 2) = 0 := by
-  rw [hybridDerivative_rankComponent_eq_zero_of_finrank_lt A B T f i hi]
-  simp
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy
@@ -302,18 +234,6 @@ omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
     linearCoeff (smallComponent ι f) T = smallCoeff ι f T :=
   coeff_synthesis _ _
 
-omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
-theorem coeff_smallComponent_of_surjective (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) (T : F →ₗ[F2] I)
-    (hT : Function.Surjective T) :
-    linearCoeff (smallComponent ι f) T = linearCoeff f (ι.comp T) := by
-  simp only [coeff_smallComponent, smallCoeff, ite_eq_left hT]
-
-omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
-theorem coeff_smallComponent_of_not_surjective (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) (T : F →ₗ[F2] I)
-    (hT : ¬ Function.Surjective T) : linearCoeff (smallComponent ι f) T = 0 := by
-  simp only [coeff_smallComponent, smallCoeff, ite_eq_right hT]
 
 omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
 /-- Exact normalization: primal expectation equals an unnormalized sum over
@@ -327,19 +247,6 @@ theorem smallComponent_energy (ι : I →ₗ[F2] E) (f : (E →ₗ[F2] F) → �
   intro T _
   by_cases hT : Function.Surjective T <;> simp [smallCoeff, hT]
 
-omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
-/-- Every retained frequency has rank equal to the small domain dimension. -/
-theorem rankComponent_smallComponent (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    rankComponent (Module.finrank F2 I) (smallComponent ι f) = smallComponent ι f := by
-  apply eq_of_coeff_eq
-  intro T
-  simp only [rankComponent, coeff_component, coeff_smallComponent]
-  by_cases hT : Function.Surjective T
-  · have hr : Module.finrank F2 T.range = Module.finrank F2 I :=
-      Submodule.eq_top_iff_finrank_eq.mp (LinearMap.range_eq_top.mpr hT)
-    simp [hr]
-  · simp [smallCoeff, hT]
 
 omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
@@ -367,52 +274,6 @@ theorem smallCoeff_eq_of_kernel_coeff_const (ι κ : I →ₗ[F2] E)
       (ker_comp_of_injective κ hκ T).symm)
   · simp only [ite_eq_right hT]
 
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] in
-/-- Equality is of the actual synthesized functions, not merely their norms. -/
-theorem smallComponent_eq_of_kernel_coeff_const (ι κ : I →ₗ[F2] E)
-    (hι : Function.Injective ι) (hκ : Function.Injective κ)
-    (f : (E →ₗ[F2] F) → ℝ)
-    (hcoeff : ∀ S T : F →ₗ[F2] E,
-      S.ker = T.ker → linearCoeff f S = linearCoeff f T) :
-    smallComponent ι f = smallComponent κ f :=
-  congrArg synthesis (smallCoeff_eq_of_kernel_coeff_const ι κ hι hκ f hcoeff)
-
-omit [FiniteDimensional F2 E] [Fintype (F →ₗ[F2] E)] in
-/-- A small component is orthogonal to any small-space function whose full
-rank coefficients vanish. -/
-theorem smallComponent_orthogonal (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) (g : (I →ₗ[F2] F) → ℝ)
-    (hg : ∀ T : F →ₗ[F2] I, Function.Surjective T → linearCoeff g T = 0) :
-    (𝔼 X, smallComponent ι f X * g X) = 0 := by
-  rw [← linear_parseval_inner]
-  apply Finset.sum_eq_zero
-  intro T _
-  rw [coeff_smallComponent]
-  by_cases hT : Function.Surjective T
-  · rw [hg T hT, mul_zero]
-  · simp [smallCoeff, hT]
-
-/-- Injective frequency lifting cannot increase the total squared norm. -/
-theorem smallComponent_energy_le (ι : I →ₗ[F2] E) (hι : Function.Injective ι)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 X, smallComponent ι f X ^ 2) ≤ 𝔼 X, f X ^ 2 := by
-  have hinj : Function.Injective (fun T : F →ₗ[F2] I => ι.comp T) := by
-    intro T U hTU
-    apply LinearMap.ext
-    intro x
-    apply hι
-    exact congrArg (fun S : F →ₗ[F2] E => S x) hTU
-  rw [smallComponent_energy, ← linear_parseval]
-  calc
-    _ = ∑ S ∈ (Finset.univ.filter (fun T : F →ₗ[F2] I => Function.Surjective T)).image
-        (fun T => ι.comp T), linearCoeff f S ^ 2 := by
-      rw [Finset.sum_image]
-      intro T _ U _ hTU
-      exact hinj hTU
-    _ ≤ ∑ S, linearCoeff f S ^ 2 :=
-      Finset.sum_le_sum_of_subset_of_nonneg (Finset.subset_univ _)
-        (fun S _ _ => sq_nonneg _)
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -445,176 +306,11 @@ variable {E F I : Type*}
   [AddCommGroup E] [Module F2 E] [AddCommGroup F] [Module F2 F]
   [AddCommGroup I] [Module F2 I]
 
-/-- The actual injective maps from the comparison space. -/
-abbrev SmallEmbedding (I E : Type*) [AddCommGroup I] [Module F2 I]
-    [AddCommGroup E] [Module F2 E] :=
-  {ι : I →ₗ[F2] E // Function.Injective ι}
-
-/-- A map with the same kernel as a surjection descends to its target. -/
-def factorThroughSurjection (S : F →ₗ[F2] E) (T : F →ₗ[F2] I)
-    (hT : Function.Surjective T) (hker : T.ker = S.ker) : I →ₗ[F2] E :=
-  (T.ker.liftQ S hker.le).comp (T.quotKerEquivOfSurjective hT).symm.toLinearMap
-
-@[simp] theorem factorThroughSurjection_apply (S : F →ₗ[F2] E) (T : F →ₗ[F2] I)
-    (hT : Function.Surjective T) (hker : T.ker = S.ker) (x : F) :
-    factorThroughSurjection S T hT hker (T x) = S x := by
-  simp [factorThroughSurjection]
-
-@[simp] theorem factorThroughSurjection_comp (S : F →ₗ[F2] E) (T : F →ₗ[F2] I)
-    (hT : Function.Surjective T) (hker : T.ker = S.ker) :
-    (factorThroughSurjection S T hT hker).comp T = S := by
-  ext x
-  exact factorThroughSurjection_apply S T hT hker x
-
-theorem factorThroughSurjection_injective (S : F →ₗ[F2] E) (T : F →ₗ[F2] I)
-    (hT : Function.Surjective T) (hker : T.ker = S.ker) :
-    Function.Injective (factorThroughSurjection S T hT hker) := by
-  exact (LinearMap.ker_eq_bot.mp (T.ker.ker_liftQ_eq_bot S hker.le hker.ge)).comp
-    (T.quotKerEquivOfSurjective hT).symm.injective
-
-/-- Compose the two factors and retain the proved rank. -/
-def factorFrequency (p : SmallEmbedding I E × FullFrequency F I) : RankFrequency F E I :=
-  ⟨p.1.val.comp p.2.val, by
-    rw [LinearMap.range_comp_of_range_eq_top _ (LinearMap.range_eq_top.mpr p.2.property)]
-    exact LinearMap.finrank_range_of_inj p.1.property⟩
-
-/-- Once the surjective factor is fixed, the injective factor is unique. -/
-def factorizationFiberEquivFullKernel (S : RankFrequency F E I) :
-    {p : SmallEmbedding I E × FullFrequency F I // factorFrequency p = S} ≃
-      {T : FullFrequency F I // fullKernel T = rankKernel S} where
-  toFun p := ⟨p.val.2, by
-    apply Subtype.ext
-    have hcomp : p.val.1.val.comp p.val.2.val = S.val :=
-      congrArg Subtype.val p.property
-    calc
-      p.val.2.val.ker = (p.val.1.val.comp p.val.2.val).ker :=
-        (LinearMap.ker_comp_of_ker_eq_bot p.val.2.val
-          (LinearMap.ker_eq_bot.mpr p.val.1.property)).symm
-      _ = S.val.ker := congrArg LinearMap.ker hcomp⟩
-  invFun T :=
-    ⟨(⟨factorThroughSurjection S.val T.val.val T.val.property
-          (congrArg Subtype.val T.property),
-        factorThroughSurjection_injective S.val T.val.val T.val.property
-          (congrArg Subtype.val T.property)⟩, T.val),
-      Subtype.ext (factorThroughSurjection_comp S.val T.val.val T.val.property
-        (congrArg Subtype.val T.property))⟩
-  left_inv p := by
-    apply Subtype.ext
-    apply Prod.ext
-    · apply Subtype.ext
-      apply LinearMap.ext
-      intro y
-      obtain ⟨x, rfl⟩ := p.val.2.property y
-      have hk : p.val.2.val.ker = S.val.ker := by
-        have hcomp : p.val.1.val.comp p.val.2.val = S.val :=
-          congrArg Subtype.val p.property
-        rw [← hcomp, LinearMap.ker_comp_of_ker_eq_bot p.val.2.val
-          (LinearMap.ker_eq_bot.mpr p.val.1.property)]
-      change factorThroughSurjection S.val p.val.2.val p.val.2.property hk
-        (p.val.2.val x) = p.val.1.val (p.val.2.val x)
-      rw [factorThroughSurjection_apply]
-      exact (congrArg (fun Z : F →ₗ[F2] E => Z x)
-        (congrArg Subtype.val p.property)).symm
-    · rfl
-  right_inv T := by
-    apply Subtype.ext
-    rfl
 
 variable [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
   [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)] [Fintype (I →ₗ[F2] E)]
 
-omit [FiniteDimensional F2 E] [Fintype (E →ₗ[F2] F)]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] in
-/-- The exact multiplicity in the embedding expansion is the square
-injection count, independent of the ambient frequency. -/
-theorem factorization_fiber_card (S : RankFrequency F E I) :
-    (Finset.univ.filter (fun p : SmallEmbedding I E × FullFrequency F I =>
-      factorFrequency p = S)).card = KMSInjectionCount.beta I I := by
-  calc
-    _ = Fintype.card {p : SmallEmbedding I E × FullFrequency F I //
-        factorFrequency p = S} := (Fintype.card_subtype _).symm
-    _ = Fintype.card {T : FullFrequency F I // fullKernel T = rankKernel S} :=
-      Fintype.card_congr (factorizationFiberEquivFullKernel S)
-    _ = (Finset.univ.filter (fun T : FullFrequency F I =>
-        fullKernel T = rankKernel S)).card := Fintype.card_subtype _
-    _ = KMSInjectionCount.beta I I := KMSKernelFiberCard.fullKernel_fiber_card _
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (F →ₗ[F2] E)] [Fintype (I →ₗ[F2] F)] [Fintype (I →ₗ[F2] E)] in
-theorem smallComponent_apply_fullFrequency (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) (X : I →ₗ[F2] F) :
-    smallComponent ι f X = ∑ T : FullFrequency F I,
-      linearCoeff f (ι.comp T.val) * (linearTraceCharacter T.val X).re := by
-  unfold smallComponent synthesis
-  simp only [Finset.sum_apply, Pi.smul_apply, smul_eq_mul]
-  rw [← Finset.sum_subtype (Finset.univ.filter (fun T : F →ₗ[F2] I =>
-      Function.Surjective T)) (by simp)
-      (fun T => linearCoeff f (ι.comp T) * (linearTraceCharacter T X).re),
-    Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro T _
-  by_cases hT : Function.Surjective T <;> simp [smallCoeff, hT]
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 I]
-  [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)] [Fintype (I →ₗ[F2] E)] in
-theorem rankComponent_apply_rankFrequency (f : (E →ₗ[F2] F) → ℝ)
-    (X : E →ₗ[F2] F) :
-    rankComponent (Module.finrank F2 I) f X = ∑ S : RankFrequency F E I,
-      linearCoeff f S.val * (linearTraceCharacter S.val X).re := by
-  unfold rankComponent component synthesis
-  simp only [Finset.sum_apply, Pi.smul_apply, smul_eq_mul]
-  rw [← Finset.sum_subtype (Finset.univ.filter (fun S : F →ₗ[F2] E =>
-      Module.finrank F2 S.range = Module.finrank F2 I)) (by simp)
-      (fun S => linearCoeff f S * (linearTraceCharacter S X).re),
-    Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro S _
-  split_ifs <;> simp
-
-omit [FiniteDimensional F2 E] [Fintype (I →ₗ[F2] F)] in
-/-- Exact pointwise orbit synthesis. No basis-invariance assumption is
-required: every small component retains the coefficients from its own embedding. -/
-theorem sum_smallComponent_embeddings (f : (E →ₗ[F2] F) → ℝ)
-    (X : E →ₗ[F2] F) :
-    (∑ ι : SmallEmbedding I E, smallComponent ι.val f (X.comp ι.val)) =
-      (KMSInjectionCount.beta I I : ℝ) * rankComponent (Module.finrank F2 I) f X := by
-  let b : RankFrequency F E I → ℝ := fun S =>
-    linearCoeff f S.val * (linearTraceCharacter S.val X).re
-  calc
-    _ = ∑ p : SmallEmbedding I E × FullFrequency F I, b (factorFrequency p) := by
-      rw [Fintype.sum_prod_type]
-      apply Finset.sum_congr rfl
-      intro ι _
-      rw [smallComponent_apply_fullFrequency]
-      apply Finset.sum_congr rfl
-      intro T _
-      change linearCoeff f (ι.val.comp T.val) *
-          (linearTraceCharacter T.val (X.comp ι.val)).re =
-        linearCoeff f (ι.val.comp T.val) *
-          (linearTraceCharacter (ι.val.comp T.val) X).re
-      simp only [linearTraceCharacter_apply, linearTracePair, LinearMap.comp_assoc]
-    _ = ∑ S : RankFrequency F E I,
-        ((Finset.univ.filter fun p : SmallEmbedding I E × FullFrequency F I =>
-          factorFrequency p = S).card : ℝ) * b S := by
-      calc
-        _ = ∑ p : SmallEmbedding I E × FullFrequency F I,
-            ∑ S : RankFrequency F E I, if factorFrequency p = S then b S else 0 := by
-          apply Finset.sum_congr rfl
-          intro p _
-          simp
-        _ = ∑ S : RankFrequency F E I,
-            ∑ p : SmallEmbedding I E × FullFrequency F I,
-              if factorFrequency p = S then b S else 0 := Finset.sum_comm
-        _ = _ := by
-          apply Finset.sum_congr rfl
-          intro S _
-          rw [← Finset.sum_filter]
-          simp
-    _ = (KMSInjectionCount.beta I I : ℝ) * ∑ S : RankFrequency F E I, b S := by
-      simp_rw [factorization_fiber_card]
-      rw [Finset.mul_sum]
-    _ = _ := by simp only [b, rankComponent_apply_rankFrequency]
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -639,12 +335,6 @@ def primalChange (g : E ≃ₗ[F2] E) : (E →ₗ[F2] F) ≃ (E →ₗ[F2] F) wh
   left_inv X := by ext x; simp
   right_inv X := by ext x; simp
 
-/-- The contragredient reindexing used in the trace pairing. -/
-def frequencyChange (g : E ≃ₗ[F2] E) : (F →ₗ[F2] E) ≃ (F →ₗ[F2] E) where
-  toFun S := g.toLinearMap.comp S
-  invFun S := g.symm.toLinearMap.comp S
-  left_inv S := by ext x; simp
-  right_inv S := by ext x; simp
 
 def IsBasisInvariant (f : (E →ₗ[F2] F) → ℝ) : Prop :=
   ∀ (g : E ≃ₗ[F2] E) X, f (X.comp g.toLinearMap) = f X
@@ -668,34 +358,9 @@ theorem coefficient_change (f : (E →ₗ[F2] F) → ℝ)
     f (X.comp g.toLinearMap) * (linearTraceCharacter S (X.comp g.toLinearMap)).re
   rw [character_change, hf g X]
 
-/-- The degree is the rank of the actual dual linear map. -/
-def frequencyRank (S : F →ₗ[F2] E) : ℕ := Module.finrank F2 (LinearMap.range S)
-
-omit [Fintype (E →ₗ[F2] F)] in
-theorem frequencyRank_change (g : E ≃ₗ[F2] E) (S : F →ₗ[F2] E) :
-    frequencyRank (g.toLinearMap.comp S) = frequencyRank S := by
-  unfold frequencyRank
-  rw [LinearMap.range_comp, g.finrank_map_eq]
 
 variable [Fintype (F →ₗ[F2] E)]
 
-/-- Exact rank projection, defined directly by trace characters. -/
-def rankProjection (i : ℕ) (f : (E →ₗ[F2] F) → ℝ) (X : E →ₗ[F2] F) : ℝ :=
-  ∑ S, if frequencyRank S = i then linearCoeff f S * (linearTraceCharacter S X).re else 0
-
-/-- Each rank projection preserves basis invariance. -/
-theorem rankProjection_invariant (i : ℕ) (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBasisInvariant f) : IsBasisInvariant (rankProjection i f) := by
-  intro g X
-  unfold rankProjection
-  apply Fintype.sum_equiv (frequencyChange g)
-  intro S
-  change (if frequencyRank S = i then
-      linearCoeff f S * (linearTraceCharacter S (X.comp g.toLinearMap)).re else 0) =
-    if frequencyRank (g.toLinearMap.comp S) = i then
-      linearCoeff f (g.toLinearMap.comp S) *
-        (linearTraceCharacter (g.toLinearMap.comp S) X).re else 0
-  rw [frequencyRank_change, coefficient_change f hf, character_change]
 
 end
 end UniqueGamesTheorem.Inverse.KMSBasisInvariant
@@ -721,21 +386,6 @@ variable {E F : Type*}
   [FiniteDimensional F2 E] [FiniteDimensional F2 F]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
 
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-theorem rankComponent_eq_rankProjection (i : ℕ) (f : (E →ₗ[F2] F) → ℝ) :
-    rankComponent i f = rankProjection i f := by
-  funext X
-  simp only [rankComponent, component, synthesis, rankProjection, frequencyRank,
-    Finset.sum_apply, Pi.smul_apply, smul_eq_mul]
-  apply Finset.sum_congr rfl
-  intro S _
-  split_ifs <;> simp_all [UniqueGamesTheorem.Fourier.MatrixCharacters.F2]
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-theorem rankComponent_invariant (i : ℕ) (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBasisInvariant f) : IsBasisInvariant (rankComponent i f) := by
-  rw [rankComponent_eq_rankProjection]
-  exact rankProjection_invariant i f hf
 
 /-- The degree bound follows from the literal coefficient filter. -/
 theorem rankComponent_coeff_eq_zero_of_ne (i : ℕ)

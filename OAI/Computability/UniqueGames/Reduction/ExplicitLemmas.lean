@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.Pi
 import Mathlib.Data.Fintype.Prod
 import Mathlib.Data.List.FinRange
@@ -37,98 +38,11 @@ def words (alphabet : List α) : Nat → List (List α)
   | 0 => [[]]
   | k + 1 => (pairs alphabet (words alphabet k)).map fun p => p.1 :: p.2
 
-theorem length_words (alphabet : List α) (k : Nat) :
-    (words alphabet k).length = alphabet.length ^ k := by
-  induction k with
-  | zero => simp [words]
-  | succ k ih =>
-    simp only [words, List.length_map, length_pairs, ih, Nat.pow_succ]
-    exact Nat.mul_comm _ _
-
-/-- The enumerator covers exactly the prescribed words. -/
-theorem mem_words {alphabet : List α} {w : List α} {k : Nat} :
-    w ∈ words alphabet k ↔ w.length = k ∧ ∀ a ∈ w, a ∈ alphabet := by
-  induction k generalizing w with
-  | zero => cases w <;> simp [words]
-  | succ k ih =>
-    cases w with
-    | nil => simp [words, pairs]
-    | cons a w =>
-      simp only [words, List.mem_map]
-      constructor
-      · rintro ⟨⟨b, v⟩, h, heq⟩
-        cases heq
-        obtain ⟨ha, hw⟩ := mem_pairs.mp h
-        obtain ⟨hlen, hall⟩ := ih.mp hw
-        constructor
-        · simp [hlen]
-        · intro x hx
-          rcases List.mem_cons.mp hx with hax | hxw
-          · simpa [hax] using ha
-          · exact hall x hxw
-      · rintro ⟨hlen, hall⟩
-        refine ⟨(a, w), mem_pairs.mpr ⟨hall a (by simp), ?_⟩, rfl⟩
-        apply ih.mpr
-        constructor
-        · simpa using hlen
-        · intro x hx
-          exact hall x (List.mem_cons_of_mem a hx)
-
-/-- `(question occurrences, binary map matrix, noise index, binary functional)`.
-The matrix is flattened and has `(2*k+1)*dimR` bits. -/
-abbrev CoordinateOutcome := (List Nat × List Nat) × (Nat × List Nat)
-
-def edgeOutcomes (m k dimR noiseCount : Nat) : List CoordinateOutcome :=
-  pairs
-    (pairs (words (List.range m) k) (words [0, 1] ((2*k + 1)*dimR)))
-    (pairs (List.range noiseCount) (words [0, 1] (2*k + 1)))
 
 /-- The formula in Equation (4.21). -/
 def edgeCount (m k dimR noiseCount : Nat) : Nat :=
   m^k * 2^((2*k + 1)*(dimR + 1)) * noiseCount
 
-theorem length_edgeOutcomes (m k dimR noiseCount : Nat) :
-    (edgeOutcomes m k dimR noiseCount).length = edgeCount m k dimR noiseCount := by
-  simp only [edgeOutcomes, length_pairs, length_words, List.length_range,
-    List.length_cons, List.length_nil, Nat.reduceAdd, edgeCount]
-  simp only [Nat.mul_add, Nat.mul_one, Nat.pow_add]
-  ring
-
-theorem edgeCount_pos {m noiseCount : Nat} (hm : 0 < m) (hv : 0 < noiseCount)
-    (k dimR : Nat) : 0 < edgeCount m k dimR noiseCount := by
-  exact Nat.mul_pos (Nat.mul_pos (Nat.pow_pos hm) (Nat.two_pow_pos _)) hv
-
-theorem edgeOutcomes_nonempty {m noiseCount : Nat} (hm : 0 < m)
-    (hv : 0 < noiseCount) (k dimR : Nat) : edgeOutcomes m k dimR noiseCount ≠ [] := by
-  intro h
-  have hp := edgeCount_pos hm hv k dimR
-  rw [← length_edgeOutcomes, h] at hp
-  exact Nat.not_lt_zero _ hp
-
-theorem edgeCount_mono {m bound : Nat} (h : m ≤ bound) (k dimR noiseCount : Nat) :
-    edgeCount m k dimR noiseCount ≤ edgeCount bound k dimR noiseCount := by
-  exact Nat.mul_le_mul_right _
-    (Nat.mul_le_mul_right _ (Nat.pow_le_pow_left h k))
-
-theorem product_pow (a b k : Nat) : (a*b)^k = a^k*b^k := by
-  induction k with
-  | zero => simp
-  | succ k ih =>
-    simp only [Nat.pow_succ, ih]
-    ac_rfl
-
-theorem edgeCount_polynomial_bound {m n coefficient degree : Nat}
-    (h : m ≤ coefficient * (n + 1)^degree) (k dimR noiseCount : Nat) :
-    edgeCount m k dimR noiseCount ≤
-      (coefficient^k * 2^((2*k + 1)*(dimR + 1)) * noiseCount) *
-        (n + 1)^(degree*k) := by
-  calc
-    edgeCount m k dimR noiseCount ≤
-        edgeCount (coefficient * (n + 1)^degree) k dimR noiseCount :=
-      edgeCount_mono h k dimR noiseCount
-    _ = _ := by
-      simp only [edgeCount, product_pow, ← Nat.pow_mul]
-      ac_rfl
 
 end UniqueGamesTheorem.Reduction.Explicit
 
@@ -251,13 +165,6 @@ theorem nodup_allLinearMaps {values : List R} (distinct : values.Nodup) :
   (nodup_pairs distinct (nodup_functions (nodup_pairs distinct distinct) k)).map
     (coefficientEquiv k R).injective
 
-theorem cardinal_linearMaps [Fintype R] [Fintype (E k →ₗ[F2] R)] :
-    Fintype.card (E k →ₗ[F2] R) = (Fintype.card R)^(2*k+1) := by
-  rw [← Fintype.card_congr (coefficientEquiv k R)]
-  simp only [Coefficients, Fintype.card_prod, Fintype.card_fun, Fintype.card_fin]
-  rw [show Fintype.card R * Fintype.card R = (Fintype.card R)^2 by simp [pow_two],
-    ← pow_mul, pow_succ]
-  exact Nat.mul_comm _ _
 
 end Coefficients
 
@@ -301,10 +208,6 @@ theorem nodup_queries (m k s d : Nat) : (queries m k s d).Nodup :=
   nodup_pairs (nodup_functions (List.nodup_finRange _) _)
     (nodup_allLinearMaps k _ (nodup_ambientVectors s d))
 
-theorem length_queries (m k s d : Nat) :
-    (queries m k s d).length = m^k * 2^((s+d)*(2*k+1)) := by
-  simp [queries, length_pairs, length_functions, length_allLinearMaps,
-    length_ambientVectors, ← pow_mul]
 
 abbrev Outcome (m k s d noiseCount : Nat) :=
   Query m k s d ×
@@ -325,22 +228,6 @@ theorem length_outcomes (m k s d noiseCount : Nat) :
   rw [show (2*k+1)*(s+d+1) = (s+d)*(2*k+1)+(2*k+1) by ring, pow_add]
   ring
 
-theorem mem_outcomes (ω : Outcome m k s d noiseCount) :
-    ω ∈ outcomes m k s d noiseCount := by
-  apply mem_pairs.mpr
-  constructor
-  · exact mem_pairs.mpr ⟨mem_functions (fun i => List.mem_finRange i) _,
-      mem_allLinearMaps k _ mem_ambientVectors _⟩
-  · exact mem_pairs.mpr ⟨List.mem_finRange _, mem_allLinearMaps k F2
-      (fun a => by rcases scalar_cases a with rfl | rfl <;> simp) _⟩
-
-theorem nodup_outcomes (m k s d noiseCount : Nat) :
-    (outcomes m k s d noiseCount).Nodup := by
-  apply nodup_pairs
-  · exact nodup_pairs (nodup_functions (List.nodup_finRange _) _)
-      (nodup_allLinearMaps k _ (nodup_ambientVectors s d))
-  · exact nodup_pairs (List.nodup_finRange _)
-      (nodup_allLinearMaps k F2 (by simp))
 
 /-- The executable edge experiment for an arbitrary explicitly ordered noise
 index type. Equal noise vectors still have separate indices and entries. -/
@@ -365,22 +252,6 @@ theorem nodup_indexedOutcomes {indices : List N} (distinct : indices.Nodup)
   nodup_pairs (nodup_queries m k s d)
     (nodup_pairs distinct (nodup_allLinearMaps k F2 (by simp)))
 
-theorem indexedOutcomes_nonempty {m : Nat} (hm : 0 < m)
-    (k s d : Nat) {indices : List N} (nonempty : indices ≠ []) :
-    indexedOutcomes m k s d indices ≠ [] := by
-  apply List.length_pos_iff.mp
-  rw [length_indexedOutcomes]
-  exact edgeCount_pos hm (List.length_pos_iff.mpr nonempty) k (s+d)
-
-/-- A genuine polynomial size bound for the actual linear-map edge list.
-This is deliberately separate from a certified machine running-time bound. -/
-theorem length_indexedOutcomes_polynomial_bound {m n coefficient degree : Nat}
-    (h : m ≤ coefficient * (n+1)^degree) (k s d : Nat) (indices : List N) :
-    (indexedOutcomes m k s d indices).length ≤
-      (coefficient^k * 2^((2*k+1)*(s+d+1)) * indices.length) *
-        (n+1)^(degree*k) := by
-  rw [length_indexedOutcomes]
-  exact edgeCount_polynomial_bound h k (s+d) indices.length
 
 end UniqueGamesTheorem.Reduction.ActualEnumeration
 
@@ -416,24 +287,12 @@ theorem realizedBit_eq_true_iff {D : Nat} (positive : 0 < D) (z : Fin D) :
 theorem coordinate_fiber_sum {D : Nat} (positive : 0 < D) (b : Bool) :
     (∑ z : Fin D, if realizedBit z = b then (D : ℝ)⁻¹ else 0) =
       if b then (D : ℝ)⁻¹ else 1 - (D : ℝ)⁻¹ := by
-  have hd : (D : ℝ) ≠ 0 := by exact_mod_cast Nat.ne_of_gt positive
-  have ht : (∑ z : Fin D, if realizedBit z = true then (D : ℝ)⁻¹ else 0) =
-      (D : ℝ)⁻¹ := by
-    simp_rw [realizedBit_eq_true_iff positive]
-    simp
-  have htotal :
-      (∑ z : Fin D, if realizedBit z = false then (D : ℝ)⁻¹ else 0) +
-      (∑ z : Fin D, if realizedBit z = true then (D : ℝ)⁻¹ else 0) = 1 := by
-    rw [← Finset.sum_add_distrib]
-    have he (z : Fin D) :
-        (if realizedBit z = false then (D : ℝ)⁻¹ else 0) +
-          (if realizedBit z = true then (D : ℝ)⁻¹ else 0) = (D : ℝ)⁻¹ := by
-      cases realizedBit z <;> simp
-    simp_rw [he]
-    simp [hd]
-  cases b <;> simp only [Bool.false_eq_true, ite_false, ite_true]
-  · linarith
-  · exact ht
+  cases D with
+  | zero => omega
+  | succ D =>
+    cases b <;> simp [Fin.sum_univ_succ, realizedBit, Nat.cast_add]
+    field_simp
+    ring
 
 variable {A : Type*} [Fintype A] [DecidableEq A]
 
@@ -454,14 +313,7 @@ theorem fiber_product_eq_indicator {D : Nat} (z : A → Fin D) (μ : A → Bool)
     (∏ a, if realizedBit (z a) = μ a then (D : ℝ)⁻¹ else 0) =
       if realizedNoise z = μ then ((D : ℝ)⁻¹) ^ Fintype.card A else 0 := by
   classical
-  by_cases h : realizedNoise z = μ
-  · rw [ite_eq_left h]
-    have ha (a : A) : realizedBit (z a) = μ a := congrFun h a
-    simp [ha]
-  · rw [ite_eq_right h]
-    obtain ⟨a, ha⟩ := Function.ne_iff.mp h
-    apply Finset.prod_eq_zero (Finset.mem_univ a)
-    exact ite_eq_right ha
+  simp [Fintype.prod_ite_zero, realizedNoise, funext_iff]
 
 /-- Exact pushforward law for every observable, using the existing noise weight. -/
 theorem expect_realizedNoise {D : Nat} (positive : 0 < D) (H : (A → Bool) → ℝ) :
@@ -472,17 +324,8 @@ theorem expect_realizedNoise {D : Nat} (positive : 0 < D) (H : (A → Bool) → 
   simp_rw [noiseWeight_eq_fiber_sum positive, Finset.sum_mul]
   rw [Finset.sum_comm]
   simp_rw [fiber_product_eq_indicator]
-  have he (z : A → Fin D) :
-      (∑ μ : A → Bool,
-        (if realizedNoise z = μ then ((D : ℝ)⁻¹) ^ Fintype.card A else 0) * H μ) =
-      ((D : ℝ)⁻¹) ^ Fintype.card A * H (realizedNoise z) := by
-    simp [eq_comm]
-  simp_rw [he]
-  rw [Fintype.expect_eq_sum_div_card]
-  simp only [Fintype.card_fun, Fintype.card_fin, Nat.cast_pow]
-  rw [div_eq_mul_inv, inv_pow]
-  rw [← Finset.mul_sum]
-  exact mul_comm _ _
+  simp [Fintype.expect_eq_sum_div_card, ← Finset.mul_sum, div_eq_mul_inv,
+    mul_comm, eq_comm]
 
 end UniqueGamesTheorem.Reduction.FiniteNoise
 

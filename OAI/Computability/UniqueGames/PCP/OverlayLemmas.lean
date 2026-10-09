@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Data.List.FinRange
 import Mathlib.Data.List.Nodup
@@ -109,17 +110,6 @@ theorem complete (G : ConstraintGraph V (V × D) A) (H : PortGraph V E)
     exact h (v, d)
   · rfl
 
-theorem satisfiable_iff (G : ConstraintGraph V (V × D) A) (H : PortGraph V E)
-    (htail : G.tail = Prod.fst) :
-    (constraintGraph G H).Satisfiable ↔ G.Satisfiable := by
-  constructor
-  · rintro ⟨labeling, h⟩
-    refine ⟨labeling, ?_⟩
-    rintro ⟨v, d⟩
-    rw [← edgeSatisfied_inl G H htail]
-    exact h (v, Sum.inl d)
-  · rintro ⟨labeling, h⟩
-    exact ⟨labeling, complete G H htail labeling h⟩
 
 /-- Every labeling rejects exactly the same number of darts before and after overlay. -/
 theorem rejectionCount_eq [Fintype V] [Fintype D] [Fintype E]
@@ -131,13 +121,6 @@ theorem rejectionCount_eq [Fintype V] [Fintype D] [Fintype E]
     Fintype.sum_sum_type]
   simp [edgeSatisfied_inl G H htail]
 
-theorem card_ports [Fintype D] [Fintype E] :
-    Fintype.card (D ⊕ E) = Fintype.card D + Fintype.card E := Fintype.card_sum
-
-theorem card_darts [Fintype V] [Fintype D] [Fintype E] :
-    Fintype.card (V × (D ⊕ E)) =
-      Fintype.card (V × D) + Fintype.card (V × E) := by
-  simp only [Fintype.card_prod, Fintype.card_sum, Nat.mul_add]
 
 section Averages
 
@@ -251,15 +234,6 @@ theorem spectralCertificate_seven_eighths [Nonempty V]
       (mul_le_mul_of_nonneg_right (by norm_num : (3 / 4 : ℝ) ≤ (7 / 8 : ℝ) ^ 2)
         (energy_nonnegative f))
 
-/-- The certificate belongs to the exact underlying graph of the overlaid constraints. -/
-theorem constraintGraph_spectralCertificate [Nonempty V]
-    (G : ConstraintGraph V (V × D) A) (H : PortGraph V E)
-    (hdegree : Fintype.card D = Fintype.card E + 1) (hpositive : 1 ≤ Fintype.card E)
-    (certificate : SpectralCertificate H (1 / 2 : ℝ)) :
-    SpectralCertificate (originalPortGraph (constraintGraph G H)) (7 / 8 : ℝ) := by
-  rw [constraintGraph_portGraph]
-  exact spectralCertificate_seven_eighths (originalPortGraph G) H
-    hdegree hpositive certificate
 
 end Averages
 
@@ -324,24 +298,6 @@ theorem complete (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
     rw [edgeSatisfied_true G htail]
     exact h (v,d)
 
-theorem complete_iff (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (labeling : V → A) :
-    (∀ e, (constraintGraph G).edgeSatisfied labeling e = true) ↔
-      ∀ e, G.edgeSatisfied labeling e = true := by
-  constructor
-  · intro h
-    rintro ⟨v,d⟩
-    rw [← edgeSatisfied_true G htail]
-    exact h (v,(true,d))
-  · exact complete G htail labeling
-
-theorem satisfiable_iff (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst) :
-    (constraintGraph G).Satisfiable ↔ G.Satisfiable := by
-  constructor
-  · rintro ⟨labeling,h⟩
-    exact ⟨labeling, (complete_iff G htail labeling).mp h⟩
-  · rintro ⟨labeling,h⟩
-    exact ⟨labeling, complete G htail labeling h⟩
 
 /-- The equality holds for every labeling, including nonsatisfying ones. -/
 theorem rejectionCount_eq [Fintype V] [Fintype D]
@@ -353,25 +309,6 @@ theorem rejectionCount_eq [Fintype V] [Fintype D]
     Fintype.sum_bool]
   simp [edgeSatisfied_true G htail]
 
-theorem card_ports [Fintype D] :
-    Fintype.card (Bool × D) = 2 * Fintype.card D := by
-  simp
-
-theorem card_darts [Fintype V] [Fintype D] :
-    Fintype.card (V × (Bool × D)) = 2 * Fintype.card (V × D) := by
-  simp [Fintype.card_prod, Nat.mul_left_comm]
-
-/-- The actual normalized rejection probability is halved. The identity also
-holds for empty dart types, using the field's totalized division. -/
-theorem rejection_density_eq_half [Fintype V] [Fintype D]
-    (G : ConstraintGraph V (V × D) A) (htail : G.tail = Prod.fst)
-    (labeling : V → A) :
-    ((constraintGraph G).rejectionCount labeling : ℝ) /
-        (Fintype.card (V × (Bool × D)) : ℝ) =
-      ((G.rejectionCount labeling : ℝ) / (Fintype.card (V × D) : ℝ)) / 2 := by
-  rw [rejectionCount_eq G htail, card_darts]
-  simp only [Nat.cast_mul, Nat.cast_ofNat, div_eq_mul_inv, mul_inv_rev]
-  ring
 
 end UniqueGamesTheorem.Foundations.PCP.LazyConstraint
 
@@ -480,13 +417,6 @@ theorem cloudSize_eq_card_cloud (t : Table) (v : Fin t.vertices) :
     cloudSize t v = Fintype.card (Cloud (semantics t) v) := by
   simpa only [Fintype.card_fin] using (Fintype.card_congr (cloudEquiv t v)).symm
 
-theorem cloudDarts_eq_nil_iff (t : Table) (v : Fin t.vertices) :
-    cloudDarts t v = [] ↔ ∀ e : Fin t.darts, t.rows[e].tail ≠ v := by
-  simp only [List.eq_nil_iff_forall_not_mem, mem_cloudDarts]
-
-theorem cloudSize_eq_zero_iff (t : Table) (v : Fin t.vertices) :
-    cloudSize t v = 0 ↔ ∀ e : Fin t.darts, t.rows[e].tail ≠ v := by
-  rw [cloudSize, List.length_eq_zero_iff, cloudDarts_eq_nil_iff]
 
 theorem sum_cloudSize (t : Table) : (∑ v, cloudSize t v) = t.darts := by
   calc
@@ -501,9 +431,6 @@ theorem sum_cloudSize (t : Table) : (∑ v, cloudSize t v) = t.darts := by
 def oldCloudIndex (t : Table) (e : Fin t.darts) :
     Fin (cloudSize t t.rows[e].tail) := cloudRank t t.rows[e].tail ⟨e, rfl⟩
 
-@[simp] theorem cloudSelect_oldCloudIndex (t : Table) (e : Fin t.darts) :
-    (cloudSelect t t.rows[e].tail (oldCloudIndex t e)).val = e :=
-  congrArg Subtype.val (cloudSelect_cloudRank t t.rows[e].tail ⟨e, rfl⟩)
 
 /-- Padding counts are supplied as executable natural-valued data, without
 choosing enumerations of the semantic clouds by their cardinalities. -/
@@ -534,15 +461,6 @@ def paddedCloudSelect (t : Table) (padding : Fin t.vertices → Nat) (v : Fin t.
     Fin (cloudSize t v + padding v) → PaddedCloud t padding v :=
   (paddedCloudEquiv t padding v).symm
 
-@[simp] theorem paddedCloudSelect_rank (t : Table) (padding : Fin t.vertices → Nat)
-    (v : Fin t.vertices) (e : PaddedCloud t padding v) :
-    paddedCloudSelect t padding v (paddedCloudRank t padding v e) = e :=
-  (paddedCloudEquiv t padding v).symm_apply_apply e
-
-@[simp] theorem paddedCloudRank_select (t : Table) (padding : Fin t.vertices → Nat)
-    (v : Fin t.vertices) (i : Fin (cloudSize t v + padding v)) :
-    paddedCloudRank t padding v (paddedCloudSelect t padding v i) = i :=
-  (paddedCloudEquiv t padding v).apply_symm_apply i
 
 @[simp] theorem paddedCloudRank_old (t : Table) (padding : Fin t.vertices → Nat)
     (v : Fin t.vertices) (e : Cloud (semantics t) v) :
@@ -700,11 +618,6 @@ theorem paddedSize_eq_size (k : Nat) : paddedSize k = ExpanderFamily.size k := b
   rw [paddedSize_power, boundedLevel_eq_level]
   rfl
 
-/-- The returned exponent is the least exponent whose power covers `k`. -/
-theorem boundedLevel_le_of_le_power {k j : Nat}
-    (h : k ≤ ExpanderFamily.growth ^ j) : boundedLevel k ≤ j := by
-  rw [boundedLevel_eq_level]
-  exact (Nat.clog_le_iff_le_pow ExpanderFamily.growth_gt_one).2 h
 
 theorem paddedSize_positive (k : Nat) : 0 < paddedSize k := by
   rw [paddedSize_power]
@@ -746,14 +659,6 @@ theorem table_vertexCount_eq_paddedSize (k : Nat) :
   rw [hg]
   exact (paddedSize_power k).symm
 
-theorem family_row_count_at_size
-    (H : ExpanderTables.Table
-      ((Expanders.baseDegree * Expanders.baseDegree) *
-        (Expanders.baseDegree * Expanders.baseDegree)) Expanders.baseDegree)
-    (k : Nat) :
-    (ExpanderTables.family H (boundedLevel k)).rows.toList.length =
-      paddedSize k * (Expanders.baseDegree * Expanders.baseDegree) := by
-  rw [ExpanderTables.row_count, table_vertexCount_eq_paddedSize]
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingLevels
 

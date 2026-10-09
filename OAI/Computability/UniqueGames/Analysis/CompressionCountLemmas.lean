@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.Isomorphisms
@@ -433,32 +434,14 @@ theorem recover_A0 (A A0 : Submodule K V) (B B0 : Submodule K W)
     (X : B0 →ₗ[K] (V ⧸ A0)) (hK : X.ker = B.comap B0.subtype)
     (hR : X.range = A.map A0.mkQ) (hA : A0 ≤ A) :
     (encodeFixed A A0 B B0 X hK hR).ker.map A.subtype = A0 := by
-  rw [ker_encodeFixed]
-  ext a
-  constructor
-  · intro ha
-    rcases Submodule.mem_map.mp ha with ⟨b, hb, rfl⟩
-    exact hb
-  · intro ha
-    exact Submodule.mem_map.mpr ⟨⟨a, hA ha⟩, ha, rfl⟩
+  rw [ker_encodeFixed, Submodule.map_comap_subtype, inf_of_le_right hA]
 
 theorem recover_B0 (A A0 : Submodule K V) (B B0 : Submodule K W)
     (X : B0 →ₗ[K] (V ⧸ A0)) (hK : X.ker = B.comap B0.subtype)
     (hR : X.range = A.map A0.mkQ) (hB : B ≤ B0) :
     (encodeFixed A A0 B B0 X hK hR).range.comap B.mkQ = B0 := by
-  rw [range_encodeFixed]
-  ext w
-  change B.mkQ w ∈ (quotientRestriction B B0).range ↔ w ∈ B0
-  constructor
-  · rintro ⟨b, hb⟩
-    change B.mkQ (b : W) = B.mkQ w at hb
-    have hm : w - (b : W) ∈ B := by
-      apply (Submodule.Quotient.mk_eq_zero B).mp
-      change B.mkQ (w - (b : W)) = 0
-      rw [map_sub, hb, sub_self]
-    simpa only [sub_add_cancel] using B0.add_mem (hB hm) b.property
-  · intro hw
-    exact ⟨⟨w, hw⟩, rfl⟩
+  rw [range_encodeFixed, quotientRestriction, LinearMap.range_comp,
+    Submodule.range_subtype, Submodule.comap_map_mkQ, sup_of_le_right hB]
 
 theorem encodeFixed_injective (A A0 : Submodule K V) (B B0 : Submodule K W)
     (X X' : B0 →ₗ[K] (V ⧸ A0))
@@ -485,7 +468,6 @@ def Valid (A : Submodule K V) (B : Submodule K W)
 abbrev Index (A : Submodule K V) (B : Submodule K W) :=
   {p : LinearIdentities.A4Index (K := K) (W := W) (V := V) // Valid A B p}
 
-abbrev GeometricIndex (A : Submodule K V) (B : Submodule K W) := Index A B
 
 def encode (A : Submodule K V) (B : Submodule K W)
     (p : Index A B) : A →ₗ[K] (W ⧸ B) :=
@@ -536,9 +518,6 @@ theorem card_index_le (A : Submodule F2 V) (B : Submodule F2 W) :
   have h := Nat.card_le_card_of_injective (encode A B) (encode_injective A B)
   rwa [hc] at h
 
-theorem card_geometricIndex_le (A : Submodule F2 V) (B : Submodule F2 W) :
-    Nat.card (GeometricIndex A B) ≤
-      2 ^ (Module.finrank F2 A * Module.finrank F2 (W ⧸ B)) := card_index_le A B
 
 end Binary
 
@@ -596,16 +575,6 @@ theorem canonical_block (X : E →ₗ[𝕜] F) (P : Submodule 𝕜 E)
   rw [apply_domainEquiv]
   exact Submodule.prodEquivOfIsCompl_symm_apply_left X.range C hC u
 
-/-- Choice of complements is available over every field; this is an actual
-normal-form existence result, including zero-dimensional kernel/range cases. -/
-theorem exists_canonical_coordinates (X : E →ₗ[𝕜] F) :
-    ∃ (P : Submodule 𝕜 E) (C : Submodule 𝕜 F)
-      (hP : IsCompl X.ker P) (hC : IsCompl X.range C),
-      ∀ (u : X.range) (k : X.ker),
-        (codomainEquiv X C hC).symm (X (domainEquiv X P hP (u, k))) = (u, 0) := by
-  obtain ⟨P, hP⟩ := X.ker.exists_isCompl
-  obtain ⟨C, hC⟩ := X.range.exists_isCompl
-  exact ⟨P, C, hP, hC, canonical_block X P hP C hC⟩
 
 @[simp] theorem domainEquiv_zero_left (X : E →ₗ[𝕜] F)
     (P : Submodule 𝕜 E) (hP : IsCompl X.ker P) (k : X.ker) :

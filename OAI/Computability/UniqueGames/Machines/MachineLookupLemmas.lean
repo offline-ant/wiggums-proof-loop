@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
@@ -278,23 +279,6 @@ theorem lookupTrace (index source destination : K)
       lookupTrace_invalid index source destination his hid hsd base values i invalid
         indexSuffix output ambient register
 
-/-- A proved linear transition budget in the lengths of the encoded table and
-index, including invalid indices. The witness is the actual trace above. -/
-def lookupInTime (index source destination : K)
-    (his : index ≠ source) (hid : index ≠ destination) (hsd : source ≠ destination)
-    (base : K → List Bool) (values : List Nat) (i : Nat)
-    (indexSuffix output : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program index source destination))
-      ⟨some .guard, (ambient, register), tapes index source destination base
-        (encodeWord i ++ indexSuffix) (encodeWords values) output⟩
-      (some ⟨some (resultLabel values i), (ambient, none), tapes index source destination base
-        (encodeWord 0 ++ indexSuffix) (encodeWords (values.drop (i + 1)))
-        (resultOutput values i output)⟩)
-      ((encodeWords values).length + 2 * (encodeWord i).length) where
-  steps := MachineLookupSpec.steps values i
-  evals_in_steps := lookupTrace index source destination his hid hsd base values i
-    indexSuffix output ambient register
-  steps_le_m := MachineLookupSpec.steps_le_input_encoding_size values i
 
 /-- The final control label executes a genuine halt in one more transition. -/
 theorem lookupHaltTrace (index source destination : K)
@@ -445,27 +429,6 @@ theorem preservingLookup_steps_le (values : List Nat) (i value : Nat)
   have hi := MachineLookupSpec.index_length_le values i value selected
   omega
 
-def preservingLookupInTime (tape : Fin 5 → K) (distinct : Function.Injective tape)
-    (firstLabel secondLabel : Λ) (lookupLabels : MachineLookup.Label → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atFirst : program firstLabel = Reduction.MachineTransfer.loopAt
-      (tape 0) (tape 4) id false firstLabel (some secondLabel))
-    (atSecond : program secondLabel = MachineCopy.forkLoop
-      (tape 4) (tape 0) (tape 2) false secondLabel (some (lookupLabels .guard)))
-    (atLookup : ∀ l, program (lookupLabels l) =
-      MachineSubroutine.statement lookupLabels exit (MachineLookup.program (tape 1) (tape 2) (tape 3) l))
-    (base : K → List Bool) (values : List Nat) (tableWord : base (tape 0) = encodeWords values)
-    (scratchEmpty : base (tape 4) = []) (i value : Nat) (selected : values[i]? = some value)
-    (indexSuffix workSuffix output : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some firstLabel, (ambient,register), initialTapes tape base i indexSuffix workSuffix output⟩
-      (some ⟨exit, (ambient,none), finalTapes tape base values i value indexSuffix workSuffix output⟩)
-      (5 * (encodeWords values).length + 3) where
-  steps := 2 * ((encodeWords values).length + 1) + MachineLookupSpec.steps values i + 1
-  evals_in_steps := preservingLookupTrace tape distinct firstLabel secondLabel lookupLabels exit
-    program atFirst atSecond atLookup base values tableWord scratchEmpty i value selected
-    indexSuffix workSuffix output ambient register
-  steps_le_m := preservingLookup_steps_le values i value selected
 
 inductive Label
   | copyFirst | copySecond | lookup (l : MachineLookup.Label)

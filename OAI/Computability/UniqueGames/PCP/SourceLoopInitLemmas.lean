@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.PCP.SourceContextLoad
 import OAI.Computability.UniqueGames.Reduction.MachineTransfer
@@ -13,17 +14,9 @@ inductive HeaderTape
   | variableCount | clauseCount
   deriving DecidableEq
 
-protected abbrev HeaderTape.enumList : List HeaderTape := [.variableCount, .clauseCount]
-
-protected theorem HeaderTape.enumList_getElem?_ctorIdx_eq (x : HeaderTape) :
-    HeaderTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem HeaderTape.enumList_nodup : HeaderTape.enumList.Nodup := by decide
-
 instance : Fintype HeaderTape where
-  elems := ⟨HeaderTape.enumList, HeaderTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.variableCount, .clauseCount}
+  complete x := by cases x <;> simp
 
 abbrev Tape (u : Nat) (Extra : Type) := SourceContextLoad.Tape u (HeaderTape ⊕ Extra)
 
@@ -147,10 +140,6 @@ def headerInTime (F : Target.Formula) (base : Tape u Extra → List Bool)
 def digitOutput (j : Fin u) (m : Nat) (base : Tape u Extra → List Bool) : Tape u Extra → List Bool :=
   Function.update (Function.update base (.current j) (encodeWord 0)) (.remaining j) (encodeWord (m - 1))
 
-theorem digitOutput_frame (j : Fin u) (m : Nat) (base : Tape u Extra → List Bool)
-    (p : Tape u Extra) (hc : p ≠ .current j) (hr : p ≠ .remaining j) :
-    digitOutput j m base p = base p := by simp [digitOutput, hc, hr]
-
 def digitInTime (j : Fin u) (m : Nat) (hm : 0 < m) (base : Tape u Extra → List Bool)
     (hcount : base clauseHeader = encodeWord m)
     (hcurrent : base (.current j) = []) (hremaining : base (.remaining j) = [])
@@ -194,62 +183,46 @@ def digitInTime (j : Fin u) (m : Nat) (hm : 0 < m) (base : Tape u Extra → List
   rw [hs, encodeWord_length]
   omega
 
-def stageTapes (m : Nat) (base : Tape u Extra → List Bool) : Nat → Tape u Extra → List Bool
-  | 0 => base
-  | r + 1 => if h : r < u then digitOutput ⟨r, h⟩ m (stageTapes m base r)
-    else stageTapes m base r
+/-- The initialized prefix is described directly by its coordinate bound. -/
+def stageTapes (m : Nat) (base : Tape u Extra → List Bool) (r : Nat) :
+    Tape u Extra → List Bool
+  | .current j => if j.val < r then encodeWord 0 else base (.current j)
+  | .remaining j => if j.val < r then encodeWord (m - 1) else base (.remaining j)
+  | p => base p
 
+omit [DecidableEq Extra] in
+@[simp] theorem stageTapes_zero (m : Nat) (base : Tape u Extra → List Bool) :
+    stageTapes m base 0 = base := by
+  funext p
+  cases p <;> simp [stageTapes]
+
+theorem stageTapes_succ (m : Nat) (base : Tape u Extra → List Bool) (r : Nat) :
+    stageTapes m base (r + 1) =
+      if h : r < u then digitOutput ⟨r, h⟩ m (stageTapes m base r)
+      else stageTapes m base r := by
+  funext p
+  split
+  · cases p <;> simp [stageTapes, digitOutput, Function.update_apply, Fin.ext_iff]
+    all_goals split_ifs <;> first | rfl | omega
+  · cases p <;> simp only [stageTapes]
+    all_goals split_ifs <;> first | rfl | omega
+
+omit [DecidableEq Extra] in
 theorem stageTapes_frame (m : Nat) (base : Tape u Extra → List Bool) (r : Nat)
     (p : Tape u Extra) (hc : ∀ j, p ≠ .current j) (hr : ∀ j, p ≠ .remaining j) :
     stageTapes m base r p = base p := by
-  induction r with
-  | zero => rfl
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    · rw [digitOutput_frame _ _ _ _ (hc _) (hr _), ih]
-    · exact ih
+  cases p <;> simp_all [stageTapes]
 
+omit [DecidableEq Extra] in
 theorem stageTapes_current (m : Nat) (base : Tape u Extra → List Bool) (r : Nat) (j : Fin u) :
-    stageTapes m base r (.current j) = if j.val < r then encodeWord 0 else base (.current j) := by
-  induction r with
-  | zero => simp [stageTapes]
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    next hr =>
-      by_cases hj : j = (⟨r, hr⟩ : Fin u)
-      · subst j; simp [digitOutput]
-      · rw [digitOutput_frame _ _ _ _ (by simpa using hj) (by simp), ih]
-        have hval : j.val ≠ r := by intro h; apply hj; exact Fin.ext h
-        have he : j.val < r + 1 ↔ j.val < r := by omega
-        simp only [he]
-    next hr =>
-      rw [ih]
-      have hjr : j.val < r := by omega
-      have hjr' : j.val < r + 1 := by omega
-      simp only [hjr, hjr', ite_true]
+    stageTapes m base r (.current j) = if j.val < r then encodeWord 0 else base (.current j) :=
+  rfl
 
+omit [DecidableEq Extra] in
 theorem stageTapes_remaining (m : Nat) (base : Tape u Extra → List Bool) (r : Nat) (j : Fin u) :
     stageTapes m base r (.remaining j) =
-      if j.val < r then encodeWord (m - 1) else base (.remaining j) := by
-  induction r with
-  | zero => simp [stageTapes]
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    next hr =>
-      by_cases hj : j = (⟨r, hr⟩ : Fin u)
-      · subst j; simp [digitOutput]
-      · rw [digitOutput_frame _ _ _ _ (by simp) (by simpa using hj), ih]
-        have hval : j.val ≠ r := by intro h; apply hj; exact Fin.ext h
-        have he : j.val < r + 1 ↔ j.val < r := by omega
-        simp only [he]
-    next hr =>
-      rw [ih]
-      have hjr : j.val < r := by omega
-      have hjr' : j.val < r + 1 := by omega
-      simp only [hjr, hjr', ite_true]
+      if j.val < r then encodeWord (m - 1) else base (.remaining j) :=
+  rfl
 
 def prefixInTime (m : Nat) (hm : 0 < m) (base : Tape u Extra → List Bool)
     (hcount : base clauseHeader = encodeWord m)
@@ -260,7 +233,7 @@ def prefixInTime (m : Nat) (hm : 0 < m) (base : Tape u Extra → List Bool)
       (some ⟨some (labelAt r), ((), none), stageTapes m base r⟩)
       (r * (2 * m + 6)) := by
   induction r with
-  | zero => exact { steps := 0, evals_in_steps := rfl, steps_le_m := by omega }
+  | zero => exact { steps := 0, evals_in_steps := by simp, steps_le_m := by omega }
   | succ r ih =>
     have hru : r < u := by omega
     let j : Fin u := ⟨r, hru⟩
@@ -274,7 +247,7 @@ def prefixInTime (m : Nat) (hm : 0 < m) (base : Tape u Extra → List Bool)
         ⟨some (labelAt r), ((), none), before⟩
         (some ⟨some (labelAt (r + 1)), ((), none), stageTapes m base (r + 1)⟩)
         (2 * m + 6) := by
-      simpa only [labelAt, dite_eq_left hru, j, stageTapes, before] using one
+      simpa only [labelAt, j, stageTapes_succ, dite_eq_left hru, before] using one
     have joined := StateTransition.EvalsToInTime.trans (TM2.step program) _ _ _ _ _
       (ih (by omega)) one'
     simpa only [Nat.add_mul, Nat.one_mul, Nat.add_comm] using joined
@@ -362,11 +335,6 @@ theorem output_frame (F : Target.Formula) (base : Tape u Extra → List Bool) (p
   rw [outputTapes, stageTapes_frame _ _ _ _ (by simp [clauseHeader]) (by simp [clauseHeader])]
   simp [headerOutput]
 
-theorem output_headers (F : Target.Formula) (base : Tape u Extra → List Bool)
-    (hn : base variableHeader = []) (hm : base clauseHeader = []) :
-    outputTapes F base variableHeader = encodeWord F.variables ∧
-      outputTapes F base clauseHeader = encodeWord F.clauses.length := by
-  simp only [output_variableHeader, output_clauseHeader, hn, hm, List.append_nil, and_self]
 
 @[simp] theorem output_formula (F : Target.Formula) (base : Tape u Extra → List Bool) :
     outputTapes F base .formula = base .formula :=
@@ -505,12 +473,6 @@ def finishInTime (clearKeys : List K) (accumulator output : K)
     evals_in_steps := by simpa only [hsteps] using run.evals_in_steps
     steps_le_m := Nat.le_refl _ }
 
-theorem finishCost_le_list (clearKeys : List K) (accumulator : K) (base : Tapes K) :
-    finishCost clearKeys accumulator base ≤ MachineDrainMany.lengthSum clearKeys base +
-      clearKeys.length + (base accumulator).length + 2 := by
-  have h := MachineDrainMany.steps_le clearKeys base
-  unfold finishCost
-  omega
 
 variable [Fintype K]
 open scoped BigOperators

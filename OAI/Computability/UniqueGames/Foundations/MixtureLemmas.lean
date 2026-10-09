@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import OAI.Computability.UniqueGames.Foundations.FiniteTrialsLemmas
 
@@ -71,9 +72,6 @@ variable {Ω : Type*} [Fintype Ω]
 def totalVariation (μ ν : FiniteDistribution Ω) : ℝ :=
   (∑ x, |μ.weight x - ν.weight x|) / 2
 
-theorem totalVariation_nonnegative (μ ν : FiniteDistribution Ω) :
-    0 ≤ μ.totalVariation ν :=
-  div_nonneg (Finset.sum_nonneg fun _ _ => abs_nonneg _) (by norm_num)
 
 theorem totalVariation_comm (μ ν : FiniteDistribution Ω) :
     μ.totalVariation ν = ν.totalVariation μ := by

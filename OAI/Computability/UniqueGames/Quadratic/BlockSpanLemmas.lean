@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Lean.Elab.Tactic.Omega
 import Mathlib.Algebra.BigOperators.Pi
 import Mathlib.Algebra.CharP.Two
@@ -49,12 +50,6 @@ theorem dot_smul_basisCoord_of_ne (t : F) (i j : Fin 3) (hij : i ≠ j) :
     dot (basisCoord j : Vec F) (t • (basisCoord i : Vec F)) = 0 := by
   fin_cases i <;> fin_cases j <;> simp_all [dot, basisCoord]
 
-/-- The explicit coordinate decomposition, over the field rather than only
-over the binary scalars of the block spaces. -/
-theorem basisCoord_decomposition (x : Vec F) :
-    x = x 0 • basisCoord 0 + x 1 • basisCoord 1 + x 2 • basisCoord 2 := by
-  ext i
-  fin_cases i <;> simp [basisCoord]
 
 variable [CharP F 2] [Algebra (ZMod 2) F]
 
@@ -184,23 +179,14 @@ theorem eq_top_of_binary_coordinates
             · exact (hzx hyx).elim
             · exact hfzero z hz hzx
           · obtain ⟨i, hi⟩ := hseparate x y (Ne.symm hyx)
-            rcases hbinary i x with hix | hix <;>
-              rcases hbinary i y with hiy | hiy
-            · exact (hi (hix.trans hiy.symm)).elim
-            · refine ⟨fun z => f z - c i z * f z,
-                W.sub_mem hf (hstable i f hf), ?_, ?_⟩
-              · simp [hfx, hix]
-              · intro z hz hzx
-                rcases Finset.mem_insert.mp hz with rfl | hz
-                · simp [hiy]
-                · simp [hfzero z hz hzx]
-            · refine ⟨fun z => c i z * f z, hstable i f hf, ?_, ?_⟩
-              · simp [hfx, hix]
-              · intro z hz hzx
-                rcases Finset.mem_insert.mp hz with rfl | hz
-                · simp [hiy]
-                · simp [hfzero z hz hzx]
-            · exact (hi (hix.trans hiy.symm)).elim
+            refine ⟨(c i x - c i y)⁻¹ •
+                ((fun z => c i z * f z) - c i y • f),
+              W.smul_mem _ (W.sub_mem (hstable i f hf) (W.smul_mem _ hf)), ?_, ?_⟩
+            · simp [hfx, inv_mul_cancel₀ (sub_ne_zero.mpr hi)]
+            · intro z hz hzx
+              rcases Finset.mem_insert.mp hz with rfl | hz
+              · simp
+              · simp [hfzero z hz hzx]
     obtain ⟨f, hf, hfx, hfzero⟩ := hfilter Finset.univ
     have heq : f = fun y => if x = y then (1 : F) else 0 := by
       funext y
@@ -245,48 +231,15 @@ theorem eq_top_of_cubic_le_of_le_quadratic
     rw [heq] at hi
     exact hcubic hi
   · intro k f hf
-    have hf' : f ∈ Submodule.span F
-        (Set.range fun ij : I × I => fun x => c ij.1 x * c ij.2 x) :=
-      hquadratic hf
-    clear hf
-    induction hf' using Submodule.span_induction with
-    | mem f hf =>
-        obtain ⟨⟨i, j⟩, rfl⟩ := hf
-        have h : (fun x => c k x * c i x * c j x) ∈ cubicEvaluationSpan c :=
-          Submodule.subset_span ⟨(k, i, j), rfl⟩
-        simpa only [mul_assoc] using hcubic h
-    | zero =>
-        have heq : (fun x => c k x * (0 : X → F) x) = (0 : X → F) := by
-          funext x
-          exact mul_zero _
-        rw [heq]
-        exact W.zero_mem
-    | add f g hf hg ihf ihg =>
-        have heq : (fun x => c k x * ((f + g) x)) =
-            (fun x => c k x * f x) + (fun x => c k x * g x) := by
-          funext x
-          exact mul_add _ _ _
-        rw [heq]
-        exact W.add_mem ihf ihg
-    | smul a f hf ih =>
-        have heq : (fun x => c k x * ((a • f) x)) =
-            a • (fun x => c k x * f x) := by
-          funext x
-          exact mul_left_comm _ _ _
-        rw [heq]
-        exact W.smul_mem a ih
+    have hmul : quadraticEvaluationSpan c ≤ W.comap (LinearMap.mulLeft F (c k)) := by
+      apply Submodule.span_le.mpr
+      rintro f ⟨⟨i, j⟩, rfl⟩
+      have h : (fun x => c k x * c i x * c j x) ∈ cubicEvaluationSpan c :=
+        Submodule.subset_span ⟨(k, i, j), rfl⟩
+      change (fun x => c k x * (c i x * c j x)) ∈ W
+      simpa only [mul_assoc] using hcubic h
+    exact hmul (hquadratic hf)
 
-/-- Equality of the quadratic and cubic evaluation spaces can occur only
-when both are already the full function space. -/
-theorem quadraticEvaluationSpan_eq_top_of_cubic_le
-    {F X I : Type*} [Field F] [Fintype X]
-    (c : I → X → F)
-    (hbinary : ∀ i x, c i x = 0 ∨ c i x = 1)
-    (hseparate : ∀ x y, x ≠ y → ∃ i, c i x ≠ c i y)
-    (hnonzero : ∀ x, ∃ i, c i x ≠ 0)
-    (h : cubicEvaluationSpan c ≤ quadraticEvaluationSpan c) :
-    quadraticEvaluationSpan c = ⊤ :=
-  eq_top_of_cubic_le_of_le_quadratic c _ hbinary hseparate hnonzero h le_rfl
 
 /-- Every element of the binary field is either zero or one. -/
 theorem binary_eq_zero_or_one (x : ZMod 2) : x = 0 ∨ x = 1 := by
@@ -294,46 +247,6 @@ theorem binary_eq_zero_or_one (x : ZMod 2) : x = 0 ∨ x = 1 := by
   · exact Or.inl rfl
   · exact Or.inr rfl
 
-/-- The exact evaluation-space form used for the genericity argument.
-`φ` embeds the binary coordinates into the field of rational functions (or
-any other field of characteristic two). -/
-theorem eq_top_of_binary_evaluation_stable
-    {F : Type*} [Field F] {r : ℕ}
-    (E : Finset (Fin r → ZMod 2))
-    (hzero : (0 : Fin r → ZMod 2) ∉ E)
-    (φ : ZMod 2 →+* F)
-    (W : Submodule F (E → F))
-    (hcoordinate : ∀ i : Fin r, (fun t : E => φ (t.val i)) ∈ W)
-    (hstable : ∀ (i : Fin r) (f : E → F), f ∈ W →
-      (fun t : E => φ (t.val i) * f t) ∈ W) : W = ⊤ := by
-  classical
-  have hφ : Function.Injective φ := by
-    intro a b h
-    rcases binary_eq_zero_or_one a with rfl | rfl <;>
-      rcases binary_eq_zero_or_one b with rfl | rfl <;> simp_all
-  apply eq_top_of_binary_coordinates (fun i (t : E) => φ (t.val i)) W
-      _ _ _ hcoordinate hstable
-  · intro i t
-    rcases binary_eq_zero_or_one (t.val i) with h | h
-    · left
-      simp [h]
-    · right
-      simp [h]
-  · intro t u htu
-    have hne : t.val ≠ u.val := fun h => htu (Subtype.ext h)
-    obtain ⟨i, hi⟩ := Function.ne_iff.mp hne
-    exact ⟨i, fun h => hi (hφ h)⟩
-  · intro t
-    have hne : t.val ≠ 0 := by
-      intro h
-      exact hzero (h ▸ t.property)
-    have hi : ∃ i : Fin r, t.val i ≠ 0 := by
-      by_contra h
-      apply hne
-      funext i
-      exact Classical.not_not.mp (fun hi => h ⟨i, hi⟩)
-    obtain ⟨i, hi⟩ := hi
-    exact ⟨i, fun h => hi (hφ (by simpa using h))⟩
 
 end UniqueGamesTheorem.Quadratic
 
@@ -416,10 +329,6 @@ theorem rankThreshold_le_triple_fieldDegree (N r : ℕ) : r ≤ 3 * fieldDegree 
   unfold fieldDegree
   omega
 
-theorem exists_binary_field_degree (N r : ℕ) :
-    ∃ d : ℕ, 0 < d ∧ N < 2 ^ d ∧ r ≤ 3 * d :=
-  ⟨fieldDegree N r, fieldDegree_pos N r, threshold_lt_two_pow_fieldDegree N r,
-    rankThreshold_le_triple_fieldDegree N r⟩
 
 /-- Simultaneous cardinality and rank threshold attainment by the same field. -/
 theorem chosen_binaryField_thresholds (N r : ℕ) :

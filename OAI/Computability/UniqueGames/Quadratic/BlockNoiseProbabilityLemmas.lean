@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Data.FunLike.Fintype
 import Mathlib.Tactic.NormNum
@@ -117,18 +118,6 @@ noncomputable def blockOrientationEquiv (A : FieldLine F) :
     intro x
     exact (chosenBlockOrientation A).symm_apply_apply (J x)
 
-theorem card_blockOrientation (A : FieldLine F) :
-    Nat.card (BlockOrientation A) = Nat.card (Vec F ≃ₗ[ZMod 2] Vec F) :=
-  Nat.card_congr (blockOrientationEquiv A)
-
-theorem card_blockOrientation_eq (A B : FieldLine F) :
-    Nat.card (BlockOrientation A) = Nat.card (BlockOrientation B) := by
-  rw [card_blockOrientation, card_blockOrientation]
-
-theorem card_blockOrientation_pos (A : FieldLine F) :
-    0 < Nat.card (BlockOrientation A) := by
-  let : Nonempty (BlockOrientation A) := ⟨chosenBlockOrientation A⟩
-  exact Nat.card_pos
 
 abbrev BlockOrientationIndex (F : Type*) [Field F] [Finite F] [CharP F 2]
     [Algebra (ZMod 2) F] := Σ A : FieldLine F, BlockOrientation A
@@ -144,10 +133,6 @@ noncomputable def blockOrientationIndexEquiv :
     rintro ⟨A, J⟩
     simp
 
-theorem card_blockOrientationIndex :
-    Nat.card (BlockOrientationIndex F) =
-      (Nat.card F ^ 2 + Nat.card F + 1) * Nat.card (Vec F ≃ₗ[ZMod 2] Vec F) := by
-  rw [Nat.card_congr (blockOrientationIndexEquiv (F := F)), Nat.card_prod, card_FieldLine]
 
 end UniqueGamesTheorem.Quadratic
 

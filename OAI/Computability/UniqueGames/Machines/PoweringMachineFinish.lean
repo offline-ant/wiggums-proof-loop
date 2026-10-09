@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
 
@@ -48,12 +49,6 @@ def instruction (enumeration : Fin N ≃ K) (headerV headerD output scratch : K)
   | .inr (.inr l) => MachineDrainMany.instruction
       (MachineDrainMany.workTapes enumeration output) (fun q => labels (.inr (.inr q))) none l
 
-/-- Actual finite control, independent of both runtime header values. -/
-def program (enumeration : Fin N ≃ K) (headerV headerD output scratch : K) :
-    Label enumeration output →
-      TM2.Stmt (Alphabet (K := K)) (Label enumeration output) (σ × Option Bool) :=
-  instruction enumeration headerV headerD output scratch id
-
 def afterD (output : K) (base : K → List Bool) (m : Nat) : K → List Bool :=
   Function.update base output (encodeWord m ++ base output)
 
@@ -78,14 +73,6 @@ theorem copySteps_eq (n m : Nat) : copySteps n m = 2 * (n + m) + 6 := by
 def steps (enumeration : Fin N ≃ K) (output : K) (base : K → List Bool) (n m : Nat) : Nat :=
   copySteps n m + MachineDrainMany.steps (MachineDrainMany.workTapes enumeration output)
     (afterHeaders output base n m)
-
-def budget (enumeration : Fin N ≃ K) (output : K) (base : K → List Bool) (n m : Nat) : Nat :=
-  copySteps n m + (MachineDrainMany.lengthSum (MachineDrainMany.workTapes enumeration output)
-    (afterHeaders output base n m) + (MachineDrainMany.workTapes enumeration output).length)
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Exact execution inside any ambient program containing these instructions.
 The only data premises describe physical header words and an empty scratch tape. -/
@@ -135,31 +122,8 @@ theorem traceAt (enumeration : Fin N ≃ K) (headerV headerD output scratch : K)
     (fun q => labels (.inr (.inr q))) target (fun l => atLabels (.inr (.inr l)))
     (afterHeaders output base n m) ambient
   rw [afterHeaders_output] at cleaned
-  have total := trace_trans _ (trace_trans _ hd hv) cleaned
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hd hv) cleaned
   simpa only [steps, copySteps] using total
-
-/-- The standalone program satisfies the trace with no code or execution premise. -/
-theorem trace (enumeration : Fin N ≃ K) (headerV headerD output scratch : K)
-    (hvs : headerV ≠ scratch) (hvo : headerV ≠ output)
-    (hds : headerD ≠ scratch) (hdo : headerD ≠ output) (hso : scratch ≠ output)
-    (base : K → List Bool) (n m : Nat) (suffixV suffixD : List Bool)
-    (wordV : base headerV = encodeWord n ++ suffixV)
-    (wordD : base headerD = encodeWord m ++ suffixD)
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    (advance (TM2.step (program enumeration headerV headerD output scratch)))^[
-      steps enumeration output base n m]
-      (some ⟨some (.inl .seed), (ambient, register), base⟩) =
-      some ⟨none, (ambient, none),
-        MachineDrainMany.haltTapes output (encodeWords [n, m] ++ base output)⟩ :=
-  traceAt enumeration headerV headerD output scratch hvs hvo hds hdo hso id
-    (program enumeration headerV headerD output scratch) (fun _ => rfl)
-    base n m suffixV suffixD wordV wordD scratchEmpty ambient register
-
-theorem steps_le_budget (enumeration : Fin N ≃ K) (output : K)
-    (base : K → List Bool) (n m : Nat) :
-    steps enumeration output base n m ≤ budget enumeration output base n m :=
-  Nat.add_le_add_left (MachineDrainMany.steps_le
-    (MachineDrainMany.workTapes enumeration output) (afterHeaders output base n m)) _
 
 theorem afterHeaders_length_le (output : K) (base : K → List Bool) (n m bound : Nat)
     (bounded : ∀ k, (base k).length ≤ bound) (k : K) :
@@ -188,24 +152,6 @@ theorem steps_le_uniform (enumeration : Fin N ≃ K) (output : K)
   unfold steps
   rw [copySteps_eq]
   exact Nat.add_le_add_left (hc.trans hm) _
-
-/-- A bounded execution witness, obtained from the physical trace above. -/
-def execution (enumeration : Fin N ≃ K) (headerV headerD output scratch : K)
-    (hvs : headerV ≠ scratch) (hvo : headerV ≠ output)
-    (hds : headerD ≠ scratch) (hdo : headerD ≠ output) (hso : scratch ≠ output)
-    (base : K → List Bool) (n m : Nat) (suffixV suffixD : List Bool)
-    (wordV : base headerV = encodeWord n ++ suffixV)
-    (wordD : base headerD = encodeWord m ++ suffixD)
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program enumeration headerV headerD output scratch))
-      ⟨some (.inl .seed), (ambient, register), base⟩
-      (some ⟨none, (ambient, none),
-        MachineDrainMany.haltTapes output (encodeWords [n, m] ++ base output)⟩)
-      (budget enumeration output base n m) where
-  steps := steps enumeration output base n m
-  evals_in_steps := trace enumeration headerV headerD output scratch hvs hvo hds hdo hso
-    base n m suffixV suffixD wordV wordD scratchEmpty ambient register
-  steps_le_m := steps_le_budget enumeration output base n m
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineFinish
 

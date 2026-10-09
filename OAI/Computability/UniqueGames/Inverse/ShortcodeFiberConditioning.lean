@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Tactic.FieldSimp
 import Mathlib.Tactic.Ring
@@ -13,6 +14,12 @@ noncomputable section
 open scoped BigOperators Classical
 open Shortcode
 
+private theorem card_nonzero_real {T : Type*} [Fintype T] [Zero T] :
+    (Fintype.card {x : T // x ≠ 0} : ℝ) = (Fintype.card T : ℝ) - 1 := by
+  have hs := Fintype.sum_eq_add_sum_subtype_ne (fun _ : T => (1 : ℝ)) 0
+  simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one] at hs
+  linarith
+
 /-- Exact decomposition of a uniform two-factor law with a self-loop on either
 zero factor. No nonemptiness is required of the nonzero subtypes. -/
 theorem uniform_pair_mixture {A B : Type*} [Fintype A] [Fintype B]
@@ -26,64 +33,25 @@ theorem uniform_pair_mixture {A B : Type*} [Fintype A] [Fintype B]
         (𝔼 p : {a : A // a ≠ 0} × {b : B // b ≠ 0}, h p.1.val p.2.val) := by
   let R : ℝ := 𝔼 p : {a : A // a ≠ 0} × {b : B // b ≠ 0},
     h p.1.val p.2.val
-  have : Nonempty A := ⟨0⟩
-  have : Nonempty B := ⟨0⟩
-  have hA : (Fintype.card A : ℝ) ≠ 0 := by
-    exact_mod_cast Fintype.card_ne_zero
-  have hB : (Fintype.card B : ℝ) ≠ 0 := by
-    exact_mod_cast Fintype.card_ne_zero
-  have hNA : (Fintype.card {a : A // a ≠ 0} : ℝ) =
-      (Fintype.card A : ℝ) - 1 := by
-    have hs := Fintype.sum_eq_add_sum_subtype_ne (fun _ : A => (1 : ℝ)) 0
-    simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one] at hs
-    linarith
-  have hNB : (Fintype.card {b : B // b ≠ 0} : ℝ) =
-      (Fintype.card B : ℝ) - 1 := by
-    have hs := Fintype.sum_eq_add_sum_subtype_ne (fun _ : B => (1 : ℝ)) 0
-    simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one] at hs
-    linarith
   have hNZ : (∑ a : {a : A // a ≠ 0}, ∑ b : {b : B // b ≠ 0}, h a.val b.val) =
-      (Fintype.card {a : A // a ≠ 0} : ℝ) *
-        (Fintype.card {b : B // b ≠ 0} : ℝ) * R := by
-    simpa only [Fintype.card_prod, Nat.cast_mul, Fintype.sum_prod_type] using
-      (Fintype.card_mul_expect
+      ((Fintype.card A : ℝ) - 1) * ((Fintype.card B : ℝ) - 1) * R := by
+    simpa only [Fintype.card_prod, Nat.cast_mul, card_nonzero_real, Fintype.sum_prod_type]
+      using (Fintype.card_mul_expect
         (fun p : {a : A // a ≠ 0} × {b : B // b ≠ 0} => h p.1.val p.2.val)).symm
-  have hinner (a : A) : (∑ b : B, h a b) =
-      1 + ∑ b : {b : B // b ≠ 0}, h a b.val := by
-    rw [Fintype.sum_eq_add_sum_subtype_ne _ 0, hright]
   have hsum : (∑ a : A, ∑ b : B, h a b) =
-      (Fintype.card B : ℝ) + (Fintype.card {a : A // a ≠ 0} : ℝ) +
-        (Fintype.card {a : A // a ≠ 0} : ℝ) *
-          (Fintype.card {b : B // b ≠ 0} : ℝ) * R := by
-    rw [Fintype.sum_eq_add_sum_subtype_ne (fun a : A => ∑ b : B, h a b) 0]
-    simp only [hleft, Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one]
-    simp_rw [hinner]
-    rw [Finset.sum_add_distrib, hNZ]
-    simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one]
-    ring
-  have hfull : (Fintype.card A : ℝ) * (Fintype.card B : ℝ) *
-      (𝔼 a, 𝔼 b, h a b) = ∑ a, ∑ b, h a b := by
-    calc
-      _ = (Fintype.card B : ℝ) *
-          ((Fintype.card A : ℝ) * (𝔼 a, 𝔼 b, h a b)) := by ring
-      _ = (Fintype.card B : ℝ) * (∑ a, 𝔼 b, h a b) := by
-        rw [Fintype.card_mul_expect]
-      _ = _ := by
-        rw [Finset.mul_sum]
-        simp_rw [Fintype.card_mul_expect]
-  have hbalance : (Fintype.card A : ℝ) * (Fintype.card B : ℝ) *
-      (𝔼 a, 𝔼 b, h a b) =
       (Fintype.card A : ℝ) + (Fintype.card B : ℝ) - 1 +
         ((Fintype.card A : ℝ) - 1) * ((Fintype.card B : ℝ) - 1) * R := by
-    rw [hfull, hsum, hNA, hNB]
+    rw [Fintype.sum_eq_add_sum_subtype_ne (fun a : A => ∑ b : B, h a b) 0]
+    simp only [hleft, Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one]
+    simp_rw [Fintype.sum_eq_add_sum_subtype_ne (h _) 0, hright]
+    rw [Finset.sum_add_distrib, hNZ]
+    simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one, card_nonzero_real]
     ring
-  apply mul_left_cancel₀ (mul_ne_zero hA hB)
-  rw [hbalance]
-  change _ = (Fintype.card A : ℝ) * (Fintype.card B : ℝ) *
-    ((Fintype.card A : ℝ)⁻¹ + (Fintype.card B : ℝ)⁻¹ -
-      (Fintype.card A : ℝ)⁻¹ * (Fintype.card B : ℝ)⁻¹ +
-      (1 - ((Fintype.card A : ℝ)⁻¹ + (Fintype.card B : ℝ)⁻¹ -
-        (Fintype.card A : ℝ)⁻¹ * (Fintype.card B : ℝ)⁻¹)) * R)
+  have hA : (Fintype.card A : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr Fintype.card_ne_zero
+  have hB : (Fintype.card B : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr Fintype.card_ne_zero
+  change (𝔼 a, 𝔼 b, h a b) = _ + (1 - _) * R
+  simp only [Fintype.expect_eq_sum_div_card, div_eq_mul_inv, ← Finset.sum_mul]
+  rw [hsum]
   field_simp [hA, hB]
   ring
 

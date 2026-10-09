@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
@@ -16,36 +17,20 @@ inductive Tape
   | input | work | power | saved | level | fuel | spare | product
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.input, .work, .power, .saved, .level, .fuel,
-  .spare, .product]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .work, .power, .saved, .level, .fuel,
+  .spare, .product}
+  complete x := by cases x <;> simp
 
 inductive Label
   | init | fuelFirst | fuelSecond | guard | copyFirst | copySecond
   | compare | restore | decide | scale | transfer | cleanup
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.init, .fuelFirst, .fuelSecond, .guard,
-  .copyFirst, .copySecond, .compare, .restore, .decide, .scale, .transfer, .cleanup]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.init, .fuelFirst, .fuelSecond, .guard,
+  .copyFirst, .copySecond, .compare, .restore, .decide, .scale, .transfer, .cleanup}
+  complete x := by cases x <;> simp
 
 abbrev Alphabet (_ : Tape) := Bool
 abbrev State (σ : Type) := (σ × Bool) × Option Bool
@@ -208,10 +193,6 @@ theorem compareRestoredTrace (g k p : Nat) (level fuel : List Bool)
     Function.iterate_add_apply, hc]
   exact hr
 
-private theorem appendTrace {α : Type*} (f : α → α) {a b c : α} {s t : Nat}
-    (hs : f^[s] a = b) (ht : f^[t] b = c) : f^[s + t] a = c := by
-  rw [Nat.add_comm s t, Function.iterate_add_apply, hs, ht]
-
 theorem scaleStep_succ (g p b : Nat) (input level fuel : List Bool)
     (ambient : σ) (register : Option Bool) :
     TM2.step (program g)
@@ -272,7 +253,7 @@ theorem scaleTrace (g k p e : Nat) (fuel : List Bool)
   have he : true :: encodeWord e = encodeWord (e + 1) := by simp [encodeWord, List.replicate_succ]
   rw [he, Nat.mul_comm g p] at ht
   rw [he, Nat.mul_comm g p] at hs
-  have h := appendTrace (advance (TM2.step (program g))) hs ht
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hs ht
   simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm, Nat.mul_comm] using h
 
 theorem cleanupTrace (g k p e f : Nat) (ambient : σ) (register : Option Bool) :
@@ -349,7 +330,7 @@ theorem prefixTrace (g k p e f : Nat) (ambient : σ) (register : Option Bool) :
       some ⟨some (if k ≤ p then Label.cleanup else Label.scale), ((ambient, false), none),
         memory (encodeWord k) [] (encodeWord p) [] (encodeWord e) (encodeWord f) [] []⟩ :=
     decideStep g k p e f ambient
-  exact appendTrace _ (appendTrace _ (appendTrace _ hg hc) hcmp) hd
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hg hc) hcmp) hd
 
 def coreTime (g k : Nat) : Nat → Nat → Nat
   | 0, _ => 3
@@ -374,16 +355,16 @@ theorem coreTrace (g k f e p : Nat) (ambient : σ) (register : Option Bool) :
           some ⟨some .cleanup, ((ambient, false), none),
             memory (encodeWord k) [] (encodeWord p) [] (encodeWord e) (encodeWord 0) [] []⟩ :=
         guardStep_zero g k p e ambient register
-      exact appendTrace _ hg (cleanupTrace g k p e 0 ambient none)
+      exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hg (cleanupTrace g k p e 0 ambient none)
   | succ f ih =>
       have hpref := prefixTrace g k p e f ambient register
       by_cases h : k ≤ p
       · simp only [h, ite_true] at hpref
-        have hrun := appendTrace _ hpref (cleanupTrace g k p e f ambient none)
+        have hrun := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hpref (cleanupTrace g k p e f ambient none)
         simpa only [coreTime, PreprocessingLevels.levelLoop, h, ite_true] using hrun
       · simp only [h, ite_false] at hpref
         have hscale := scaleTrace g k p e (encodeWord f) ambient none
-        have hrun := appendTrace _ hpref (appendTrace _ hscale (ih (e + 1) (p * g) none))
+        have hrun := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hpref (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hscale (ih (e + 1) (p * g) none))
         simpa only [coreTime, PreprocessingLevels.levelLoop, h, ite_false] using hrun
 
 def roundBudget (g k : Nat) : Nat := (g + 8) * (k + 1) + 16
@@ -462,7 +443,7 @@ theorem searchTrace (g k : Nat) (ambient : σ) (register : Option Bool) :
     (memory (encodeWord k) [] (encodeWord 1) [] (encodeWord 0) [] [] [])
     rfl (ambient, false) register
   simp only [memory, encodeWord_length, List.append_nil, update_fuel] at hc
-  exact appendTrace _ (appendTrace _ hi hc) (coreTrace g k k 0 1 ambient none)
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hi hc) (coreTrace g k k 0 1 ambient none)
 
 def timeBound (g k : Nat) : Nat := (g + 8) * (k + 1) ^ 2 + 18 * (k + 1) + 3
 

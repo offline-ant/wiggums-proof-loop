@@ -1,8 +1,8 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
 import Mathlib.Algebra.Order.BigOperators.GroupWithZero.Finset
-import Mathlib.Data.Fintype.Option
 import Mathlib.Data.Fintype.Pi
 import Mathlib.Data.Fintype.Prod
 import Mathlib.Basic.Real.Basic
@@ -15,11 +15,10 @@ section
 /-!
 Exact finite probability mass of a bounded rejection process.
 
-Each trial independently draws from a finite mass function `w`. Its first
-accepted proposal is represented by `some proposal`; exhaustion is `none`.
-The recursive definition exposes the one-step probability transition. We prove
-normalization, nonnegativity, the exact survival probability, and an exact
-agreement-event formula with the finite-truncation error.
+Each trial independently draws from a finite mass function `w`. We track only
+the mass of a good first acceptance, rather than constructing an auxiliary law
+on every possible output. Its scalar recurrence gives the exact geometric
+formula and is identified directly with the executable sampler below.
 -/
 
 namespace UniqueGamesTheorem.Foundations.CorrelatedSampling
@@ -49,97 +48,13 @@ theorem eventMass_complement (w : σ → ℝ) (event : σ → Bool)
       cases event s <;> simp
     _ = 1 := hw
 
-def geometricMass (r : ℝ) : Nat → ℝ
+/-- Mass of a good first acceptance: accept a good proposal now, or reject
+and continue. For two threshold samplers, take `accept = left || right` and
+`good = left && right`; `first_union_common` gives agreement on this event. -/
+def goodFirstMass (w : σ → ℝ) (accept good : σ → Bool) : Nat → ℝ
   | 0 => 0
-  | n + 1 => 1 + r * geometricMass r n
-
-theorem geometricMass_nonneg (r : ℝ) (hr : 0 ≤ r) (n : Nat) :
-    0 ≤ geometricMass r n := by
-  induction n with
-  | zero => simp [geometricMass]
-  | succ n ih => exact add_nonneg (by norm_num) (mul_nonneg hr ih)
-
-theorem geometricMass_identity (r : ℝ) (n : Nat) :
-    (1 - r) * geometricMass r n = 1 - r ^ n := by
-  induction n with
-  | zero => simp [geometricMass]
-  | succ n ih =>
-      simp only [geometricMass, pow_succ]
-      calc
-        (1 - r) * (1 + r * geometricMass r n) =
-            (1 - r) + r * ((1 - r) * geometricMass r n) := by ring
-        _ = 1 - r ^ n * r := by rw [ih]; ring
-
-/-- Probability transition for a finite first-acceptance process. A successful
-first trial contributes its own mass; a rejected first trial continues with
-one fewer trial. -/
-def firstHitWeight (w : σ → ℝ) (accept : σ → Bool) : Nat → Option σ → ℝ
-  | 0, none => 1
-  | 0, some _ => 0
-  | n + 1, none => eventMass w (fun s => !(accept s)) * firstHitWeight w accept n none
-  | n + 1, some s =>
-      (if accept s then w s else 0) +
-        eventMass w (fun s => !(accept s)) * firstHitWeight w accept n (some s)
-
-theorem firstHitWeight_nonneg (w : σ → ℝ) (accept : σ → Bool)
-    (hw : ∀ s, 0 ≤ w s) (n : Nat) (output : Option σ) :
-    0 ≤ firstHitWeight w accept n output := by
-  induction n generalizing output with
-  | zero => cases output <;> simp [firstHitWeight]
-  | succ n ih =>
-      have hr := eventMass_nonneg w (fun s => !(accept s)) hw
-      cases output with
-      | none => exact mul_nonneg hr (ih none)
-      | some s =>
-          apply add_nonneg
-          · split <;> simp_all
-          · exact mul_nonneg hr (ih (some s))
-
-theorem firstHitWeight_none (w : σ → ℝ) (accept : σ → Bool) (n : Nat) :
-    firstHitWeight w accept n none = eventMass w (fun s => !(accept s)) ^ n := by
-  induction n with
-  | zero => simp [firstHitWeight]
-  | succ n ih => simp [firstHitWeight, ih, pow_succ, mul_comm]
-
-theorem firstHitWeight_some (w : σ → ℝ) (accept : σ → Bool) (n : Nat) (s : σ) :
-    firstHitWeight w accept n (some s) =
-      (if accept s then w s else 0) *
-        geometricMass (eventMass w (fun s => !(accept s))) n := by
-  induction n with
-  | zero => simp [firstHitWeight, geometricMass]
-  | succ n ih =>
-      rw [firstHitWeight, geometricMass, ih]
-      ring
-
-theorem firstHitWeight_normalized (w : σ → ℝ) (accept : σ → Bool)
-    (hw : ∑ s, w s = 1) (n : Nat) : ∑ output, firstHitWeight w accept n output = 1 := by
-  rw [Fintype.sum_option, firstHitWeight_none]
-  simp_rw [firstHitWeight_some]
-  rw [← Finset.sum_mul]
-  change eventMass w (fun s => !(accept s)) ^ n +
-    eventMass w accept * geometricMass (eventMass w (fun s => !(accept s))) n = 1
-  have hc := eventMass_complement w accept hw
-  have hg := geometricMass_identity (eventMass w (fun s => !(accept s))) n
-  have ha : eventMass w accept = 1 - eventMass w (fun s => !(accept s)) := by linarith
-  rw [ha, hg]
-  ring
-
-/-- Probability that the first accepted proposal satisfies an additional test.
-For two threshold samplers, take `accept = left || right` and `good = left && right`.
-`first_union_common` gives deterministic agreement on this event. -/
-def goodFirstMass (w : σ → ℝ) (accept good : σ → Bool) (n : Nat) : ℝ :=
-  ∑ s, if good s then firstHitWeight w accept n (some s) else 0
-
-theorem goodFirstMass_eq (w : σ → ℝ) (accept good : σ → Bool) (n : Nat) :
-    goodFirstMass w accept good n =
-      eventMass w (fun s => accept s && good s) *
-        geometricMass (eventMass w (fun s => !(accept s))) n := by
-  unfold goodFirstMass eventMass
-  rw [Finset.sum_mul]
-  apply Finset.sum_congr rfl
-  intro s _
-  rw [firstHitWeight_some]
-  cases ha : accept s <;> cases hg : good s <;> simp [ha, hg, eventMass]
+  | n + 1 => eventMass w (fun s => accept s && good s) +
+      eventMass w (fun s => !(accept s)) * goodFirstMass w accept good n
 
 /-- Exact finite geometric law: the first accepted proposal lies in the good
 part with probability (good accepted mass / total accepted mass) times the
@@ -149,16 +64,14 @@ theorem goodFirstMass_exact (w : σ → ℝ) (accept good : σ → Bool)
     goodFirstMass w accept good n =
       eventMass w (fun s => accept s && good s) / eventMass w accept *
         (1 - eventMass w (fun s => !(accept s)) ^ n) := by
-  rw [goodFirstMass_eq]
-  have hc := eventMass_complement w accept hw
-  have hg := geometricMass_identity (eventMass w (fun s => !(accept s))) n
-  have hgeom : eventMass w accept *
-      geometricMass (eventMass w (fun s => !(accept s))) n =
-      1 - eventMass w (fun s => !(accept s)) ^ n := by
-    have heq : eventMass w accept = 1 - eventMass w (fun s => !(accept s)) := by linarith
-    rw [heq, hg]
-  rw [← hgeom]
-  field_simp
+  have hc : eventMass w (fun s => !(accept s)) = 1 - eventMass w accept := by
+    linarith [eventMass_complement w accept hw]
+  induction n with
+  | zero => simp [goodFirstMass]
+  | succ n ih =>
+      rw [goodFirstMass, ih, pow_succ, hc]
+      field_simp [ha]
+      ring
 
 theorem commonMass_le_acceptMass (w : σ → ℝ) (accept good : σ → Bool)
     (hw : ∀ s, 0 ≤ w s) :
@@ -254,9 +167,8 @@ theorem splitRight_preserves_cut (I : ThresholdInterval) (t r : ℝ) (h : cutAt 
   · exact Or.inl h
   · exact Or.inr (h.trans (le_max_left _ _))
 
-def splitAll (t : ℝ) : List ThresholdInterval → List ThresholdInterval
-  | [] => []
-  | I :: rest => splitLeft I t :: splitRight I t :: splitAll t rest
+def splitAll (t : ℝ) (intervals : List ThresholdInterval) : List ThresholdInterval :=
+  intervals.flatMap (fun I => [splitLeft I t, splitRight I t])
 
 def unitThresholdInterval : ThresholdInterval := ⟨0, 1, by norm_num⟩
 
@@ -264,19 +176,14 @@ def thresholdPartition : List ℝ → List ThresholdInterval
   | [] => [unitThresholdInterval]
   | t :: rest => splitAll t (thresholdPartition rest)
 
-def sumOnIntervals (f : ThresholdInterval → ℝ) : List ThresholdInterval → ℝ
-  | [] => 0
-  | I :: rest => f I + sumOnIntervals f rest
+def sumOnIntervals (f : ThresholdInterval → ℝ) (intervals : List ThresholdInterval) : ℝ :=
+  (intervals.map f).sum
 
 theorem sumOn_splitAll (f : ThresholdInterval → ℝ) (t : ℝ)
     (hf : ∀ I, f (splitLeft I t) + f (splitRight I t) = f I)
     (intervals : List ThresholdInterval) :
     sumOnIntervals f (splitAll t intervals) = sumOnIntervals f intervals := by
-  induction intervals with
-  | nil => rfl
-  | cons I rest ih =>
-      simp only [splitAll, sumOnIntervals, ih]
-      rw [← add_assoc, hf]
+  simp [sumOnIntervals, splitAll, List.flatMap_def, List.sum_flatten, Function.comp_def, hf]
 
 theorem partition_sum (f : ThresholdInterval → ℝ)
     (hf : ∀ t I, f (splitLeft I t) + f (splitRight I t) = f I)
@@ -300,29 +207,21 @@ theorem partition_cdf (thresholds : List ℝ) (r : ℝ) (h0 : 0 ≤ r) (h1 : r �
 
 theorem splitAll_new_cuts (intervals : List ThresholdInterval) (t : ℝ) :
     ∀ I ∈ splitAll t intervals, cutAt t I := by
-  induction intervals with
-  | nil => intro I h; simp [splitAll] at h
-  | cons J rest ih =>
-      intro I h
-      rcases List.mem_cons.mp h with h | h
-      · subst I; exact splitLeft_cut J t
-      · rcases List.mem_cons.mp h with h | h
-        · subst I; exact splitRight_cut J t
-        · exact ih I h
+  intro I h
+  obtain ⟨J, _, hJ⟩ := List.mem_flatMap.mp h
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hJ
+  rcases hJ with rfl | rfl
+  · exact splitLeft_cut J t
+  · exact splitRight_cut J t
 
 theorem splitAll_preserves_cuts (intervals : List ThresholdInterval) (t r : ℝ) :
     (∀ I ∈ intervals, cutAt r I) → ∀ I ∈ splitAll t intervals, cutAt r I := by
-  induction intervals with
-  | nil => intro _ I h; simp [splitAll] at h
-  | cons J rest ih =>
-      intro hc I h
-      have hJ : cutAt r J := hc J (by simp)
-      have hrest : ∀ K ∈ rest, cutAt r K := fun K hK => hc K (by simp [hK])
-      rcases List.mem_cons.mp h with h | h
-      · subst I; exact splitLeft_preserves_cut J t r hJ
-      · rcases List.mem_cons.mp h with h | h
-        · subst I; exact splitRight_preserves_cut J t r hJ
-        · exact ih hrest I h
+  intro hc I h
+  obtain ⟨J, hJ, hI⟩ := List.mem_flatMap.mp h
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hI
+  rcases hI with rfl | rfl
+  · exact splitLeft_preserves_cut J t r (hc J hJ)
+  · exact splitRight_preserves_cut J t r (hc J hJ)
 
 theorem partition_cuts (thresholds : List ℝ) (r : ℝ) :
     r ∈ thresholds → ∀ I ∈ thresholdPartition thresholds, cutAt r I := by
@@ -336,13 +235,8 @@ theorem partition_cuts (thresholds : List ℝ) (r : ℝ) :
 
 theorem sumOnIntervals_congr (f g : ThresholdInterval → ℝ) (intervals : List ThresholdInterval) :
     (∀ I ∈ intervals, f I = g I) → sumOnIntervals f intervals = sumOnIntervals g intervals := by
-  induction intervals with
-  | nil => intro _; rfl
-  | cons J rest ih =>
-      intro h
-      have hJ := h J (by simp)
-      have hr : ∀ I ∈ rest, f I = g I := fun I hI => h I (by simp [hI])
-      simp only [sumOnIntervals, hJ, ih hr]
+  intro h
+  exact congrArg List.sum (List.map_congr_left h)
 
 theorem partition_acceptance_mass (thresholds : List ℝ) (r : ℝ)
     (hr : r ∈ thresholds) (h0 : 0 ≤ r) (h1 : r ≤ 1) :
@@ -356,10 +250,8 @@ theorem partition_acceptance_mass (thresholds : List ℝ) (r : ℝ)
 
 theorem sum_interval_get (f : ThresholdInterval → ℝ) (intervals : List ThresholdInterval) :
     (∑ i : Fin intervals.length, f intervals[i]) = sumOnIntervals f intervals := by
-  induction intervals with
-  | nil => simp [sumOnIntervals]
-  | cons I rest ih =>
-      simpa [Fin.sum_univ_succ, sumOnIntervals] using congrArg (fun x : ℝ => f I + x) ih
+  simpa only [List.sum_ofFn, Fin.getElem_fin, sumOnIntervals] using
+    congrArg List.sum (List.ofFn_getElem_eq_map intervals f)
 
 end
 
@@ -372,8 +264,8 @@ section
 /-!
 Connect the rejection sampler's executable list recursion to exact finite
 probabilities. `traceAverage` is a finite nested sum over independent proposals;
-it introduces no assumed probability law. The main theorem computes the actual
-mass of each output of `firstAccepted` under those nested sums.
+it introduces no assumed probability law. The good-first-event indicator obeys
+the same scalar recurrence as `goodFirstMass`.
 -/
 
 namespace UniqueGamesTheorem.Foundations.CorrelatedSampling
@@ -406,102 +298,29 @@ theorem traceAverage_mono (w : σ → ℝ) (hw : ∀ s, 0 ≤ w s) (n : Nat)
         (ih (fun tail => f (s :: tail)) (fun tail => g (s :: tail))
           (fun tail => hfg (s :: tail))) (hw s)
 
-theorem traceAverage_sum {ι : Type*} [Fintype ι] (w : σ → ℝ) (n : Nat)
-    (f : ι → List σ → ℝ) :
-    traceAverage w n (fun xs => ∑ i, f i xs) = ∑ i, traceAverage w n (f i) := by
-  induction n generalizing f with
-  | zero => rfl
-  | succ n ih =>
-      simp only [traceAverage]
-      simp_rw [ih, Finset.mul_sum]
-      exact Finset.sum_comm
-
-variable [DecidableEq σ]
-
-/-- The recursively constructed first-hit distribution is the actual law
-of the finite shared-list rejection sampler. -/
-theorem firstAccepted_law (w : σ → ℝ) (accept : σ → Bool)
-    (hw : ∑ s, w s = 1) (n : Nat) (output : Option σ) :
-    traceAverage w n (fun proposals =>
-      if firstAccepted accept proposals = output then 1 else 0) =
-      firstHitWeight w accept n output := by
-  classical
-  induction n generalizing output with
-  | zero => cases output <;> simp [traceAverage, firstAccepted, firstHitWeight]
-  | succ n ih =>
-      have hstep : traceAverage w (n + 1) (fun proposals =>
-          if firstAccepted accept proposals = output then 1 else 0) =
-          ∑ s, w s * (if accept s then (if some s = output then 1 else 0)
-            else firstHitWeight w accept n output) := by
-        unfold traceAverage
-        apply Finset.sum_congr rfl
-        intro s _
-        congr 1
-        by_cases hs : accept s = true
-        · simp [firstAccepted, hs, traceAverage_const w hw]
-        · simpa [firstAccepted, hs] using ih output
-      rw [hstep]
-      cases output with
-      | none =>
-          simp only [Option.some_ne_none, ite_false, firstHitWeight]
-          rw [eventMass, Finset.sum_mul]
-          apply Finset.sum_congr rfl
-          intro s _
-          cases accept s <;> simp
-      | some t =>
-          simp only [Option.some.injEq, firstHitWeight]
-          calc
-            ∑ s, w s * (if accept s then (if s = t then 1 else 0)
-                else firstHitWeight w accept n (some t)) =
-              ∑ s, ((if s = t then (if accept s then w s else 0) else 0) +
-                (if !(accept s) then w s else 0) * firstHitWeight w accept n (some t)) := by
-                  apply Finset.sum_congr rfl
-                  intro s _
-                  by_cases he : s = t
-                  · subst s
-                    by_cases hs : accept t = true <;> simp [hs]
-                  · by_cases hs : accept s = true <;> simp [hs, he]
-            _ = (if accept t then w t else 0) +
-                eventMass w (fun s => !(accept s)) * firstHitWeight w accept n (some t) := by
-                  rw [Finset.sum_add_distrib, ← Finset.sum_mul]
-                  simp [eventMass]
-
 /-- Indicator of the first accepted proposal passing a second test. -/
 def goodFirstIndicator (accept good : σ → Bool) (proposals : List σ) : ℝ :=
   match firstAccepted accept proposals with
   | none => 0
   | some s => if good s then 1 else 0
 
-theorem goodFirstIndicator_expansion (accept good : σ → Bool) (proposals : List σ) :
-    goodFirstIndicator accept good proposals =
-      ∑ s, if good s then (if firstAccepted accept proposals = some s then 1 else 0) else 0 := by
-  classical
-  cases h : firstAccepted accept proposals with
-  | none => simp [goodFirstIndicator, h]
-  | some t =>
-      simp only [goodFirstIndicator, h, Option.some.injEq]
-      calc
-        (if good t then (1 : ℝ) else 0) =
-            ∑ s, if t = s then (if good s then (1 : ℝ) else 0) else 0 := by simp
-        _ = ∑ s, if good s then (if t = s then (1 : ℝ) else 0) else 0 := by
-          apply Finset.sum_congr rfl
-          intro s _
-          by_cases hg : good s = true <;> by_cases ht : t = s <;> simp [hg, ht]
-
 /-- Exact good-event probability of the actual bounded sampler. -/
 theorem goodFirstIndicator_law (w : σ → ℝ) (accept good : σ → Bool)
     (hw : ∑ s, w s = 1) (n : Nat) :
     traceAverage w n (goodFirstIndicator accept good) = goodFirstMass w accept good n := by
-  classical
-  change traceAverage w n (fun xs => goodFirstIndicator accept good xs) = _
-  simp_rw [goodFirstIndicator_expansion]
-  rw [traceAverage_sum]
-  unfold goodFirstMass
-  apply Finset.sum_congr rfl
-  intro s _
-  by_cases hg : good s = true
-  · simpa [hg] using firstAccepted_law w accept hw n (some s)
-  · simp [hg, traceAverage_const w hw]
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+      rw [traceAverage, goodFirstMass, eventMass, eventMass, Finset.sum_mul,
+        ← Finset.sum_add_distrib]
+      apply Finset.sum_congr rfl
+      intro s _
+      cases hs : accept s with
+      | false =>
+          change traceAverage w n (fun xs => goodFirstIndicator accept good xs) = _ at ih
+          simpa [goodFirstIndicator, firstAccepted, hs] using congrArg (w s * ·) ih
+      | true =>
+          simp [goodFirstIndicator, firstAccepted, hs, traceAverage_const w hw]
 
 end
 

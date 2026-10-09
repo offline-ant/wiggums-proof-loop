@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Polynomial.Inductions
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -310,12 +311,6 @@ theorem Ready.output_update (slots : Layout width ↪ K) (base : K → List Bool
   · rw [other _ (by simp)]; exact ready.hornerScratch
   · rw [other _ (by simp)]; exact ready.output
 
-theorem final_ready (slots : Layout width ↪ K) (values : List Nat) (coefficient : Nat)
-    (indices offsets fields : Fin width → Nat) (base : K → List Bool)
-    (ready : Ready slots base) (value : Nat) :
-    Ready slots (finalTapes slots values coefficient indices offsets fields base value) := by
-  rw [finalTapes_eq slots values coefficient indices offsets fields base ready value]
-  exact ready.output_update slots base _
 
 /-- Cleanup only touches gather work; it never scans the global accumulator. -/
 theorem emitted_clear_length (slots : Layout width ↪ K) (values : List Nat) (coefficient : Nat)
@@ -754,23 +749,6 @@ noncomputable def width (p : Polynomial Nat) : Nat := (highCoefficients p).lengt
 noncomputable def digit (p : Polynomial Nat) (i : Nat) : Nat :=
   if hi : i < width p then (highCoefficients p)[i] else 0
 
-noncomputable def digitBound (p : Polynomial Nat) : Nat := (highCoefficients p).sum
-
-theorem le_sum_of_mem {n : Nat} {xs : List Nat} (h : n ∈ xs) : n ≤ xs.sum := by
-  induction xs with
-  | nil => simp at h
-  | cons a rest ih =>
-    rcases List.mem_cons.mp h with rfl | hm
-    · simp
-    · have hrest := ih hm
-      simp only [List.sum_cons]
-      omega
-
-theorem digit_le_bound (p : Polynomial Nat) (i : Nat) : digit p i ≤ digitBound p := by
-  unfold digit
-  split
-  · exact le_sum_of_mem (List.getElem_mem _)
-  · exact Nat.zero_le _
 
 theorem highCoefficients_foldl (p : Polynomial Nat) (n : Nat) :
     (highCoefficients p).foldl (fun value digit => value * n + digit) 0 = p.eval n := by

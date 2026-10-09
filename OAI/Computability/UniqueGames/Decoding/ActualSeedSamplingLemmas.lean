@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.ActualAdviceUpperLemmas
 import OAI.Computability.UniqueGames.Decoding.ActualSeedPointwise
 import OAI.Computability.UniqueGames.Decoding.TableKeysCompletenessLemmas
@@ -39,60 +40,10 @@ theorem uniform_occurrence_slots {O : Type} [Fintype O] [Nonempty O]
   rw [Clean.NativeExperiment.expectation_iid_product,
     FiniteDistribution.iid_uniform, FiniteDistribution.iid_uniform]
 
-/-- A named pointwise observable makes the finite expectation permutations
-explicit without changing the actual sampled draw. -/
-def drawAgreement (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (A : Alphabet s →ₗ[F2] Vector rs) (mask : Fin k → Bool)
-    (occ : Fin k → Fin S.occurrences) (slots : Fin k → Fin 3)
-    (TM :
-      (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Vector d) ×
-      (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Alphabet s)) : ℝ :=
-  VisiblePolicies.observedAgreement S labeling good
-    (actualDraw S A (Clean.NativeExperiment.maskSet mask) occ
-      (fun j => Clean.ActualAdviceBridge.indexSlot (slots j)) TM.1 TM.2)
-
-theorem sampledAgreement_eq_separated (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (A : Alphabet s →ₗ[F2] Vector rs)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1) :
-    sampledAgreement S labeling good
-      (Clean.IncidenceGap.slotLaw (FiniteDistribution.uniform (Fin S.occurrences)))
-      A β hβ₀ hβ₁ =
-      ((Clean.bernoulli β hβ₀ hβ₁).iid k).expectation (fun mask =>
-        (FiniteDistribution.uniform (Fin k → Fin S.occurrences)).expectation (fun occ =>
-          (FiniteDistribution.uniform (Fin k → Fin 3)).expectation (fun slots =>
-            (FiniteDistribution.uniform
-              ((RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Vector d) ×
-                (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Alphabet s))).expectation
-              (drawAgreement S labeling good A mask occ slots)))) := by
-  unfold sampledAgreement
-  apply FiniteDistribution.expectation_congr
-  intro mask
-  calc
-    _ = (FiniteDistribution.uniform
-        ((RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Vector d) ×
-          (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Alphabet s))).expectation
-        (fun TM => (FiniteDistribution.uniform (Fin k → Fin S.occurrences)).expectation
-          (fun occ => (FiniteDistribution.uniform (Fin k → Fin 3)).expectation
-            (fun slots => drawAgreement S labeling good A mask occ slots TM))) := by
-      apply FiniteDistribution.expectation_congr
-      intro TM
-      exact uniform_occurrence_slots _
-    _ = _ := by
-      rw [FiniteDistribution.expectation_comm]
-      apply FiniteDistribution.expectation_congr
-      intro occ
-      exact FiniteDistribution.expectation_comm _ _ _
-
 /-- Exact sampler join: the complete hidden seed used by conditioning has
 the same success as the genuine local-policy experiment used by the upper
 bound, with no extra hidden-data conditioning on either side. -/
-theorem fullSeedLaw_eq_sampledAgreement (S : Source)
+theorem fullSeedLaw_eq_actualSuccess (S : Source)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
     (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
       VisiblePolicies.ResponseWitness k → Prop)
@@ -103,32 +54,26 @@ theorem fullSeedLaw_eq_sampledAgreement (S : Source)
       (fun seed => VisiblePolicies.observedAgreement S labeling good
         (AdviceLaw.seedToActualDraw seed.1.1 seed.1.2 seed.2)) =
       (FiniteDistribution.uniform (Alphabet s →ₗ[F2] Vector rs)).expectation
-        (fun A => sampledAgreement S labeling good
+        (fun A => AdviceLaw.actualSuccess
           (Clean.IncidenceGap.slotLaw (FiniteDistribution.uniform (Fin S.occurrences)))
-          A β hβ₀ hβ₁) := by
+          (sourceIncidence S) A (policies S labeling good A) β hβ₀ hβ₁) := by
   unfold AdviceLaw.fullSeedLaw
   rw [FiniteDistribution.expectation_product, FiniteDistribution.expectation_product,
     FiniteDistribution.expectation_comm]
   apply FiniteDistribution.expectation_congr
   intro A
-  rw [sampledAgreement_eq_separated]
-  calc
-    _ = (FiniteDistribution.uniform (Fin k → Fin S.occurrences)).expectation (fun occ =>
-        ((Clean.bernoulli β hβ₀ hβ₁).iid k).expectation (fun mask =>
-          (FiniteDistribution.uniform (Fin k → Fin 3)).expectation (fun slots =>
-            (FiniteDistribution.uniform
-              ((RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Vector d) ×
-                (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Alphabet s))).expectation
-              (drawAgreement S labeling good A mask occ slots)))) := by
-      apply FiniteDistribution.expectation_congr
-      intro occ
-      rw [AdviceLaw.projectionSeed_mask_slots_expectation]
-      apply FiniteDistribution.expectation_congr
-      intro mask
-      apply FiniteDistribution.expectation_congr
-      intro slots
-      exact ActualSeedPointwise.seedAgreement_repack S labeling good occ A mask slots
-    _ = _ := FiniteDistribution.expectation_comm _ _ _
+  unfold AdviceLaw.actualSuccess
+  simp_rw [AdviceLaw.projectionSeed_mask_slots_expectation,
+    ActualSeedPointwise.seedAgreement_repack, fixedMapSuccess_eq_observed,
+    uniform_occurrence_slots]
+  rw [FiniteDistribution.expectation_comm]
+  apply FiniteDistribution.expectation_congr
+  intro mask
+  symm
+  rw [FiniteDistribution.expectation_comm]
+  apply FiniteDistribution.expectation_congr
+  intro occ
+  exact FiniteDistribution.expectation_comm _ _ _
 
 theorem fullSeedLaw_upper (S : Source)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
@@ -145,8 +90,10 @@ theorem fullSeedLaw_upper (S : Source)
       (fun seed => VisiblePolicies.observedAgreement S labeling good
         (AdviceLaw.seedToActualDraw seed.1.1 seed.1.2 seed.2)) ≤
       (1 - (β / (2 : ℝ) ^ (d + rs)) / 3600) ^ k := by
-  rw [fullSeedLaw_eq_sampledAgreement]
-  exact sampledAgreement_average_bound S labeling good β hβ₀ hβ₁ distinct hopt
+  rw [fullSeedLaw_eq_actualSuccess]
+  exact public_map_average_bound (sourceIncidence S)
+    (FiniteDistribution.uniform (Fin S.occurrences)) (policies S labeling good)
+    β hβ₀ hβ₁ distinct hopt
 
 end
 
@@ -267,16 +214,6 @@ structure Parameters (p : ℚ) where
       (FiniteDistribution.uniform (Fin S.occurrences)) ≤ (4 : ℝ) / 5 →
     InstanceValue.value (TableKeysAddressGame.tableOutput S k T) ≤ (99 : ℝ) / 100
 
-/-- The rate of any semantic vertex labeling is realized on the direct
-address output. Isolated unused addresses receive an arbitrary valid label. -/
-theorem semantic_rate_le_address_value (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (en : NoiseEnumeration g)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s)) :
-    (GapSemantics.satisfactionRate (TableKeysGame.outputInstance S k g) labeling : ℝ) ≤
-      InstanceValue.value (TableKeysAddressGame.outputInstance S k g en) := by
-  have h := semantic_acceptance_le_address_value S k g en labeling
-  rw [TableKeysGame.acceptanceProbability_eq_count] at h
-  exact h
 
 namespace Parameters
 

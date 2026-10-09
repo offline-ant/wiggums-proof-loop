@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Basic.Real.Basic
 import OAI.Computability.UniqueGames.Reduction.ActualCanonicalLemmas
@@ -87,27 +88,18 @@ theorem freePullback_expansion (gamma : RawCoefficients J R)
   rw [pullback_expansion]
   simp only [inverse_homogeneous, inverse_first, inverse_second, inverse_retained_free]
 
-def outsideInsideEquiv : (PositionOutside J ⊕ PositionInside J) ≃ Fin k where
-  toFun j := Sum.elim Subtype.val Subtype.val j
-  invFun j := if hj : j ∈ J then Sum.inr ⟨j,hj⟩ else Sum.inl ⟨j,hj⟩
-  left_inv j := by
-    cases j with
-    | inl j => simp [j.property]
-    | inr j => simp [j.property]
-  right_inv j := by
-    by_cases hj : j ∈ J <;> simp [hj]
-
 omit [Module F2 R] in
 theorem sum_outside_inside (f : PositionOutside J → R) (g : PositionInside J → R) :
     (∑ j, f j) + (∑ j, g j) =
       ∑ j : Fin k, if hj : j ∈ J then g ⟨j,hj⟩ else f ⟨j,hj⟩ := by
-  rw [← (outsideInsideEquiv J).sum_comp]
-  rw [Fintype.sum_sum_type]
-  congr 1 <;> apply Finset.sum_congr rfl
-  · intro j _
-    simp [outsideInsideEquiv, j.property]
-  · intro j _
-    simp [outsideInsideEquiv, j.property]
+  classical
+  have h := Fintype.sum_subtype_add_sum_subtype (fun j : Fin k => j ∈ J)
+    (fun j => if hj : j ∈ J then g ⟨j, hj⟩ else f ⟨j, hj⟩)
+  have hi : Subtype.fintype (fun j : Fin k => j ∈ J) = Finset.Subtype.fintype J :=
+    Subsingleton.elim _ _
+  rw [hi] at h
+  simpa only [Subtype.property, show ∀ j : PositionOutside J, j.val ∉ J from fun j => j.property,
+    dite_true, dite_false, add_comm] using h
 
 theorem raw_represents (gamma : RawCoefficients J R) (slot : Fin k → Slot) :
     ActualCanonical.Represents (fun j => ofBit (rhsB j)) (gamma none)
@@ -260,60 +252,10 @@ def rowBitsEquiv : (Q → F2) ≃ ZeroInformation.Bits Q where
   left_inv v := by funext q; exact ofBit_toBit _
   right_inv v := by funext q; exact toBit_ofBit _
 
-theorem rowBits_eq_zero (v : Q → F2) : rowBits v = ZeroInformation.zero ↔ v = 0 := by
-  rw [← rowBits_zero]
-  constructor
-  · intro h
-    apply (rowBitsEquiv (Q := Q)).injective
-    exact h
-  · intro h
-    rw [h]
 
 def rowCoefficients {P : Type} (J : Finset P) (gamma : RawCoefficients J (Q → F2)) :
     RawCoefficients J (ZeroInformation.Bits Q) := fun slot => rowBits (gamma slot)
 
-theorem zeroSet_rowCoefficients {P : Type} [DecidableEq P] [Fintype Q] [DecidableEq Q]
-    (J : Finset P) (gamma : RawCoefficients J (Q → F2)) :
-    zeroSet J (rowCoefficients J gamma) = zeroSet J gamma := by
-  ext j
-  simp only [mem_zeroSet, rowCoefficients]
-  apply exists_congr
-  intro hj
-  change (rowBits (gamma (some (.inr ⟨j,hj⟩))) = ZeroInformation.zero) ↔
-    (gamma (some (.inr ⟨j,hj⟩)) = 0)
-  exact rowBits_eq_zero _
-
-theorem actual_pullbackRow {k : Nat} [Fintype Q] [DecidableEq Q]
-    (rhs : Fin k → Bool) (J : Finset (Fin k))
-    (gamma : RawCoefficients J (Q → F2)) (slot : Fin k → PartnerProjection.Slot)
-    (x : PartnerProjection.SourcePoint rhs) :
-    rowBits (mapEquiv rhs J (Q → F2) gamma
-      (PartnerLinear.projection rhs (activeOf J) slot x)) =
-    ZeroInformation.pullbackRow Finset.univ.toList (membershipBool J)
-      ((rowCoefficients J gamma) none)
-      (fullCoefficient J (rowCoefficients J gamma) 0)
-      (fullCoefficient J (rowCoefficients J gamma) 1)
-      (singleCoefficient J (rowCoefficients J gamma))
-      (fun j => ConcreteExtraction.slotIndex (slot j)) x.homogeneous
-      (fun j => ConcreteExtraction.tripleCoordinates (x.coordinates j)) := by
-  let f : PositionOutside J → Q → F2 := fun j =>
-    ofBit (x.coordinates j.val).first • gamma (some (.inl (j,0))) +
-      ofBit (x.coordinates j.val).second • gamma (some (.inl (j,1)))
-  let g : PositionInside J → Q → F2 := fun j =>
-    ofBit (PartnerProjection.retained (slot j.val) (x.coordinates j.val)) • gamma (some (.inr j))
-  rw [pullback_expansion]
-  change rowBits ((ofBit x.homogeneous • gamma none + ∑ j, f j) + ∑ j, g j) = _
-  rw [add_assoc, ActualCanonicalPullback.sum_outside_inside J (Q → F2) f g,
-    rowBits_add, rowBits_smul, rowBits_sum]
-  unfold ZeroInformation.pullbackRow
-  congr 1
-  apply ZeroInformation.rowSum_congr
-  intro j
-  by_cases hj : j ∈ J
-  · simp [g, hj, membershipBool, singleCoefficient, rowCoefficients,
-      rowBits_smul, ConcreteExtraction.retained_coordinates]
-  · simp [f, hj, membershipBool, fullCoefficient, rowCoefficients,
-      rowBits_add, rowBits_smul, ConcreteExtraction.tripleCoordinates]
 
 theorem actual_partnerRow {k : Nat} [Fintype Q] [DecidableEq Q]
     (rhs : Fin k → Bool) (J : Finset (Fin k))
@@ -344,23 +286,28 @@ theorem actual_partnerRow {k : Nat} [Fintype Q] [DecidableEq Q]
   · simp [f, hj, membershipBool, fullCoefficient, rowCoefficients,
       rowBits_add, rowBits_smul, ConcreteExtraction.tripleCoordinates]
 
-def rawBitsEquiv {P : Type} (J : Finset P) :
-    RawCoefficients J (Q → F2) ≃ RawCoefficients J (ZeroInformation.Bits Q) :=
-  Equiv.piCongrRight (fun _ => rowBitsEquiv)
 
-def bitsMapEquiv {P : Type} [Fintype P] [DecidableEq P]
-    (rhs : P → Bool) (J : Finset P) :
-    RawCoefficients J (ZeroInformation.Bits Q) ≃
-      (PartnerProjection.PartnerPoint rhs (activeOf J) →ₗ[F2] (Q → F2)) :=
-  (rawBitsEquiv J).symm.trans (mapEquiv rhs J (Q → F2)).toEquiv
-
-/-- Uniform raw bit coefficients are exactly uniform genuine partner row maps. -/
-theorem uniform_bit_coefficients_maps {P : Type} [Fintype P] [DecidableEq P]
-    [Fintype Q] [DecidableEq Q] (rhs : P → Bool) (J : Finset P)
-    (H : (PartnerProjection.PartnerPoint rhs (activeOf J) →ₗ[F2] (Q → F2)) → ℝ) :
-    (𝔼 gamma : RawCoefficients J (ZeroInformation.Bits Q), H (bitsMapEquiv rhs J gamma)) =
-      𝔼 Y, H Y :=
-  Fintype.expect_equiv (bitsMapEquiv rhs J) _ H (fun _ => rfl)
+theorem actual_pullbackRow {k : Nat} [Fintype Q] [DecidableEq Q]
+    (rhs : Fin k → Bool) (J : Finset (Fin k))
+    (gamma : RawCoefficients J (Q → F2)) (slot : Fin k → PartnerProjection.Slot)
+    (x : PartnerProjection.SourcePoint rhs) :
+    rowBits (mapEquiv rhs J (Q → F2) gamma
+      (PartnerLinear.projection rhs (activeOf J) slot x)) =
+    ZeroInformation.pullbackRow Finset.univ.toList (membershipBool J)
+      ((rowCoefficients J gamma) none)
+      (fullCoefficient J (rowCoefficients J gamma) 0)
+      (fullCoefficient J (rowCoefficients J gamma) 1)
+      (singleCoefficient J (rowCoefficients J gamma))
+      (fun j => ConcreteExtraction.slotIndex (slot j)) x.homogeneous
+      (fun j => ConcreteExtraction.tripleCoordinates (x.coordinates j)) := by
+  rw [actual_partnerRow]
+  unfold ZeroInformation.partnerRow ZeroInformation.pullbackRow
+  congr 1
+  apply ZeroInformation.rowSum_congr
+  intro j
+  by_cases hj : j ∈ J <;>
+    simp [PartnerLinear.projection_apply, PartnerProjection.project, activeOf,
+      membershipBool, hj, ConcreteExtraction.retained_coordinates]
 
 end
 end UniqueGamesTheorem.Soundness.BinaryRowTransport
@@ -392,12 +339,13 @@ def rawProjection (rhsB : Fin k → Bool) (J : Finset (Fin k))
       (PartnerLinear.sourceLinearEquiv rhsB).symm.toLinearMap)
 
 def gammaOfRawMap (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] R) :
-    RawCoefficients J R := fun s => Y (Pi.single s 1)
+    RawCoefficients J R :=
+  (Pi.basisFun F2 (RawSlot J)).constr F2 |>.symm Y
 
 theorem rawPoint_decomposition (J : Finset (Fin k)) (v : RawPoint J) :
     (∑ s, v s • Pi.single s (1 : F2)) = v := by
-  funext t
-  simp [Finset.sum_apply, Pi.single_apply, smul_eq_mul, mul_ite]
+  simpa only [Pi.basisFun_repr, Pi.basisFun_apply] using
+    (Pi.basisFun F2 (RawSlot J)).sum_repr v
 
 theorem rawMap_expansion (J : Finset (Fin k)) (Y : RawPoint J →ₗ[F2] R)
     (v : RawPoint J) : Y v = ∑ s, v s • gammaOfRawMap J Y s := by
@@ -453,17 +401,14 @@ def restrictedFirst (rhs : Id → Bool)
 
 def firstMap (rhs : Id → Bool) (qa : ZeroInformation.FirstInput (Fin k) Q Id) :
     ActualHomogeneous.E k →ₗ[F2] (Q → F2) :=
-  if h : ∃ Z : ActualHomogeneous.E k →ₗ[F2] (Q → F2),
-    ∀ x, Z x = restrictedFirst rhs qa x then Classical.choose h else 0
+  Function.extend DFunLike.coe id (fun _ => 0) (restrictedFirst rhs qa)
 
 theorem firstMap_eq (rhs : Id → Bool) (qa : ZeroInformation.FirstInput (Fin k) Q Id)
     (Z : ActualHomogeneous.E k →ₗ[F2] (Q → F2))
     (hZ : ∀ x, restrictedFirst rhs qa x = Z x) : firstMap rhs qa = Z := by
-  have h : ∃ W : ActualHomogeneous.E k →ₗ[F2] (Q → F2),
-      ∀ x, W x = restrictedFirst rhs qa x := ⟨Z, fun x => (hZ x).symm⟩
   unfold firstMap
-  rw [dite_eq_left h]
-  exact LinearMap.ext (fun x => (Classical.choose_spec h x).trans (hZ x))
+  rw [show restrictedFirst rhs qa = ⇑Z from funext hZ]
+  exact DFunLike.coe_injective.extend_apply _ _ Z
 
 def restrictedSecond (J : Finset (Fin k))
     (qb : ZeroInformation.SecondInput (Fin k) Q Id Name) (v : RawPoint J) : Q → F2 :=
@@ -473,17 +418,14 @@ def restrictedSecond (J : Finset (Fin k))
 
 def secondMap (J : Finset (Fin k))
     (qb : ZeroInformation.SecondInput (Fin k) Q Id Name) : RawPoint J →ₗ[F2] (Q → F2) :=
-  if h : ∃ Y : RawPoint J →ₗ[F2] (Q → F2),
-    ∀ v, Y v = restrictedSecond J qb v then Classical.choose h else 0
+  Function.extend DFunLike.coe id (fun _ => 0) (restrictedSecond J qb)
 
 theorem secondMap_eq (J : Finset (Fin k))
     (qb : ZeroInformation.SecondInput (Fin k) Q Id Name) (Y : RawPoint J →ₗ[F2] (Q → F2))
     (hY : ∀ v, restrictedSecond J qb v = Y v) : secondMap J qb = Y := by
-  have h : ∃ W : RawPoint J →ₗ[F2] (Q → F2),
-      ∀ v, W v = restrictedSecond J qb v := ⟨Y, fun v => (hY v).symm⟩
   unfold secondMap
-  rw [dite_eq_left h]
-  exact LinearMap.ext (fun v => (Classical.choose_spec h v).trans (hY v))
+  rw [show restrictedSecond J qb = ⇑Y from funext hY]
+  exact DFunLike.coe_injective.extend_apply _ _ Y
 
 /-- The first player's extraction on the actual sampled input equals `Y π`.
 There is no assumption that an arbitrary input row is linear. -/
@@ -544,54 +486,23 @@ attribute [local instance] Classical.propDecidable
 variable {k : Nat} (J : Finset (Fin k)) (R : Type) [AddCommGroup R] [Module F2 R]
 
 def rawMap (gamma : RawCoefficients J R) : RawPoint J →ₗ[F2] R :=
-  (mapEquiv (fun _ : Fin k => false) J R gamma).comp
-    (pointEquiv (fun _ : Fin k => false) J).symm.toLinearMap
+  (Pi.basisFun F2 (RawSlot J)).constr F2 gamma
 
 theorem coefficients_rawMap (gamma : RawCoefficients J R) :
-    gammaOfRawMap J (rawMap J R gamma) = gamma := by
-  apply (mapEquiv (fun _ : Fin k => false) J R).injective
-  apply LinearMap.ext
-  intro y
-  rw [← rawMap_on_partner]
-  change mapEquiv (fun _ : Fin k => false) J R gamma
-    ((pointEquiv (fun _ : Fin k => false) J).symm
-      (pointEquiv (fun _ : Fin k => false) J y)) = _
-  rw [LinearEquiv.symm_apply_apply]
+    gammaOfRawMap J (rawMap J R gamma) = gamma :=
+  (Pi.basisFun F2 (RawSlot J)).constr F2 |>.symm_apply_apply gamma
 
 theorem rawMap_coefficients (Y : RawPoint J →ₗ[F2] R) :
-    rawMap J R (gammaOfRawMap J Y) = Y := by
-  apply LinearMap.ext
-  intro v
-  have h := rawMap_on_partner (fun _ : Fin k => false) J Y
-    ((pointEquiv (fun _ : Fin k => false) J).symm v)
-  rw [LinearEquiv.apply_symm_apply] at h
-  exact h.symm
+    rawMap J R (gammaOfRawMap J Y) = Y :=
+  (Pi.basisFun F2 (RawSlot J)).constr F2 |>.apply_symm_apply Y
 
-def rawMapEquiv : RawCoefficients J R ≃ (RawPoint J →ₗ[F2] R) where
-  toFun := rawMap J R
-  invFun := gammaOfRawMap J
-  left_inv := coefficients_rawMap J R
-  right_inv := rawMap_coefficients J R
+def rawMapEquiv : RawCoefficients J R ≃ (RawPoint J →ₗ[F2] R) :=
+  ((Pi.basisFun F2 (RawSlot J)).constr F2).toEquiv
 
 instance rawMapsFintype [Fintype R] : Fintype (RawPoint J →ₗ[F2] R) := by
   classical
   exact Fintype.ofEquiv (RawCoefficients J R) (rawMapEquiv J R)
 
-def bitsRawMapEquiv {Q : Type} : RawCoefficients J (ZeroInformation.Bits Q) ≃
-    (RawPoint J →ₗ[F2] (Q → F2)) :=
-  (rawBitsEquiv J).symm.trans (rawMapEquiv J (Q → F2))
-
-theorem bits_coefficients {Q : Type} (gamma : RawCoefficients J (ZeroInformation.Bits Q)) :
-    rowCoefficients J (gammaOfRawMap J (bitsRawMapEquiv J gamma)) = gamma := by
-  change (rawBitsEquiv J) (gammaOfRawMap J (rawMap J (Q → F2) ((rawBitsEquiv J).symm gamma))) = gamma
-  rw [coefficients_rawMap, Equiv.apply_symm_apply]
-
-/-- This equality counts every raw coefficient and every genuine row map once. -/
-theorem uniform_bits_rawMaps {Q : Type} [Fintype Q] [DecidableEq Q]
-    (H : (RawPoint J →ₗ[F2] (Q → F2)) → ℝ) :
-    (𝔼 gamma : RawCoefficients J (ZeroInformation.Bits Q), H (bitsRawMapEquiv J gamma)) =
-      𝔼 Y, H Y :=
-  Fintype.expect_equiv (bitsRawMapEquiv J) _ H (fun _ => rfl)
 
 end
 end UniqueGamesTheorem.Soundness.RawMapLaw

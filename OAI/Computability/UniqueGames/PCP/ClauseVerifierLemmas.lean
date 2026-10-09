@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.Foundations.PinskerLemmas
 import OAI.Computability.UniqueGames.PCP.SourceNoiseParameterLemmas
@@ -121,135 +122,16 @@ def failureCount (formula : Formula) (bob : BobStrategy formula) :
   | [] => 0
   | i :: rest => clauseFailure (clauseAt formula i) bob + failureCount formula bob rest
 
-theorem total_rejection_bound (formula : Formula) (alice : AliceStrategy formula)
-    (bob : BobStrategy formula) (indices : List (Fin formula.clauses.length)) :
-    acceptedCount formula alice bob indices + failureCount formula bob indices ≤
-      3 * indices.length := by
-  induction indices with
-  | nil => simp [acceptedCount, failureCount]
-  | cons i rest ih =>
-    have h := local_rejection_bound (clauseAt formula i) (alice i) bob
-    simp only [acceptedCount, failureCount, List.length_cons]
-    omega
 
 def allIndices (formula : Formula) : List (Fin formula.clauses.length) :=
   List.finRange formula.clauses.length
 
-/-- Count form of Håstad Lemma 3.1: a fraction `a/b` of failed clauses gives
-    a fraction at least `a/(3*b)` of failed verifier events. -/
-theorem hastad_basic_verifier_soundness (formula : Formula) (a b : Nat)
-    (sourceGap : ∀ bob : BobStrategy formula,
-      a * formula.clauses.length ≤ b * failureCount formula bob (allIndices formula))
-    (alice : AliceStrategy formula) (bob : BobStrategy formula) :
-    b * acceptedCount formula alice bob (allIndices formula) + a * formula.clauses.length ≤
-      b * (3 * formula.clauses.length) := by
-  have ht := Nat.mul_le_mul_left b (total_rejection_bound formula alice bob (allIndices formula))
-  have hg := sourceGap bob
-  simp only [allIndices, List.length_finRange, Nat.mul_add] at *
-  omega
-
-theorem honest_accepts (formula : Formula) (assignment : BobStrategy formula)
-    (satisfies : ∀ clause ∈ formula.clauses, clause.eval assignment = true)
-    (event : RandomEvent formula) :
-    accepts formula (fun i => honestAnswer (clauseAt formula i) assignment) assignment event = true := by
-  have hc : (clauseAt formula event.1).eval assignment = true :=
-    satisfies _ (List.getElem_mem _)
-  simp [accepts, honest_satisfies, honest_answerAt, hc]
-
-/-- Pointwise perfect completeness, including the exact input syntax. -/
-theorem verifier_completeness (formula : Formula) (sat : formula.Satisfiable) :
-    ∃ (alice : AliceStrategy formula) (bob : BobStrategy formula),
-      ∀ event : RandomEvent formula, accepts formula alice bob event = true := by
-  rcases sat with ⟨assignment, hs⟩
-  exact ⟨fun i => honestAnswer (clauseAt formula i) assignment, assignment,
-    honest_accepts formula assignment hs⟩
 
 /-- The valid left labels and projection maps give the concrete Label Cover
     presentation. Their alphabet depends on the clause, with at most 8 bit triples. -/
 abbrev LeftLabel (formula : Formula) (i : Fin formula.clauses.length) :=
   { answer : ClauseAnswer // localSatisfies (clauseAt formula i) answer = true }
 
-def edgeProjection (formula : Formula) (event : RandomEvent formula)
-    (label : LeftLabel formula event.1) : Bool := answerAt label.val event.2
-
-theorem verifier_eq_projection (formula : Formula)
-    (alice : ∀ i, LeftLabel formula i) (bob : BobStrategy formula) (event : RandomEvent formula) :
-    accepts formula (fun i => (alice i).val) bob event =
-      decide (edgeProjection formula event (alice event.1) =
-        bob (nameAt (clauseAt formula event.1) event.2)) := by
-  simp [accepts, (alice event.1).property, edgeProjection]
-  rfl
-
-/-- A materialized list of all three slot events at an occurrence. -/
-def eventsAt (formula : Formula) (i : Fin formula.clauses.length) : List (RandomEvent formula) :=
-  [(i, .first), (i, .second), (i, .third)]
-
-def enumerateEvents (formula : Formula) : List (Fin formula.clauses.length) →
-    List (RandomEvent formula)
-  | [] => []
-  | i :: rest => eventsAt formula i ++ enumerateEvents formula rest
-
-theorem length_enumerateEvents (formula : Formula) (indices : List (Fin formula.clauses.length)) :
-    (enumerateEvents formula indices).length = 3 * indices.length := by
-  induction indices with
-  | nil => simp [enumerateEvents]
-  | cons i rest ih =>
-    simp only [enumerateEvents, eventsAt, List.length_append, List.length_cons,
-      List.length_nil, ih]
-    omega
-
-theorem accepted_eventsAt (formula : Formula) (alice : AliceStrategy formula)
-    (bob : BobStrategy formula) (i : Fin formula.clauses.length) :
-    ((eventsAt formula i).filter (accepts formula alice bob)).length =
-      acceptedSlots (clauseAt formula i) (alice i) (honestAnswer (clauseAt formula i) bob) := by
-  by_cases hs : localSatisfies (clauseAt formula i) (alice i) = true
-  · by_cases h₁ : (alice i).first = bob (clauseAt formula i)[0].variableIndex <;>
-      by_cases h₂ : (alice i).second = bob (clauseAt formula i)[1].variableIndex <;>
-      by_cases h₃ : (alice i).third = bob (clauseAt formula i)[2].variableIndex <;>
-      simp [eventsAt, accepts, acceptedSlots, matchingSlots, honestAnswer,
-        answerAt, nameAt, hs, h₁, h₂, h₃]
-  · simp [eventsAt, accepts, acceptedSlots, hs]
-
-/-- The rejection-count proof counts exactly the explicit verifier's accepted
-    random events; it is not a separate abstract score. -/
-theorem accepted_enumerateEvents (formula : Formula) (alice : AliceStrategy formula)
-    (bob : BobStrategy formula) (indices : List (Fin formula.clauses.length)) :
-    ((enumerateEvents formula indices).filter (accepts formula alice bob)).length =
-      acceptedCount formula alice bob indices := by
-  induction indices with
-  | nil => simp [enumerateEvents, acceptedCount]
-  | cons i rest ih =>
-    simp only [enumerateEvents, List.filter_append, List.length_append,
-      accepted_eventsAt, ih, acceptedCount]
-
-def allEvents (formula : Formula) : List (RandomEvent formula) :=
-  enumerateEvents formula (allIndices formula)
-
-theorem length_allEvents (formula : Formula) :
-    (allEvents formula).length = 3 * formula.clauses.length := by
-  simp [allEvents, length_enumerateEvents, allIndices]
-
-theorem allEvents_nonempty (formula : Formula) (hne : formula.clauses ≠ []) :
-    allEvents formula ≠ [] := by
-  intro he
-  have hl := length_allEvents formula
-  rw [he] at hl
-  have hpos : 0 < formula.clauses.length := List.length_pos_iff.mpr hne
-  simp only [List.length_nil] at hl
-  omega
-
-/-- Soundness stated solely in terms of filtering the generated event list.
-    For `b>0` and a nonempty input, division by `b*|allEvents|` gives the
-    usual normalized acceptance probability. -/
-theorem verifier_event_soundness (formula : Formula) (a b : Nat)
-    (sourceGap : ∀ bob : BobStrategy formula,
-      a * formula.clauses.length ≤ b * failureCount formula bob (allIndices formula))
-    (alice : AliceStrategy formula) (bob : BobStrategy formula) :
-    b * ((allEvents formula).filter (accepts formula alice bob)).length +
-      a * formula.clauses.length ≤ b * (allEvents formula).length := by
-  rw [length_allEvents]
-  simp only [allEvents, accepted_enumerateEvents]
-  exact hastad_basic_verifier_soundness formula a b sourceGap alice bob
 
 /-- Count the syntactic occurrences of one variable in each three-slot clause. -/
 def occurrencesAt {n : Nat} (clause : Clause n) (v : Fin n) : Nat :=
@@ -262,35 +144,6 @@ def occurrenceCount (formula : Formula) (v : Fin formula.variables) :
   | [] => 0
   | i :: rest => occurrencesAt (clauseAt formula i) v + occurrenceCount formula v rest
 
-theorem variable_eventsAt (formula : Formula) (v : Fin formula.variables)
-    (i : Fin formula.clauses.length) :
-    ((eventsAt formula i).filter (fun event =>
-      decide (nameAt (clauseAt formula event.1) event.2 = v))).length =
-      occurrencesAt (clauseAt formula i) v := by
-  by_cases h₁ : (clauseAt formula i)[0].variableIndex = v <;>
-    by_cases h₂ : (clauseAt formula i)[1].variableIndex = v <;>
-    by_cases h₃ : (clauseAt formula i)[2].variableIndex = v <;>
-    simp [eventsAt, nameAt, occurrencesAt, h₁, h₂, h₃]
-
-theorem variable_enumerateEvents (formula : Formula) (v : Fin formula.variables)
-    (indices : List (Fin formula.clauses.length)) :
-    ((enumerateEvents formula indices).filter (fun event =>
-      decide (nameAt (clauseAt formula event.1) event.2 = v))).length =
-      occurrenceCount formula v indices := by
-  induction indices with
-  | nil => simp [enumerateEvents, occurrenceCount]
-  | cons i rest ih =>
-    simp only [enumerateEvents, List.filter_append, List.length_append,
-      variable_eventsAt, ih, occurrenceCount]
-
-theorem regular_bob_marginal (formula : Formula) (degree : Nat)
-    (regular : ∀ v : Fin formula.variables,
-      occurrenceCount formula v (allIndices formula) = degree)
-    (v : Fin formula.variables) :
-    ((allEvents formula).filter (fun event =>
-      decide (nameAt (clauseAt formula event.1) event.2 = v))).length = degree := by
-  rw [allEvents, variable_enumerateEvents]
-  exact regular v
 
 end UniqueGamesTheorem.Foundations.PCP
 
@@ -326,9 +179,6 @@ instance slotFintype : Fintype Slot where
 
 instance slotInhabited : Inhabited Slot := ⟨.first⟩
 
-@[simp] theorem card_clauseAnswer : Fintype.card ClauseAnswer = 8 := by
-  rw [Fintype.card_congr clauseAnswerFinEquiv]
-  rfl
 
 @[simp] theorem card_slot : Fintype.card Slot = 3 := by decide
 
@@ -338,14 +188,6 @@ abbrev ClauseContext (F : Formula) (u : ℕ) := Fin u → Fin F.clauses.length
 abbrev VariableContext (F : Formula) (u : ℕ) := Fin u → Fin F.variables
 abbrev SlotContext (u : ℕ) := Fin u → Slot
 
-@[simp] theorem card_I (u : ℕ) : Fintype.card (I u) = 2 ^ u := by simp [I]
-@[simp] theorem card_J (u : ℕ) : Fintype.card (J u) = 8 ^ u := by simp [J]
-@[simp] theorem card_ClauseContext (F : Formula) (u : ℕ) :
-    Fintype.card (ClauseContext F u) = F.clauses.length ^ u := by simp [ClauseContext]
-@[simp] theorem card_VariableContext (F : Formula) (u : ℕ) :
-    Fintype.card (VariableContext F u) = F.variables ^ u := by simp [VariableContext]
-@[simp] theorem card_SlotContext (u : ℕ) :
-    Fintype.card (SlotContext u) = 3 ^ u := by simp [SlotContext]
 
 def localConsistent {n : ℕ} (clause : Clause n) (answer : ClauseAnswer) : Bool :=
   decide (∀ s s' : Slot, nameAt clause s = nameAt clause s' →
@@ -422,23 +264,6 @@ theorem sampledVariables_supported (F : Formula) {u : ℕ}
     ∀ t, ∃ slot, nameAt (clauseAt F (c t)) slot = sampledVariables F c s t :=
   fun t => ⟨s t, rfl⟩
 
-theorem sampled_eq_pi (F : Formula) {u : ℕ} (c : ClauseContext F u)
-    (v : VariableContext F u) (j : J u) (hj : validJ F c j = true)
-    (t : Fin u) (s : Slot) (hs : nameAt (clauseAt F (c t)) s = v t) :
-    answerAt (j t) s = pi F c v j t := by
-  exact validJ_consistent F c j hj t s t
-    (canonicalSlot (clauseAt F (c t)) (v t))
-    (hs.trans (canonicalSlot_name _ _ ⟨s, hs⟩).symm)
-
-/-- Two hidden choices with the same visible variable tuple give the same
-selected answers for every valid label. -/
-theorem sampled_answers_eq_of_visible_eq (F : Formula) {u : ℕ}
-    (c : ClauseContext F u) (s s' : SlotContext u) (j : J u)
-    (hj : validJ F c j = true)
-    (hvisible : sampledVariables F c s = sampledVariables F c s') :
-    (fun t => answerAt (j t) (s t)) = fun t => answerAt (j t) (s' t) := by
-  funext t
-  exact validJ_consistent F c j hj t (s t) t (s' t) (congrFun hvisible t)
 
 def honestJ (F : Formula) {u : ℕ} (c : ClauseContext F u)
     (assignment : Fin F.variables → Bool) : J u :=
@@ -505,16 +330,6 @@ theorem baseAccepts_implies_sampled (F : Formula) (c : Fin F.clauses.length)
     (canonicalSlot (clauseAt F c) (nameAt (clauseAt F c) s)) hname.symm
   simp [hsat, hans.trans heq]
 
-/-- Every coordinate of the original repeated clause-slot verifier accepts
-the decoded answers. Each answer tuple may depend on its whole private context. -/
-theorem projection_implies_sampled_accepts (F : Formula) {u : ℕ}
-    (c : ClauseContext F u) (s : SlotContext u) (i : I u) (j : J u)
-    (hj : validJ F c j = true) (hpi : pi F c (sampledVariables F c s) j = i) :
-    ∀ t, (localSatisfies (clauseAt F (c t)) (j t) &&
-      decide (answerAt (j t) (s t) = i t)) = true := by
-  intro t
-  exact baseAccepts_implies_sampled F (c t) (s t) (i t) (j t)
-    (projection_implies_coordinate_accepts F c _ i j hj hpi t)
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceContexts
 
@@ -548,15 +363,6 @@ instance signatureFintype (u : ℕ) : Fintype (Signature u) :=
   Fintype.ofEquiv ((Position u → Bool) × NameProfile u × SlotContext u)
     (signatureEquiv u).symm
 
-@[simp] theorem card_position (u : ℕ) : Fintype.card (Position u) = 3 * u := by
-  simp [Position, Nat.mul_comm]
-
-/-- A finite control alphabet bound, not a claim about evaluation time. -/
-theorem card_signature (u : ℕ) :
-    Fintype.card (Signature u) =
-      2 ^ (3 * u) * ((2 ^ (3 * u)) ^ (3 * u) * 3 ^ u) := by
-  rw [Fintype.card_congr (signatureEquiv u)]
-  simp [NameProfile, Nat.mul_comm]
 
 def positiveAt {n : ℕ} (clause : Clause n) : Slot → Bool
   | .first => clause[0].positive
@@ -663,30 +469,6 @@ theorem signature_pi (F : Formula) {u : ℕ} (c : ClauseContext F u)
   funext t
   simp only [signatureProjection, signatureCanonicalSlot_ofContext, pi]
 
-/-- On valid labels, canonical projection also agrees with the actual
-selected occurrence answers. -/
-theorem signature_projection_selected (F : Formula) {u : ℕ}
-    (c : ClauseContext F u) (s : SlotContext u) (j : J u)
-    (hj : signatureValid (ofContext F c s) j = true) :
-    signatureProjection (ofContext F c s) j = fun t => answerAt (j t) (s t) := by
-  rw [signature_pi]
-  have hv : validJ F c j = true := by simpa only [signature_validJ] using hj
-  funext t
-  exact (sampled_eq_pi F c (sampledVariables F c s) j hv t (s t) rfl).symm
-
-/-- The same finite signature gives the same validity decision even across
-formulas having different global index types. -/
-theorem validJ_eq_of_signature_eq (F G : Formula) {u : ℕ}
-    (c : ClauseContext F u) (d : ClauseContext G u) (s s' : SlotContext u)
-    (h : ofContext F c s = ofContext G d s') (j : J u) :
-    validJ F c j = validJ G d j := by
-  rw [← signature_validJ F c s, h, signature_validJ]
-
-theorem pi_eq_of_signature_eq (F G : Formula) {u : ℕ}
-    (c : ClauseContext F u) (d : ClauseContext G u) (s s' : SlotContext u)
-    (h : ofContext F c s = ofContext G d s') (j : J u) :
-    pi F c (sampledVariables F c s) j = pi G d (sampledVariables G d s') j := by
-  rw [← signature_pi F c s, h, signature_pi]
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceLocalSignature
 

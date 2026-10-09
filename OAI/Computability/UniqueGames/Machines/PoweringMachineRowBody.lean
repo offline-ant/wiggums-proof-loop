@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.PoweringGlobalEnumerationLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMasterState
 import OAI.Computability.UniqueGames.Machines.PoweringPlanBudget
@@ -51,11 +52,6 @@ omit [DecidableEq K] in
     (placement : PoweringMachineTapes.Tape max → K) (output : K) :
     headerPlacement placement output (.inl 10) = output := by simp [headerPlacement]
 
-omit [DecidableEq K] in
-theorem headerPlacement_other {max : Nat}
-    (placement : PoweringMachineTapes.Tape max → K) (output : K)
-    (i : PoweringMachineTapes.Tape max) (hi : i ≠ .inl 10) :
-    headerPlacement placement output i = placement i := by simp [headerPlacement, hi]
 
 omit [DecidableEq K] in
 theorem headerPlacement_injective {max : Nat}
@@ -378,25 +374,6 @@ theorem steps_le (graph : PortTables.Table vertices d) (vertex : Fin vertices)
   unfold steps budget
   omega
 
-/-- The row subroutine's genuine execution certificate has the explicit
-fixed-parameter affine bound in the serialized graph length. -/
-def rowInTime (graph : PortTables.Table vertices d) (n : Nat)
-    (placement : PoweringMachineTapes.Tape (capacity n) → K) (distinct : Function.Injective placement)
-    (output : K) (outside : ∀ i, output ≠ placement i) (vertex : Fin vertices)
-    (ports : Fin (n + 1) → Fin d) (direction : Bool)
-    (labels : Label n ports direction → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State d n))
-    (atLabels : ∀ l, program (labels l) = instruction n placement output ports direction labels exit l)
-    (base : K → List Bool) (suffix : List Bool) (ready : Ready graph n placement vertex suffix base) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (entry n ports direction)), PoweringMasterState.clean (bufferSize d n), base⟩
-      (some ⟨exit, PoweringMasterState.clean (bufferSize d n),
-        finalTapes graph n placement output vertex ports direction base⟩)
-      (budget d n (PortTables.tableBits graph).length) where
-  steps := steps graph vertex n ports direction
-  evals_in_steps := rowTrace graph n placement distinct output outside vertex ports direction
-    labels exit program atLabels base suffix ready
-  steps_le_m := steps_le graph vertex n ports direction
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineRowBody
 

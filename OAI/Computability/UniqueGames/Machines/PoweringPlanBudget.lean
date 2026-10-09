@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.PoweringGlobalEnumerationLemmas
 
 namespace OAI
@@ -90,52 +91,6 @@ theorem rowPlan_steps_le (graph : PortTables.Table vertices d) (n : Nat)
     (PoweringMachinePlan.boundedRowPlan n ports direction).reverse base
   simpa only [List.length_reverse, boundedRowPlan_length, fieldBudget] using h
 
-/-- A genuine execution certificate for an arbitrary concrete bounded plan. -/
-def planInTime (graph : PortTables.Table vertices d)
-    (placement : PoweringMachineTapes.Tape max → K) (distinct : Function.Injective placement)
-    (vertex : Fin vertices) (commands : List (PoweringMachinePlan.Command d max))
-    (labels : PoweringMachinePlan.Label commands → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineUnaryEqualityBit.State A))
-    (atLabels : ∀ l, program (labels l) =
-      PoweringMachinePlan.instruction placement commands labels exit l)
-    (base : K → List Bool) (suffix : List Bool)
-    (ready : PoweringMachineField.Ready graph placement vertex suffix base) (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨PoweringMachinePlan.entry commands labels exit, MachineUnaryEqualityBit.clean ambient, base⟩
-      (some ⟨exit, MachineUnaryEqualityBit.clean ambient,
-        PoweringMachinePlan.finalTapes graph placement vertex commands base⟩)
-      (commands.length * fieldBudget max (PortTables.tableBits graph).length) where
-  steps := PoweringMachinePlan.steps graph placement vertex commands base
-  evals_in_steps := PoweringMachinePlan.planTrace graph placement distinct vertex commands
-    labels exit program atLabels base suffix ready ambient
-  steps_le_m := plan_steps_le graph placement vertex commands base
-
-/-- The actual row-data plan runs within the explicit fixed-plan affine bound. -/
-def rowPlanInTime (graph : PortTables.Table vertices d) (n : Nat)
-    (ports : Fin (n + 1) → Fin d) (direction : Bool)
-    (placement : PoweringMachineTapes.Tape (2 * (n + 1)) → K)
-    (distinct : Function.Injective placement) (vertex : Fin vertices)
-    (labels : PoweringMachinePlan.Label
-      (PoweringMachinePlan.boundedRowPlan n ports direction).reverse → Λ)
-    (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineUnaryEqualityBit.State A))
-    (atLabels : ∀ l, program (labels l) = PoweringMachinePlan.instruction placement
-      (PoweringMachinePlan.boundedRowPlan n ports direction).reverse labels exit l)
-    (base : K → List Bool) (suffix : List Bool)
-    (ready : PoweringMachineField.Ready graph placement vertex suffix base) (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨PoweringMachinePlan.entry (PoweringMachinePlan.boundedRowPlan n ports direction).reverse
-          labels exit, MachineUnaryEqualityBit.clean ambient, base⟩
-      (some ⟨exit, MachineUnaryEqualityBit.clean ambient,
-        PoweringMachinePlan.finalTapes graph placement vertex
-          (PoweringMachinePlan.boundedRowPlan n ports direction).reverse base⟩)
-      (rowBudget d n (PortTables.tableBits graph).length) where
-  steps := PoweringMachinePlan.steps graph placement vertex
-    (PoweringMachinePlan.boundedRowPlan n ports direction).reverse base
-  evals_in_steps := PoweringMachinePlan.planTrace graph placement distinct vertex
-    (PoweringMachinePlan.boundedRowPlan n ports direction).reverse
-    labels exit program atLabels base suffix ready ambient
-  steps_le_m := rowPlan_steps_le graph n ports direction placement vertex base
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringPlanBudget
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.NativeExperiment
 import OAI.Computability.UniqueGames.Foundations.ValueLemmas
 
@@ -41,7 +42,6 @@ def actualGame (μ : FiniteDistribution (O × Fin 3)) (J : Finset P)
     ((FiniteDistribution.table (fun _ : P => μ)).pushforward fun draw =>
       (actualFirst J gamma draw, actualSecond J g.name gamma draw))
 
-abbrev fixedAdviceGame := @actualGame
 
 omit [DecidableEq R] [DecidableEq O] [DecidableEq N] in
 /-- The two deterministic strategy representations have exactly the same
@@ -82,20 +82,6 @@ theorem exists_deterministic_ge_stochastic
     _ ≤ (actualGame μ J g gamma).success strategy := h
     _ = _ := success_eq_fixedAdviceSuccess μ J g gamma strategy
 
-theorem fixed_advice_stochastic_le_repeated_value
-    (μ : FiniteDistribution (O × Fin 3)) (J : Finset P)
-    (g : IncidenceExtraction.Incidence O N)
-    (gamma : RawCoefficients J (ZeroInformation.Bits R))
-    (responses₁ : ZeroInformation.FirstInput P R O →
-      FiniteDistribution (ActualProjection.FirstAnswer P))
-    (responses₂ : ZeroInformation.SecondInput P R O N →
-      FiniteDistribution (ActualProjection.SecondAnswer P))
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    (actualGame μ J g gamma).stochasticSuccess responses₁ responses₂ ≤
-      ((incidenceGame g (μ.pushforward (incidence g.name))).repetition
-        (zeroSet J gamma).card).value := by
-  obtain ⟨strategy, h⟩ := exists_deterministic_ge_stochastic μ J g gamma responses₁ responses₂
-  exact h.trans (UpperBound.fixed_advice_success_le_repeated_value μ J g gamma strategy distinct)
 
 /-- A pair of response kernels, each indexed only by its own complete input. -/
 abbrev Responses (P R O N : Type) [Fintype P] [DecidableEq P] :=
@@ -148,24 +134,6 @@ theorem native_stochastic_le_deterministic
   exact Classical.choose_spec (exists_deterministic_ge_stochastic μ
     (NativeExperiment.maskSet mask) g gamma (responses mask gamma).1 (responses mask gamma).2)
 
-/-- Stochastic kernels satisfy the same exact clean-mask moment as deterministic
-ones. The only supplied rate is for the actual ordinary repeated incidence game. -/
-theorem native_stochastic_le_mask_moment
-    (k : ℕ) (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (responses : (mask : Fin k → Bool) →
-      RawCoefficients (NativeExperiment.maskSet mask) (ZeroInformation.Bits R) →
-      Responses (Fin k) R O N)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) (ρ : ℝ)
-    (rate : ∀ n, ((incidenceGame g (μ.pushforward (incidence g.name))).repetition n).value ≤ ρ ^ n) :
-    nativeStochasticSuccess k μ g β hβ₀ hβ₁ responses ≤
-      (1 - cleanProbability β (ZeroInformation.Bits R) * (1 - ρ)) ^ k := by
-  obtain ⟨strategy, h⟩ := native_stochastic_le_deterministic k μ g β hβ₀ hβ₁ responses
-  rw [NativeExperiment.success_eq_flat] at h
-  exact h.trans (Experiment.success_le_of_repetition k μ g
-    (FiniteDistribution.uniform (Experiment.Additional k R)) β hβ₀ hβ₁
-    (NativeExperiment.liftStrategy strategy) distinct ρ rate)
 
 end
 end UniqueGamesTheorem.Clean.StochasticBound

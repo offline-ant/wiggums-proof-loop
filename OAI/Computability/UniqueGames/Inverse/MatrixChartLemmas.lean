@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Module.LinearMap.DivisionRing
 import Mathlib.FieldTheory.Finiteness
@@ -40,19 +41,6 @@ theorem graph_injective : Function.Injective (LinearMap.graph (R := K) (M := X) 
   have hx : (x, T x) ∈ U.graph := h ▸ (show (x, T x) ∈ T.graph from rfl)
   exact hx
 
-/-- Membership in the graph chart is precisely invertibility of the first
-projection; this includes both existence and uniqueness of the matrix. -/
-theorem exists_unique_graph_iff (L : Submodule K (X × Y)) :
-    (∃! T : X →ₗ[K] Y, L = T.graph) ↔
-      Function.Bijective (fun x : L => x.val.1) := by
-  constructor
-  · rintro ⟨T, rfl, _⟩
-    exact (graphEquiv T).symm.bijective
-  · intro h
-    obtain ⟨T, hT⟩ := L.exists_eq_graph h
-    refine ⟨T, hT, ?_⟩
-    intro U hU
-    exact graph_injective (hU.symm.trans hT)
 
 /-- Common graph vectors correspond exactly to the kernel of the difference. -/
 def intersectionEquiv (T U : X →ₗ[K] Y) :
@@ -171,11 +159,6 @@ variable {K ι κ : Type*} [Field K] [Fintype ι] [Fintype κ]
 abbrev matrixGraph (M : Matrix ι κ K) : Submodule K ((ι → K) × (κ → K)) :=
   M.vecMulLinear.graph
 
-omit [Fintype κ] in
-@[simp] theorem mem_matrixGraph (M : Matrix ι κ K) (x : ι → K) (y : κ → K) :
-    (x, y) ∈ matrixGraph M ↔ y = M.transpose *ᵥ x := by
-  rw [Matrix.mulVec_transpose]
-  rfl
 
 omit [Fintype κ] in
 theorem matrixGraph_injective : Function.Injective (matrixGraph (K := K) (ι := ι) (κ := κ)) := by
@@ -206,16 +189,6 @@ theorem column_equation_iff (M : Matrix ι κ K) (q : κ → K) (t : ι → K) :
   rw [dotFunctional_comp_vecMulLinear]
   exact dotFunctional_injective.eq_iff
 
-/-- Exact concrete row-and-column slice corresponding to an interval. -/
-theorem matrix_interval_iff_slice {ρ σ : Type*}
-    (d : ρ → ι → K) (s : ρ → κ → K)
-    (t : σ → ι → K) (q : σ → κ → K) (M : Matrix ι κ K) :
-    lowerRows d s ≤ matrixGraph M ∧
-        matrixGraph M ≤ upperColumns (fun j => dotFunctional (t j))
-          (fun j => dotFunctional (q j)) ↔
-      (∀ i, d i ᵥ* M = s i) ∧ (∀ j, M *ᵥ q j = t j) := by
-  rw [interval_iff_slice]
-  simp only [Matrix.vecMulLinear_apply, column_equation_iff]
 
 omit [Fintype κ] in
 /-- The graph always has the row dimension, including degenerate zero dimensions. -/
@@ -551,14 +524,6 @@ theorem range_inf_rankOneUpdate (X : E →ₗ[K] F) (a : E →ₗ[K] K)
     have ha : a x = 0 := hx
     simp only [rankOneUpdate_apply, ha, zero_smul, add_zero]
 
-/-- In the domain coordinates, the intersection recovers the entire kernel. -/
-theorem comap_range_inf_rankOneUpdate (X : E →ₗ[K] F)
-    (hX : Function.Injective X) (a : E →ₗ[K] K)
-    {y : F} (hy : y ∉ LinearMap.range X) :
-    (LinearMap.range X ⊓ LinearMap.range (rankOneUpdate X a y)).comap X =
-      LinearMap.ker a := by
-  rw [range_inf_rankOneUpdate X a hy]
-  exact Submodule.comap_map_eq_of_injective hX _
 
 /-- The updated image is a genuine Grassmann neighbor, with the full
 ambient neighbor predicate rather than its chart restriction. -/
@@ -663,16 +628,6 @@ theorem exists_rankOneUpdate_range_eq (X : E →ₗ[K] F)
   rw [LinearMap.finrank_range_of_inj (injective_rankOneUpdate X hX a hy),
     W.property.1, LinearMap.finrank_range_of_inj hX]
 
-/-- Surjectivity includes all neighbors, including those outside any fixed
-matrix chart. -/
-theorem rankOneUpdateNeighbor_surjective (X : E →ₗ[K] F)
-    (hX : Function.Injective X) :
-    Function.Surjective (fun p : {a : E →ₗ[K] K // a ≠ 0} ×
-      {y : F // y ∉ LinearMap.range X} =>
-        rankOneUpdateNeighbor X hX p.1.val p.1.property p.2.val p.2.property) := by
-  intro W
-  obtain ⟨a, y, ha, hy, hW⟩ := exists_rankOneUpdate_range_eq X hX W
-  exact ⟨(⟨a, ha⟩, ⟨y, hy⟩), Subtype.ext hW⟩
 
 end UniqueGamesTheorem.Inverse.KMSBasisComparison
 
@@ -758,16 +713,6 @@ def matrixChart (ell m : Nat) : Finset (KMS.Vertex (ell + m) ell) := by
   classical
   simp [matrixChart]
 
-theorem card_matrixChart (ell m : Nat) : (matrixChart ell m).card = 2 ^ (ell * m) := by
-  classical
-  rw [matrixChart, Finset.card_image_of_injective _ matrixVertex_injective,
-    Finset.card_univ]
-  calc
-    Fintype.card (Matrix (Fin ell) (Fin m) (ZMod 2)) =
-        Fintype.card (Fin ell → Fin m → ZMod 2) := Fintype.card_congr (Equiv.refl _)
-    _ = 2 ^ (ell * m) := by
-      rw [Fintype.card_fun, Fintype.card_fun]
-      simp [ZMod.card, ← pow_mul, Nat.mul_comm]
 
 end
 

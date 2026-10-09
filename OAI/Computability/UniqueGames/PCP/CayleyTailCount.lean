@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Data.Fintype.Pi
@@ -242,24 +243,6 @@ theorem union_bound_le_half (n m : ℕ) (hm : 3 * (n + 2) ≤ m) :
       field_simp
       norm_num
 
-/-- The proposed fixed parameters meet the elementary counting margin. -/
-theorem fixed_parameters : 3 * (448 + 2) ≤ 16384 ∧ 4 * 16384 = 2 ^ 16 := by
-  norm_num
-
-theorem fixed_union_bound :
-    (2 : ℝ) ^ 448 * (2 * (2 / 3 : ℝ) ^ 16384) ≤ 1 / 2 :=
-  union_bound_le_half 448 16384 fixed_parameters.1
-
-/-- Pure parameter identity; this does not assert existence of a graph. -/
-theorem seventh_power_size : (2 : ℕ) ^ 448 = (((2 : ℕ) ^ 16) ^ 7) ^ 4 := by
-  rw [← pow_mul, ← pow_mul]
-
-/-- Pure scalar estimate, ready for a separately proved spectral powering theorem. -/
-theorem seventh_power_abs_le {a : ℝ} (ha : |a| ≤ 1 / 2) : |a ^ 7| ≤ 1 / 128 := by
-  rw [abs_pow]
-  calc
-    |a| ^ 7 ≤ (1 / 2 : ℝ) ^ 7 := pow_le_pow_left₀ (abs_nonneg a) ha 7
-    _ = 1 / 128 := by norm_num
 
 end UniqueGamesTheorem.Foundations.PCP.CayleyTailCount
 

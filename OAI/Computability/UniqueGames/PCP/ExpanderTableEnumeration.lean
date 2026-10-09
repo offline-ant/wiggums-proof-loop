@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.PCP.ExpanderRowControlLemmas
 
@@ -126,17 +127,10 @@ theorem generatedWords_eq_rotationWords (G : Table v (degree d)) (H : Table (clo
     (fun i => (reverseIndex (step G H) i).val)).trans
     (rotationWords_eq_ofFn (step G H)).symm
 
-@[simp] theorem generatedWords_length (G : Table v (degree d)) (H : Table (cloudSize d) d) :
-    (generatedWords G H).length = v * rowFactor d := by
-  rw [generatedWords_eq_rotationWords, rotationWords_length]
-  exact rowCount_eq.symm
 
 def priorVertices (G : Table v (degree d)) (H : Table (cloudSize d) d) (count : Nat) :
     List Nat := ((List.ofFn (vertexWords G H)).take count).flatten
 
-def prefixRows (G : Table v (degree d)) (H : Table (cloudSize d) d)
-    (vertex : Fin v) (completedPositions : Nat) : List Nat :=
-  priorVertices G H vertex.val ++ (vertexWords G H vertex).take completedPositions
 
 @[simp] theorem priorVertices_zero (G : Table v (degree d)) (H : Table (cloudSize d) d) :
     priorVertices G H 0 = [] := by simp [priorVertices]
@@ -153,23 +147,6 @@ theorem priorVertices_succ (G : Table v (degree d)) (H : Table (cloudSize d) d)
   rw [List.take_succ_eq_append_getElem (by simpa using hk), List.flatten_append]
   simp
 
-@[simp] theorem prefixRows_zero (G : Table v (degree d)) (H : Table (cloudSize d) d)
-    (vertex : Fin v) : prefixRows G H vertex 0 = priorVertices G H vertex.val := by
-  simp [prefixRows]
-
-theorem prefixRows_succ (G : Table v (degree d)) (H : Table (cloudSize d) d)
-    (vertex : Fin v) (r : Nat) (hr : r < rowFactor d) :
-    prefixRows G H vertex (r + 1) =
-      prefixRows G H vertex r ++ [rowValue G H vertex ⟨r, hr⟩] := by
-  unfold prefixRows
-  rw [List.take_succ_eq_append_getElem (by simpa using hr)]
-  simp [vertexWords, List.append_assoc]
-
-theorem prefixRows_complete (G : Table v (degree d)) (H : Table (cloudSize d) d)
-    (vertex : Fin v) :
-    prefixRows G H vertex (rowFactor d) = priorVertices G H (vertex.val + 1) := by
-  rw [prefixRows, List.take_of_length_le (by simp)]
-  simpa using (priorVertices_succ G H vertex.val vertex.isLt).symm
 
 /-- This is exactly the accumulator update performed after each emitted row. -/
 def accumulate (values : List Nat) (initial : List Bool) : List Bool :=
@@ -187,13 +164,6 @@ theorem accumulate_append (first second : List Nat) (initial : List Bool) :
     accumulate (first ++ second) initial = accumulate second (accumulate first initial) := by
   simp only [accumulate, List.foldl_append]
 
-theorem accumulate_prefixRows_succ (G : Table v (degree d)) (H : Table (cloudSize d) d)
-    (vertex : Fin v) (r : Nat) (hr : r < rowFactor d) (initial : List Bool) :
-    accumulate (prefixRows G H vertex (r + 1)) initial =
-      (encodeWord (rowValue G H vertex ⟨r, hr⟩)).reverse ++
-        accumulate (prefixRows G H vertex r) initial := by
-  rw [prefixRows_succ G H vertex r hr, accumulate_append]
-  rfl
 
 theorem accumulate_generatedWords (G : Table v (degree d)) (H : Table (cloudSize d) d)
     (initial : List Bool) :
@@ -207,12 +177,6 @@ theorem encode_generatedWords_length_le (G : Table v (degree d)) (H : Table (clo
   rw [generatedWords_eq_rotationWords, rowCount_eq]
   exact encode_rotationWords_length_le (step G H)
 
-theorem accumulate_generatedWords_length_le (G : Table v (degree d))
-    (H : Table (cloudSize d) d) (initial : List Bool) :
-    (accumulate (generatedWords G H) initial).length ≤
-      (v * rowFactor d) * (v * rowFactor d + 1) + initial.length := by
-  rw [accumulate_eq, List.length_append, List.length_reverse]
-  exact Nat.add_le_add_right (encode_generatedWords_length_le G H) initial.length
 
 end UniqueGamesTheorem.Foundations.PCP.ExpanderTableEnumeration
 

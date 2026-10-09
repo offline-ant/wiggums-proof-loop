@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.PCP.ClauseVerifierLemmas
 
@@ -93,8 +94,6 @@ theorem map_attach_val {α β : Type} (xs : List α) (f : α → β) :
 def evaluationList (F : Formula) (A : Fin F.variables → Bool) : List Bool :=
   F.clauses.map (fun c => c.eval A)
 
-def satisfiedCount (F : Formula) (A : Fin F.variables → Bool) : Nat :=
-  (evaluationList F A).count true
 
 def failedCount (F : Formula) (A : Fin F.variables → Bool) : Nat :=
   (evaluationList F A).count false
@@ -116,17 +115,11 @@ theorem evaluationList_extend (F : Formula) (B : Fin (compact F).variables → B
       exact eval_compact_extend F c.val c.property B
     _ = _ := map_attach_val F.clauses (fun c => c.eval (extendAssignment F B))
 
-theorem satisfiedCount_restrict (F : Formula) (A : Fin F.variables → Bool) :
-    satisfiedCount (compact F) (restrictAssignment F A) = satisfiedCount F A := by
-  simp only [satisfiedCount, evaluationList_restrict]
 
 theorem failedCount_restrict (F : Formula) (A : Fin F.variables → Bool) :
     failedCount (compact F) (restrictAssignment F A) = failedCount F A := by
   simp only [failedCount, evaluationList_restrict]
 
-theorem satisfiedCount_extend (F : Formula) (B : Fin (compact F).variables → Bool) :
-    satisfiedCount (compact F) B = satisfiedCount F (extendAssignment F B) := by
-  simp only [satisfiedCount, evaluationList_extend]
 
 theorem failedCount_extend (F : Formula) (B : Fin (compact F).variables → Bool) :
     failedCount (compact F) B = failedCount F (extendAssignment F B) := by
@@ -141,9 +134,6 @@ theorem clauseNames_flat_length {n : Nat} (cs : List (Clause n)) :
       List.length_cons, List.length_nil, ih]
     omega
 
-@[simp] theorem compact_clause_count (F : Formula) :
-    (compact F).clauses.length = F.clauses.length := by
-  simp [compact, compactClauses]
 
 theorem length_eraseDups_le {α : Type} [BEq α] (xs : List α) :
     xs.eraseDups.length ≤ xs.length := by
@@ -159,59 +149,6 @@ termination_by xs.length
 decreasing_by
   exact Nat.lt_succ_of_le (List.length_filter_le _ _)
 
-theorem compact_active_bound (F : Formula) :
-    (compact F).variables ≤ 3 * F.clauses.length := by
-  have h := length_eraseDups_le (sourceNames F)
-  simpa only [sourceNames, clauseNames_flat_length, compact, activeNames] using h
-
-theorem compact_completeness (F : Formula) (hs : F.Satisfiable) :
-    (compact F).Satisfiable := by
-  rcases hs with ⟨A, hA⟩
-  refine ⟨restrictAssignment F A, ?_⟩
-  intro d hd
-  change d ∈ F.clauses.attach.map (fun c => compactClause F c.val c.property) at hd
-  rcases List.mem_map.mp hd with ⟨c, _, rfl⟩
-  exact (eval_compact_restrict F c.val c.property A).trans (hA c.val c.property)
-
-theorem compact_reflects (F : Formula) (hs : (compact F).Satisfiable) :
-    F.Satisfiable := by
-  rcases hs with ⟨B, hB⟩
-  refine ⟨extendAssignment F B, ?_⟩
-  intro c hc
-  have hm : compactClause F c hc ∈ (compact F).clauses := by
-    change _ ∈ F.clauses.attach.map (fun d => compactClause F d.val d.property)
-    exact List.mem_map.mpr ⟨⟨c, hc⟩, by simp, rfl⟩
-  rw [← eval_compact_extend F c hc B]
-  exact hB _ hm
-
-theorem compact_satisfiable_iff (F : Formula) :
-    (compact F).Satisfiable ↔ F.Satisfiable :=
-  ⟨compact_reflects F, compact_completeness F⟩
-
-theorem compact_preserves_gap (F : Formula) (a b : Nat)
-    (gap : ∀ A, a * F.clauses.length ≤ b * failedCount F A)
-    (B : Fin (compact F).variables → Bool) :
-    a * (compact F).clauses.length ≤ b * failedCount (compact F) B := by
-  rw [compact_clause_count, failedCount_extend]
-  exact gap (extendAssignment F B)
-
-theorem compact_encoding_bound (F : Formula) :
-    (Complexity.formulaBits (compact F)).length ≤
-      9 * F.clauses.length * F.clauses.length + 10 * F.clauses.length + 2 := by
-  have enc := Complexity.formulaBits_length_le (compact F)
-  rw [compact_clause_count] at enc
-  have active := compact_active_bound F
-  have h₁ := Nat.add_le_add_right active (F.clauses.length + 2)
-  have h₂ := Nat.mul_le_mul_left F.clauses.length
-    (Nat.mul_le_mul_left 3 (Nat.add_le_add_right active 2))
-  have total := Nat.add_le_add h₁ h₂
-  have polynomial : 3 * F.clauses.length + (F.clauses.length + 2) +
-      F.clauses.length * (3 * (3 * F.clauses.length + 2)) =
-      9 * F.clauses.length * F.clauses.length + 10 * F.clauses.length + 2 := by
-    simp [Nat.mul_add, Nat.mul_comm, Nat.mul_left_comm]
-    omega
-  rw [polynomial] at total
-  omega
 
 theorem failureCount_evaluations (F : Formula) (A : Fin F.variables → Bool)
     (indices : List (Fin F.clauses.length)) :
@@ -237,19 +174,6 @@ theorem verifier_failureCount (F : Formula) (A : Fin F.variables → Bool) :
   rw [failureCount_evaluations, evaluations_allIndices]
   rfl
 
-theorem compact_verifier_soundness (F : Formula) (a b : Nat)
-    (gap : ∀ A, a * F.clauses.length ≤ b * failedCount F A)
-    (alice : AliceStrategy (compact F)) (bob : BobStrategy (compact F)) :
-    b * ((allEvents (compact F)).filter (accepts (compact F) alice bob)).length +
-        a * F.clauses.length ≤ b * (3 * F.clauses.length) := by
-  have sourceGap : ∀ A : BobStrategy (compact F),
-      a * (compact F).clauses.length ≤
-        b * failureCount (compact F) A (allIndices (compact F)) := by
-    intro A
-    rw [verifier_failureCount]
-    exact compact_preserves_gap F a b gap A
-  have h := verifier_event_soundness (compact F) a b sourceGap alice bob
-  simpa only [length_allEvents, compact_clause_count] using h
 
 end UniqueGamesTheorem.Foundations.PCP.NameCompaction
 

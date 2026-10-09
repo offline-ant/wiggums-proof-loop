@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
@@ -80,13 +81,6 @@ theorem finrank_assemble {z : B →ₗ[R] W}
   rw [range_assemble_of_fullCoordinates_surjective p hp]
   exact LinearMap.finrank_range_of_inj (embedLast_injective p.v hv)
 
-theorem ker_assemble {z : B →ₗ[R] W}
-    (p : Coordinates (A := A) (D := D) (C := C) z)
-    (hv : Function.Injective p.v) :
-    (assemble p).ker = (fullCoordinates p).ker := by
-  rw [assemble_eq_embedLast_comp]
-  exact LinearMap.ker_comp_of_ker_eq_bot _
-    (LinearMap.ker_eq_bot.mpr (embedLast_injective p.v hv))
 
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridCoordinates
 
@@ -105,42 +99,6 @@ variable {R A W D B C : Type*} [Field R]
 
 open UniqueGamesTheorem.Appendix
 
-/-- The exact coordinate parametrization after imposing the genuine hybrid
-selector. The two remaining conditions are ordinary injectivity and
-surjectivity of displayed linear maps. -/
-def hybridFiberEquiv (z : B →ₗ[R] W) (hz : Function.Surjective z) :
-    {S : (B × C) →ₗ[R] (A × (W × D)) //
-      compressBlock S = z.prod (0 : B →ₗ[R] D) ∧
-        LinearIdentities.Hybrid S
-          (LinearMap.range (LinearMap.inl R A (W × D)))
-          (LinearMap.range (LinearMap.inl R B C))} ≃
-      {p : Coordinates (A := A) (D := D) (C := C) z //
-        Function.Injective p.v ∧ Function.Surjective (fullCoordinates p)} where
-  toFun S := ⟨extract z ⟨S.val, S.property.1⟩, by
-    apply (hybrid_assemble_iff _ hz).mp
-    rw [assemble_extract]
-    exact S.property.2⟩
-  invFun p := ⟨assemble p.val, compressBlock_assemble p.val,
-    (hybrid_assemble_iff p.val hz).mpr p.property⟩
-  left_inv S := by
-    apply Subtype.ext
-    exact assemble_extract z ⟨S.val, S.property.1⟩
-  right_inv p := by
-    apply Subtype.ext
-    exact extract_assemble p.val
-
-/-- Every map in the actual fiber has the prescribed small rank. -/
-theorem hybridFiber_finrank (z : B →ₗ[R] W) (hz : Function.Surjective z)
-    (S : (B × C) →ₗ[R] (A × (W × D)))
-    (hc : compressBlock S = z.prod (0 : B →ₗ[R] D))
-    (hh : LinearIdentities.Hybrid S
-      (LinearMap.range (LinearMap.inl R A (W × D)))
-      (LinearMap.range (LinearMap.inl R B C))) :
-    Module.finrank R S.range = Module.finrank R (A × (W × C)) := by
-  let p := (hybridFiberEquiv (A := A) (D := D) (C := C) z hz) ⟨S, hc, hh⟩
-  have he : assemble p.val = S := assemble_extract z ⟨S, hc⟩
-  rw [← he]
-  exact finrank_assemble p.val p.property.1 p.property.2
 
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridCoordinates
 
@@ -261,13 +219,8 @@ a surjective map. -/
 theorem range_subtype_comp_of_surjective (W : Submodule R U)
     (z : B →ₗ[R] W) (hz : Function.Surjective z) :
     (W.subtype.comp z).range = W := by
-  ext u
-  constructor
-  · rintro ⟨b, rfl⟩
-    exact (z b).property
-  · intro hu
-    obtain ⟨b, hb⟩ := hz ⟨u, hu⟩
-    exact ⟨b, congrArg Subtype.val hb⟩
+  rw [LinearMap.range_comp_of_range_eq_top _ (LinearMap.range_eq_top.mpr hz),
+    Submodule.range_subtype]
 
 /-- The full fixed-image fiber, with its canonical surjective coordinates. -/
 def fixedImageEquivSurjection (W : Submodule R U) :
@@ -307,27 +260,14 @@ abbrev ImageRankFrequency (q : ℕ) :=
 abbrev RankImage (R U : Type*) [Ring R] [AddCommGroup U] [Module R U] (q : ℕ) :=
   {W : Submodule R U // Module.finrank R W = q}
 
-/-- The image classification of an exact-rank frequency. -/
-def frequencyImage (q : ℕ) (z : ImageRankFrequency (R := R) (B := B) (U := U) q) :
-    RankImage R U q := ⟨z.val.range, z.property⟩
-
-/-- Removing the redundant rank certificate from a fixed-image fiber. -/
-def frequencyImageFiberEquiv (q : ℕ) (W : RankImage R U q) :
-    {z : ImageRankFrequency (R := R) (B := B) (U := U) q // frequencyImage q z = W} ≃
-      {z : B →ₗ[R] U // z.range = W.val} where
-  toFun z := ⟨z.val.val, congrArg Subtype.val z.property⟩
-  invFun z := ⟨⟨z.val, by rw [z.property]; exact W.property⟩, Subtype.ext z.property⟩
-  left_inv z := by apply Subtype.ext; apply Subtype.ext; rfl
-  right_inv z := by apply Subtype.ext; rfl
-
 /-- Exact rank frequencies are in bijection with a choice of actual image
 and a surjective map onto it. -/
 def rankFrequencyImageEquiv (q : ℕ) :
     ImageRankFrequency (R := R) (B := B) (U := U) q ≃
       Σ W : RankImage R U q, {z : B →ₗ[R] W.val // Function.Surjective z} :=
-  (Equiv.sigmaFiberEquiv (frequencyImage (R := R) (B := B) (U := U) q)).symm.trans
-    (Equiv.sigmaCongrRight fun W =>
-      (frequencyImageFiberEquiv q W).trans (fixedImageEquivSurjection W.val))
+  (Equiv.sigmaSubtypeFiberEquivSubtype (fun z : B →ₗ[R] U => z.range)
+    (q := fun W => Module.finrank R W = q) (fun _ => Iff.rfl)).symm.trans
+      (Equiv.sigmaCongrRight fun W => fixedImageEquivSurjection W.val)
 
 @[simp] theorem rankFrequencyImageEquiv_symm_val (q : ℕ)
     (p : Σ W : RankImage R U q, {z : B →ₗ[R] W.val // Function.Surjective z}) :
@@ -338,59 +278,6 @@ section Sums
 variable [Fintype (B →ₗ[R] U)] [Fintype (Submodule R U)]
   [∀ W : Submodule R U, Fintype (B →ₗ[R] W)]
 
-omit [Fintype (Submodule R U)] in
-/-- Exact fixed-image reindexing for arbitrary real weights. -/
-theorem sum_fixedImage_eq_sum_surjection (W : Submodule R U)
-    (weight : (B →ₗ[R] U) → ℝ) :
-    (∑ z : {z : B →ₗ[R] U // z.range = W}, weight z.val) =
-      ∑ z : {z : B →ₗ[R] W // Function.Surjective z}, weight (W.subtype.comp z.val) := by
-  symm
-  apply Fintype.sum_equiv (fixedImageEquivSurjection W).symm
-  intro z
-  rfl
-
-/-- Partition the exact-rank frequency sum by the actual image subspace. -/
-theorem sum_rankFrequency_eq_sum_image (q : ℕ) (weight : (B →ₗ[R] U) → ℝ) :
-    (∑ z : ImageRankFrequency (R := R) (B := B) (U := U) q, weight z.val) =
-      ∑ W : RankImage R U q,
-        ∑ z : {z : B →ₗ[R] W.val // Function.Surjective z},
-          weight (W.val.subtype.comp z.val) := by
-  calc
-    _ = ∑ p : Σ W : RankImage R U q,
-        {z : B →ₗ[R] W.val // Function.Surjective z},
-        weight (p.1.val.subtype.comp p.2.val) := by
-      symm
-      apply Fintype.sum_equiv (rankFrequencyImageEquiv q).symm
-      intro p
-      rfl
-    _ = _ := Fintype.sum_sigma _
-
-/-- The same partition in filtered-sum form, convenient for Fourier support
-conditions that are expressed as vanishing away from one rank. -/
-theorem sum_filter_rank_eq_sum_image (q : ℕ) (weight : (B →ₗ[R] U) → ℝ) :
-    (∑ z : B →ₗ[R] U with Module.finrank R z.range = q, weight z) =
-      ∑ W : RankImage R U q,
-        ∑ z : {z : B →ₗ[R] W.val // Function.Surjective z},
-          weight (W.val.subtype.comp z.val) := by
-  rw [Finset.sum_subtype (p := fun z : B →ₗ[R] U => Module.finrank R z.range = q)
-    (Finset.univ.filter fun z : B →ₗ[R] U =>
-    Module.finrank R z.range = q) (by simp) weight]
-  exact sum_rankFrequency_eq_sum_image q weight
-
-/-- If a weight vanishes outside rank `q`, the full sum has the same exact
-image partition. No positivity assumption on the weight is needed. -/
-theorem sum_eq_sum_image_of_rank_support (q : ℕ) (weight : (B →ₗ[R] U) → ℝ)
-    (hsupport : ∀ z, Module.finrank R z.range ≠ q → weight z = 0) :
-    (∑ z : B →ₗ[R] U, weight z) =
-      ∑ W : RankImage R U q,
-        ∑ z : {z : B →ₗ[R] W.val // Function.Surjective z},
-          weight (W.val.subtype.comp z.val) := by
-  rw [← sum_filter_rank_eq_sum_image, Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro z _
-  by_cases hz : Module.finrank R z.range = q
-  · simp [hz]
-  · simp [hz, hsupport z hz]
 
 end Sums
 
@@ -423,11 +310,6 @@ theorem imageCoordinates_finrank [FiniteDimensional K V]
     Module.finrank K W + Module.finrank K D = Module.finrank K V := by
   simpa only [Module.finrank_prod] using (Submodule.prodEquivOfIsCompl W D h).finrank_eq
 
-/-- Every image subspace admits the required product coordinates. -/
-theorem exists_imageCoordinates (W : Submodule K V) :
-    ∃ D : Submodule K V, ∃ e : V ≃ₗ[K] (W × D), ∀ w : W, e (w : V) = (w, 0) := by
-  obtain ⟨D, h⟩ := W.exists_isCompl
-  exact ⟨D, imageCoordinates W D h, imageCoordinates_subtype W D h⟩
 
 end ImageCoordinates
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy
@@ -495,12 +377,6 @@ theorem range_forward (K : Submodule R F)
     (fixedKernelEquivQuotientInjection K S).val.range = S.val.range :=
   K.range_liftQ S.val _
 
-/-- The quotient lift has the same rank as the original map. -/
-theorem finrank_range_forward (K : Submodule R F)
-    (S : {S : F →ₗ[R] E // S.ker = K}) :
-    Module.finrank R (fixedKernelEquivQuotientInjection K S).val.range =
-      Module.finrank R S.val.range := by
-  rw [range_forward]
 
 /-- A prescribed kernel fixes the rank to the dimension of its quotient. -/
 theorem fixedKernel_finrank_eq_quotient (K : Submodule R F)
@@ -513,13 +389,7 @@ theorem fixedKernel_finrank_eq_quotient (K : Submodule R F)
 defined on the quotient. -/
 theorem range_comp_mkQ (K : Submodule R F) (J : (F ⧸ K) →ₗ[R] E) :
     (J.comp K.mkQ).range = J.range := by
-  ext y
-  constructor
-  · rintro ⟨x, rfl⟩
-    exact ⟨K.mkQ x, rfl⟩
-  · rintro ⟨q, rfl⟩
-    obtain ⟨x, rfl⟩ := K.mkQ_surjective q
-    exact ⟨x, rfl⟩
+  exact LinearMap.range_comp_of_range_eq_top J (Submodule.range_mkQ K)
 
 /-- The inverse factorization of an injection has quotient dimension as its
 rank. In the finite-dimensional binary case this is the ordinary finite rank. -/
@@ -529,19 +399,6 @@ theorem quotientInjection_comp_finrank (K : Submodule R F)
   rw [range_comp_mkQ]
   exact LinearMap.finrank_range_of_inj hJ
 
-/-- Exact fixed-kernel count, stated without requiring a chosen enumeration. -/
-theorem natCard_fixedKernel_eq_injectiveQuotient (K : Submodule R F) :
-    Nat.card {S : F →ₗ[R] E // S.ker = K} =
-      Nat.card {J : (F ⧸ K) →ₗ[R] E // Function.Injective J} :=
-  Nat.card_congr (fixedKernelEquivQuotientInjection K)
-
-/-- The same counting equality for any finite enumerations of the two sides. -/
-theorem card_fixedKernel_eq_injectiveQuotient (K : Submodule R F)
-    [Fintype {S : F →ₗ[R] E // S.ker = K}]
-    [Fintype {J : (F ⧸ K) →ₗ[R] E // Function.Injective J}] :
-    Fintype.card {S : F →ₗ[R] E // S.ker = K} =
-      Fintype.card {J : (F ⧸ K) →ₗ[R] E // Function.Injective J} :=
-  Fintype.card_congr (fixedKernelEquivQuotientInjection K)
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalyticKernelCount

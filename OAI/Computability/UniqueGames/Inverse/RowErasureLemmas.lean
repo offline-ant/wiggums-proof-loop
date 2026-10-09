@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Analysis.SpecialFunctions.Log.Basic
@@ -23,7 +24,6 @@ def indicator (p : Prop) : ℝ := by
   classical
   exact if p then 1 else 0
 
-@[simp] theorem indicator_true : indicator True = 1 := by simp [indicator]
 @[simp] theorem indicator_false : indicator False = 0 := by simp [indicator]
 
 theorem indicator_nonneg (p : Prop) : 0 ≤ indicator p := by
@@ -43,9 +43,6 @@ theorem uniformMass_nonneg {X : Type*} [Fintype X] (p : X → Prop) :
     0 ≤ uniformMass p :=
   Finset.expect_nonneg fun x _ => indicator_nonneg (p x)
 
-theorem uniformMass_le_one {X : Type*} [Fintype X] [Nonempty X]
-    (p : X → Prop) : uniformMass p ≤ 1 :=
-  Finset.expect_le Finset.univ_nonempty fun x _ => indicator_le_one (p x)
 
 /-- One independent replacement value per matrix entry, not per row fiber. -/
 def replaceOn {X Y : Type*} (B : X → Prop) (f replacement : X → Y) : X → Y := by
@@ -131,26 +128,31 @@ theorem adviceMass_nonneg {A X : Type*} [Fintype A] [Fintype X]
     (good : A → X → Prop) : 0 ≤ adviceMass good :=
   Finset.expect_nonneg fun x _ => uniformMass_nonneg (fun a => good a x)
 
+theorem uniformMass_exists_le_sum
+    {R D : Type*} [Fintype R] [Fintype D] (bad : D → R → Prop) :
+    uniformMass (fun r => ∃ d, bad d r) ≤ ∑ d, uniformMass (bad d) := by
+  classical
+  have hp : ∀ r, indicator (∃ d, bad d r) ≤ ∑ d, indicator (bad d r) := by
+    intro r
+    by_cases hr : ∃ d, bad d r
+    · obtain ⟨d, hd⟩ := hr
+      have h := Finset.single_le_sum
+        (s := (Finset.univ : Finset D)) (f := fun d => indicator (bad d r))
+        (fun d _ => indicator_nonneg (bad d r)) (Finset.mem_univ d)
+      simpa [indicator, hd, show ∃ d, bad d r from ⟨d, hd⟩] using h
+    · simp only [indicator, ite_eq_right hr]
+      exact Finset.sum_nonneg fun d _ => indicator_nonneg (bad d r)
+  have h := Finset.expect_le_expect (s := Finset.univ) (fun r _ => hp r)
+  simpa only [uniformMass, Finset.expect_sum_comm] using h
+
 /-- Each matrix in the union has at least one successful row-map atom. No
 disjointness between good fibers is needed. -/
 theorem union_mass_le_card_mul_adviceMass
     {A X : Type*} [Fintype A] [Fintype X] (good : A → X → Prop) :
     uniformMass (goodUnion good) ≤ (Fintype.card A : ℝ) * adviceMass good := by
-  classical
-  have pointwise : ∀ x : X, indicator (goodUnion good x) ≤
-      (Fintype.card A : ℝ) * uniformMass (fun a => good a x) := by
-    intro x
-    rw [uniformMass, Fintype.card_mul_expect]
-    by_cases hx : goodUnion good x
-    · obtain ⟨a, ha⟩ := hx
-      have h := Finset.single_le_sum
-        (s := (Finset.univ : Finset A)) (f := fun a => indicator (good a x))
-        (fun a _ => indicator_nonneg (good a x)) (Finset.mem_univ a)
-      simpa [indicator, ha, goodUnion, show ∃ a, good a x from ⟨a, ha⟩] using h
-    · simp only [indicator, ite_eq_right hx]
-      exact Finset.sum_nonneg fun a _ => indicator_nonneg (good a x)
-  have h := Finset.expect_le_expect (s := Finset.univ) (fun x _ => pointwise x)
-  simpa only [uniformMass, adviceMass, ← Finset.mul_expect] using h
+  rw [adviceMass, Finset.mul_expect]
+  simpa only [uniformMass, Fintype.card_mul_expect, Finset.expect_sum_comm,
+    goodUnion] using uniformMass_exists_le_sum good
 
 theorem adviceMass_ge_union_div_card
     {A X : Type*} [Fintype A] [Nonempty A] [Fintype X]
@@ -379,13 +381,6 @@ def equiv (A : K →ₗ[R] L) (Q : Submodule R E) (M₀ : E →ₗ[R] K) :
     (M₀ : E →ₗ[R] K) (N : (E ⧸ Q) →ₗ[R] A.ker) :
     equiv A Q M₀ N = ofQuotient A Q M₀ N := rfl
 
-/-- The base point contributes an affine offset; it is not discarded. -/
-theorem equiv_affine_target (A : K →ₗ[R] L) (Q : Submodule R E)
-    (M₀ : E →ₗ[R] K) (N : (E ⧸ Q) →ₗ[R] A.ker) (z : E) (u : K) :
-    (equiv A Q M₀ N).val z + u =
-      (N (Q.mkQ z) : K) + (M₀ z + u) := by
-  change (M₀ z + (N (Q.mkQ z) : K)) + u = _
-  ac_rfl
 
 /-- Exact uniform-law transport through the affine parametrization. -/
 theorem expect_equiv (A : K →ₗ[R] L) (Q : Submodule R E) (M₀ : E →ₗ[R] K)
@@ -555,23 +550,6 @@ namespace UniqueGamesTheorem.Inverse.RowErasure
 open scoped BigOperators Classical
 
 noncomputable section
-
-theorem uniformMass_exists_le_sum
-    {R D : Type*} [Fintype R] [Fintype D] (bad : D → R → Prop) :
-    uniformMass (fun r => ∃ d, bad d r) ≤ ∑ d, uniformMass (bad d) := by
-  classical
-  have hp : ∀ r, indicator (∃ d, bad d r) ≤ ∑ d, indicator (bad d r) := by
-    intro r
-    by_cases hr : ∃ d, bad d r
-    · obtain ⟨d, hd⟩ := hr
-      have h := Finset.single_le_sum
-        (s := (Finset.univ : Finset D)) (f := fun d => indicator (bad d r))
-        (fun d _ => indicator_nonneg (bad d r)) (Finset.mem_univ d)
-      simpa [indicator, hd, show ∃ d, bad d r from ⟨d, hd⟩] using h
-    · simp only [indicator, ite_eq_right hr]
-      exact Finset.sum_nonneg fun d _ => indicator_nonneg (bad d r)
-  have h := Finset.expect_le_expect (s := Finset.univ) (fun r _ => hp r)
-  simpa only [uniformMass, Finset.expect_sum_comm] using h
 
 theorem exists_avoiding_of_sum_bad_lt_one
     {R D : Type*} [Fintype R] [Nonempty R] [Fintype D]

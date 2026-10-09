@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamilyLoop
 
 namespace OAI
@@ -51,18 +52,6 @@ noncomputable def familyInTime {d : Nat} {ρ : Type} [Fintype ρ]
   unfold familyBudget
   omega
 
-/-- The actual complete computation is polynomial in the final full vertex
-count; the level is never silently treated as an equally long input. -/
-noncomputable def familyInOutputSizeTime {d : Nat} {ρ : Type} [Fintype ρ]
-    (positive : 0 < d) (H : Table (cloudSize d) d) (growth : 1 < cloudSize d)
-    (level : Nat) (state : State ρ d) (suffix : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program positive H growth))
-      ⟨some (.inr .initialize), state, initialTapes level suffix⟩
-      (some ⟨none, initialState positive H (caller state), familyTapes H level suffix⟩)
-      ((resizeCoefficient d + 4) * (vertexCount (degree d) level + 1)^5) where
-  toEvalsTo := (familyInTime positive H growth level state suffix).toEvalsTo
-  steps_le_m := (familyInTime positive H growth level state suffix).steps_le_m.trans
-    (familyBudget_le H growth level)
 
 theorem baseDegree_cloud_growth :
     cloudSize PCP.Expanders.baseDegree = PCP.ExpanderFamily.growth := by

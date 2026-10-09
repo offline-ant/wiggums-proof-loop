@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Data.Fintype.Pi
 import Std
@@ -87,13 +88,6 @@ theorem totalVariation_sq_le_relativeEntropy (p q : α → ℝ) (hp : IsProbabil
   (totalVariation_sq_le_hellingerSquared p q hp hq).trans
     (hellingerSquared_le_relativeEntropy p q hp hq hs)
 
-theorem posterior_totalVariation_sq_le_log (p w : α → ℝ) (hp : IsProbability p)
-    (hw : ∀ a, 0 ≤ w a) (hw_one : ∀ a, w a ≤ 1) {z : ℝ} (hz : 0 < z)
-    (hmass : ∑ a, p a * w a = z) :
-    totalVariation (posterior p w z) p ^ 2 ≤ Real.log (1 / z) := by
-  exact (totalVariation_sq_le_relativeEntropy _ _ (posterior_isProbability p w hp hw hz hmass)
-    hp (posterior_supportedBy p w z)).trans
-      (posterior_relativeEntropy_le p w hp hw hw_one hz hmass)
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -255,43 +249,6 @@ theorem posterior_coordinate_totalVariation_sq_sum_le_log
     (posterior_coordinate_supportedBy q w z)).trans
       (posterior_relativeEntropy_le _ w hp hw hw_one hz hmass)
 
-/-- The summed-distance form (4.2), with natural logarithms. -/
-theorem posterior_coordinate_totalVariation_sum_le_sqrt
-    (q : ι → α → ℝ) (hq : ∀ i, IsProbability (q i)) (w : (ι → α) → ℝ)
-    (hw : ∀ x, 0 ≤ w x) (hw_one : ∀ x, w x ≤ 1) {z : ℝ} (hz : 0 < z)
-    (hmass : ∑ x, independentProduct q x * w x = z) :
-    (∑ i, totalVariation
-      (coordinateMarginal (posterior (independentProduct q) w z) i) (q i)) ≤
-        Real.sqrt ((Fintype.card ι : ℝ) * Real.log (1 / z)) := by
-  let d : ι → ℝ := fun i => totalVariation
-    (coordinateMarginal (posterior (independentProduct q) w z) i) (q i)
-  have hsq := posterior_coordinate_totalVariation_sq_sum_le_log q hq w hw hw_one hz hmass
-  have hcs := Finset.sum_mul_sq_le_sq_mul_sq (Finset.univ : Finset ι) d (fun _ => (1 : ℝ))
-  simp only [mul_one, one_pow, Finset.sum_const, Finset.card_univ, nsmul_eq_mul, mul_one] at hcs
-  have hln : 0 ≤ Real.log (1 / z) := by
-    have hp := independentProduct_isProbability q hq
-    exact (relativeEntropy_nonneg _ _ (posterior_isProbability _ w hp hw hz hmass) hp
-      (posterior_supportedBy _ w z)).trans
-        (posterior_relativeEntropy_le _ w hp hw hw_one hz hmass)
-  have hcard : 0 ≤ (Fintype.card ι : ℝ) := Nat.cast_nonneg _
-  have hmul := mul_le_mul_of_nonneg_left hsq hcard
-  have hsqrt := Real.sq_sqrt (mul_nonneg hcard hln)
-  have hsqrtpos := Real.sqrt_nonneg ((Fintype.card ι : ℝ) * Real.log (1 / z))
-  change (∑ i, d i) ≤ _
-  change (∑ i, d i ^ 2) ≤ _ at hsq
-  change (Fintype.card ι : ℝ) * (∑ i, d i ^ 2) ≤ _ at hmul
-  nlinarith
-
-/-- The base-two-logarithm normalization of the squared-distance bound. -/
-theorem posterior_coordinate_totalVariation_sq_sum_le_binaryLog
-    (q : ι → α → ℝ) (hq : ∀ i, IsProbability (q i)) (w : (ι → α) → ℝ)
-    (hw : ∀ x, 0 ≤ w x) (hw_one : ∀ x, w x ≤ 1) {z : ℝ} (hz : 0 < z)
-    (hmass : ∑ x, independentProduct q x * w x = z) :
-    (∑ i, totalVariation
-      (coordinateMarginal (posterior (independentProduct q) w z) i) (q i) ^ 2) ≤
-        Real.log (1 / z) / Real.log 2 := by
-  exact le_binaryLog_of_le_log (Finset.sum_nonneg (fun _ _ => sq_nonneg _))
-    (posterior_coordinate_totalVariation_sq_sum_le_log q hq w hw hw_one hz hmass)
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -309,16 +266,6 @@ noncomputable def posteriorOrOriginal
   classical
   exact if 0 < z then posterior p e z else p
 
-theorem posteriorOrOriginal_isProbability
-    {A : Type*} [Fintype A] (p e : A → ℝ)
-    (hp : IsProbability p) (he : ∀ a, 0 ≤ e a)
-    {z : ℝ} (hmass : ∑ a, p a * e a = z) :
-    IsProbability (posteriorOrOriginal p e z) := by
-  classical
-  by_cases hz : 0 < z
-  · simpa only [posteriorOrOriginal, ite_eq_left hz] using
-      posterior_isProbability p e hp he hz hmass
-  · simpa only [posteriorOrOriginal, ite_eq_right hz] using hp
 
 theorem mass_mul_posteriorOrOriginal
     {A : Type*} [Fintype A] (p e : A → ℝ)
@@ -520,9 +467,6 @@ theorem PermutationTable.images_injective {q : Nat} (table : PermutationTable q)
   have inverseEquality := congrArg (fun label : Fin q => table.inverseImages[label]) h
   simpa only [table.leftInverse] using inverseEquality
 
-theorem PermutationTable.images_surjective {q : Nat} (table : PermutationTable q)
-    (label : Fin q) : ∃ preimage : Fin q, table.images[preimage] = label :=
-  ⟨table.inverseImages[label], table.rightInverse label⟩
 
 /-- Constraint occurrences are list entries, so repeated parallel edges retain
 their multiplicity. No weights are hidden in this representation. -/

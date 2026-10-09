@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.Machines.MachinePaddingRowsLemmas
 import OAI.Computability.UniqueGames.PCP.PreprocessingPaddingTables
@@ -21,12 +22,6 @@ open Complexity PortTables
 
 variable {n m d : Nat}
 
-private theorem encodeWords_flatMap {α : Type*} (xs : List α) (words : α → List Nat) :
-    encodeWords (xs.flatMap words) = xs.flatMap (fun x => encodeWords (words x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 /-- Split any indexed list at the actual old/new vertex boundary. -/
 theorem ofFn_split {α : Type*} (h : n ≤ m) (f : Fin m → α) :
     List.ofFn f =
@@ -43,16 +38,9 @@ theorem flatten_ofFn_rowIndex {α : Type*} (f : Fin (n * d) → List α) :
     (List.ofFn f).flatten =
       (List.ofFn (fun v : Fin n =>
         (List.ofFn (fun p : Fin d => f (rowIndex n d (v, p)))).flatten)).flatten := by
-  rw [List.ofFn_mul, List.flatten_flatten, List.map_ofFn]
-  apply congrArg List.flatten
-  apply congrArg List.ofFn
-  funext v
-  apply congrArg List.flatten
-  apply congrArg List.ofFn
-  funext p
-  apply congrArg f
-  apply Fin.ext
-  simp only [rowIndex_val, Nat.mul_comm, Nat.add_comm]
+  simpa only [List.flatten_flatten, List.map_ofFn, rowIndex, finProdFinEquiv,
+    Equiv.coe_fn_mk, Function.comp_def, Nat.mul_comm, Nat.add_comm] using
+    congrArg List.flatten (List.ofFn_mul f)
 
 /-- The bits of one actual table row, in the existing graph codec. -/
 def rowBits (table : Table n d) (v : Fin n) (p : Fin d) : List Bool :=
@@ -80,7 +68,7 @@ theorem rowsBits_eq_vertices (table : Table n d) :
       List.ofFn (fun i : Fin (n * d) => (flatRows table)[i]) := by
     simp only [flatRows, Vector.toList_ofFn, Vector.getElem_ofFn, Fin.getElem_fin]
   unfold rowsBits
-  rw [hflat, encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
+  rw [hflat, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
   change (List.ofFn (fun i : Fin (n * d) =>
     encodeWords (GraphTables.rowWords ((flatRows table)[i])))).flatten = _
   simp_rw [rowBits_flat]

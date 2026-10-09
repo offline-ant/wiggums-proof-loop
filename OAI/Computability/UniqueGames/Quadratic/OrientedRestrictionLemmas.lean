@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.LinearAlgebra.Dual.Defs
 import OAI.Computability.UniqueGames.Quadratic.BlockNoiseProbabilityLemmas
@@ -40,12 +41,7 @@ theorem orientedBlockRestriction_eq_zero_iff
     (v : Vec F) (J : B ≃ₗ[ZMod 2] U v) (z : S) :
     orientedBlockRestriction S g v J z = 0 ↔ blockRestriction S g v z = 0 := by
   change J.dualMap (blockRestriction S g v z) = 0 ↔ _
-  constructor
-  · intro h
-    apply J.dualMap.injective
-    simpa only [map_zero] using h
-  · intro h
-    rw [h, map_zero]
+  exact J.dualMap.map_eq_zero_iff
 
 omit [Fintype F] in
 /-- The kernel depends on the field line and common-parent lift, not on `J`. -/
@@ -56,13 +52,6 @@ theorem ker_orientedBlockRestriction
   ext z
   simp only [LinearMap.mem_ker, orientedBlockRestriction_eq_zero_iff]
 
-omit [Fintype F] in
-theorem ker_orientedBlockRestriction_independent
-    (S : Submodule (ZMod 2) (Vec F)) (g : S →ₗ[ZMod 2] Vec F)
-    (v : Vec F) (J J' : B ≃ₗ[ZMod 2] U v) :
-    (orientedBlockRestriction S g v J).ker =
-      (orientedBlockRestriction S g v J').ker := by
-  rw [ker_orientedBlockRestriction, ker_orientedBlockRestriction]
 
 theorem mem_ker_orientedBlockRestriction_iff
     (S : Submodule (ZMod 2) (Vec F)) (g : S →ₗ[ZMod 2] Vec F)

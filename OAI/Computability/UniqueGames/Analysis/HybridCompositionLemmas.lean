@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.LinearAlgebra.Isomorphisms
 import OAI.Computability.UniqueGames.Analysis.A13IndexLemmas
 import OAI.Computability.UniqueGames.Analysis.FiberEnergyLemmas
@@ -45,128 +46,24 @@ theorem effective_hybrid_iff (A : Submodule F2 E) (B : Submodule F2 F)
     (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B) (Y : F →ₗ[F2] E) :
     (Hybrid Y A B ∧ Hybrid (Restriction.compressFrequency A B Y) C D) ↔
       Hybrid Y (C.comap A.mkQ) (D.map B.subtype) := by
-  have hA : A ≤ C.comap A.mkQ := by
-    intro x hx
-    change A.mkQ x ∈ C
-    have hz : A.mkQ x = 0 := by
-      change x ∈ LinearMap.ker A.mkQ
-      simpa only [Submodule.ker_mkQ] using hx
-    rw [hz]
-    exact C.zero_mem
-  have hB : D.map B.subtype ≤ B := by
-    intro x hx
-    obtain ⟨y, hy, rfl⟩ := Submodule.mem_map.mp hx
-    exact y.property
-  have hC : (C.comap A.mkQ).map A.mkQ = C := by
-    ext x
-    constructor
-    · intro hx
-      obtain ⟨y, hy, rfl⟩ := Submodule.mem_map.mp hx
-      exact hy
-    · intro hx
-      obtain ⟨y, rfl⟩ := A.mkQ_surjective x
-      exact Submodule.mem_map.mpr ⟨y, hx, rfl⟩
-  have hD : (D.map B.subtype).comap B.subtype = D := by
-    ext x
-    constructor
-    · intro hx
-      obtain ⟨y, hy, heq⟩ := Submodule.mem_map.mp hx
-      have hxy : y = x := Subtype.ext heq
-      simpa only [hxy] using hy
-    · intro hx
-      exact Submodule.mem_map.mpr ⟨x, hx, rfl⟩
-  have hh := LinearIdentities.nested_hybrid_iff Y A (C.comap A.mkQ)
-    (D.map B.subtype) B hA hB
-  rw [hC, hD] at hh
-  have hc : Restriction.compressFrequency A B Y = LinearIdentities.compress Y A B := by
+  have hc : Restriction.compressFrequency A B Y = compress Y A B := by
     ext x
     rfl
-  simpa only [hc] using hh
+  simpa only [hc, Submodule.map_comap_eq_of_surjective A.mkQ_surjective,
+    Submodule.comap_map_eq_of_injective B.subtype_injective] using
+    LinearIdentities.nested_hybrid_iff Y A (C.comap A.mkQ)
+      (D.map B.subtype) B (A.le_comap_mkQ C) (B.map_subtype_le D)
 
-theorem nested_hybridDerivative_energy
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B)
-    (f : (E →ₗ[F2] F) → ℝ) (T : E →ₗ[F2] F) (S : Parameter A B) :
-    (𝔼 N, hybridDerivative C D S (hybridDerivative A B T f) N ^ 2) =
-      𝔼 M, hybridDerivative (C.comap A.mkQ) (D.map B.subtype)
-        (T + embed A B S) f M ^ 2 := by
-  let g := hybridProjector (C.comap A.mkQ) (D.map B.subtype) f
-  have hp : (fun Y => Hybrid Y A B ∧
-        Hybrid (Restriction.compressFrequency A B Y) C D) =
-      (fun Y => Hybrid Y (C.comap A.mkQ) (D.map B.subtype)) := by
-    funext Y
-    exact propext (effective_hybrid_iff A B C D Y)
-  have hh := OperatorPartitions.spectralProjector_restriction_projector A B
-    (fun Y => Hybrid Y A B) (fun Z => Hybrid Z C D) f T
-  rw [hp] at hh
-  have hval (N : Parameter C D) :
-      hybridDerivative C D S (hybridDerivative A B T f) N =
-      g ((T + embed A B S) + RestrictionTransport.nestedEmbedding A B C D N) := by
-    change restrict (spectralProjector (fun Z => Hybrid Z C D)
-      (restrict (spectralProjector (fun Y => Hybrid Y A B) f) A B T)) C D S N = _
-    rw [hh]
-    change g (T + (embedding A B) (S + embed C D N)) =
-      g ((T + (embedding A B) S) + (embedding A B) (embed C D N))
-    rw [map_add, add_assoc]
-  simp_rw [hval]
-  exact RestrictionTransport.nested_restriction_secondMoment_eq A B C D g
-    (T + embed A B S)
-
-theorem nested_hybridDerivative_energySquare_average
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 T, 𝔼 S, (𝔼 N,
-      hybridDerivative C D S (hybridDerivative A B T f) N ^ 2)^2) =
-    𝔼 U, (𝔼 M, hybridDerivative (C.comap A.mkQ) (D.map B.subtype) U f M ^ 2)^2 := by
-  simp_rw [nested_hybridDerivative_energy A B C D f]
-  exact Restriction.real_translation_average (embed A B)
-    (fun U => (𝔼 M,
-      hybridDerivative (C.comap A.mkQ) (D.map B.subtype) U f M ^ 2)^2)
 
 omit [Finite E] in
 theorem finrank_comap_mkQ (A : Submodule F2 E)
     (C : Submodule F2 (E ⧸ A)) :
     Module.finrank F2 (C.comap A.mkQ) = Module.finrank F2 A + Module.finrank F2 C := by
-  let P := C.comap A.mkQ
-  have hAP : A ≤ P := by
-    intro x hx
-    change A.mkQ x ∈ C
-    have hz : A.mkQ x = 0 := by
-      change x ∈ LinearMap.ker A.mkQ
-      simpa only [Submodule.ker_mkQ] using hx
-    rw [hz]
-    exact C.zero_mem
-  let q : P →ₗ[F2] (E ⧸ A) := A.mkQ.comp P.subtype
-  have hR : q.range = C := by
-    ext x
-    constructor
-    · rintro ⟨y, rfl⟩
-      exact y.property
-    · intro hx
-      obtain ⟨y, hy⟩ := A.mkQ_surjective x
-      refine ⟨⟨y, ?_⟩, ?_⟩
-      · change A.mkQ y ∈ C
-        rw [hy]
-        exact hx
-      · exact hy
-  have hK : q.ker.map P.subtype = A := by
-    ext x
-    constructor
-    · intro hx
-      obtain ⟨y, hy, rfl⟩ := Submodule.mem_map.mp hx
-      have hz : (y : E) ∈ LinearMap.ker A.mkQ := hy
-      change (y : E) ∈ A
-      simpa only [Submodule.ker_mkQ] using hz
-    · intro hx
-      refine Submodule.mem_map.mpr ⟨⟨x, hAP hx⟩, ?_, rfl⟩
-      change x ∈ LinearMap.ker A.mkQ
-      simpa only [Submodule.ker_mkQ] using hx
-  have hKdim := Submodule.finrank_map_subtype_eq P q.ker
-  rw [hK] at hKdim
-  have hdim := q.finrank_range_add_finrank_ker
-  rw [hR, ← hKdim] at hdim
-  change Module.finrank F2 P = Module.finrank F2 A + Module.finrank F2 C
+  have h : Module.finrank F2 (E ⧸ C.comap A.mkQ) =
+      Module.finrank F2 ((E ⧸ A) ⧸ C) := (NaturalTransport.quotientFactor A C).finrank_eq
+  have hA := A.finrank_quotient_add_finrank
+  have hC := C.finrank_quotient_add_finrank
+  have hAC := (C.comap A.mkQ).finrank_quotient_add_finrank
   omega
 
 omit [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] [Finite E] [Finite F] in
@@ -824,29 +721,15 @@ theorem derivative_embedding_range (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
     ((LinearEquiv.arrowCongr a b).toLinearMap.comp (embedding Z.range Z.ker)).range =
       (embedding (LinearEquiv.arrowCongr b a Z).range
         (LinearEquiv.arrowCongr b a Z).ker).range := by
-  let e : (E →ₗ[F2] F) ≃ₗ[F2] (E' →ₗ[F2] F') := LinearEquiv.arrowCongr a b
-  let Z' := LinearEquiv.arrowCongr b a Z
+  rw [LinearMap.range_comp]
   ext M'
-  change (∃ N, e (embed Z.range Z.ker N) = M') ↔
-    (∃ N, embed Z'.range Z'.ker N = M')
-  constructor
-  · rintro ⟨N, rfl⟩
-    apply (exists_embed_iff Z'.range Z'.ker _).mpr
-    apply (admissible_arrowCongr a b Z (embed Z.range Z.ker N)).mpr
-    exact (exists_embed_iff Z.range Z.ker _).mp ⟨N, rfl⟩
-  · intro hM'
-    let M := e.symm M'
-    have he : e M = M' := e.apply_symm_apply M'
-    have hm' := (exists_embed_iff Z'.range Z'.ker M').mp hM'
-    have hm : Z.range ≤ M.ker ∧ M.range ≤ Z.ker := by
-      apply (admissible_arrowCongr a b Z M).mp
-      change Z'.range ≤ (e M).ker ∧ (e M).range ≤ Z'.ker
-      rw [he]
-      exact hm'
-    obtain ⟨N, hN⟩ := (exists_embed_iff Z.range Z.ker M).mpr hm
-    refine ⟨N, ?_⟩
-    rw [hN]
-    exact he
+  obtain ⟨M, rfl⟩ := (LinearEquiv.arrowCongr a b).surjective M'
+  rw [Submodule.mem_map_equiv, LinearEquiv.symm_apply_apply]
+  change (∃ N, embed Z.range Z.ker N = M) ↔
+    (∃ N, embed (LinearEquiv.arrowCongr b a Z).range
+      (LinearEquiv.arrowCongr b a Z).ker N = LinearEquiv.arrowCongr a b M)
+  rw [exists_embed_iff, exists_embed_iff]
+  exact (admissible_arrowCongr a b Z M).symm
 
 variable [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
   [Fintype (E' →ₗ[F2] F')] [Fintype (F' →ₗ[F2] E')]
@@ -902,32 +785,6 @@ variable {E F : Type*}
   [Finite E] [Finite F]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
 
-def quotientFactor (A : Submodule F2 E) (C : Submodule F2 (E ⧸ A)) :
-    (E ⧸ C.comap A.mkQ) ≃ₗ[F2] ((E ⧸ A) ⧸ C) :=
-  (Submodule.quotEquivOfEq (C.comap A.mkQ) (C.mkQ.comp A.mkQ).ker
-    (by rw [LinearMap.ker_comp, Submodule.ker_mkQ])).trans
-      ((C.mkQ.comp A.mkQ).quotKerEquivOfSurjective
-        (C.mkQ_surjective.comp A.mkQ_surjective))
-
-omit [FiniteDimensional F2 E] [Finite E] in
-@[simp] theorem quotientFactor_mkQ (A : Submodule F2 E)
-    (C : Submodule F2 (E ⧸ A)) (x : E) :
-    quotientFactor A C ((C.comap A.mkQ).mkQ x) = C.mkQ (A.mkQ x) := by
-  simp [quotientFactor]
-
-def outputFactor (B : Submodule F2 F) (D : Submodule F2 B) :
-    D ≃ₗ[F2] (D.map B.subtype) :=
-  Submodule.equivMapOfInjective B.subtype Subtype.val_injective D
-
-omit [FiniteDimensional F2 F] [Finite F] in
-@[simp] theorem outputFactor_val (B : Submodule F2 F) (D : Submodule F2 B) (x : D) :
-    ((outputFactor B D x : D.map B.subtype) : F) = ((x : B) : F) := rfl
-
-def parameterFactor (A : Submodule F2 E) (B : Submodule F2 F)
-    (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B) :
-    Parameter C D ≃ₗ[F2] Parameter (C.comap A.mkQ) (D.map B.subtype) :=
-  LinearEquiv.arrowCongr (quotientFactor A C).symm (outputFactor B D)
-
 def dualFactor (A : Submodule F2 E) (B : Submodule F2 F)
     (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B) :
     (D →ₗ[F2] ((E ⧸ A) ⧸ C)) ≃ₗ[F2]
@@ -941,18 +798,6 @@ theorem dualFactor_rank (A : Submodule F2 E) (B : Submodule F2 F)
     (Z : D →ₗ[F2] ((E ⧸ A) ⧸ C)) :
     Module.finrank F2 (dualFactor A B C D Z).range = Module.finrank F2 Z.range :=
   rank_arrowCongr (outputFactor B D) (quotientFactor A C).symm Z
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F]
-  [Finite E] [Finite F] [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] in
-theorem parameterFactor_embedding (A : Submodule F2 E) (B : Submodule F2 F)
-    (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B) (N : Parameter C D) :
-    embed (C.comap A.mkQ) (D.map B.subtype) (parameterFactor A B C D N) =
-      RestrictionTransport.nestedEmbedding A B C D N := by
-  ext x
-  change ((outputFactor B D (N (quotientFactor A C ((C.comap A.mkQ).mkQ x)))) : F) =
-    ((N (C.mkQ (A.mkQ x)) : B) : F)
-  rw [quotientFactor_mkQ]
-  rfl
 
 theorem nested_hybridDerivative_function
     (A : Submodule F2 E) (B : Submodule F2 F)
@@ -989,18 +834,6 @@ theorem nested_mapDerivative_energy
   exact mapDerivative_energy_pullback (quotientFactor A C).symm (outputFactor B D)
     (hybridDerivative (C.comap A.mkQ) (D.map B.subtype) (T + embed A B S) f) Z
 
-theorem nested_mapDerivative_energySquare_average
-    (A : Submodule F2 E) (B : Submodule F2 F)
-    (C : Submodule F2 (E ⧸ A)) (D : Submodule F2 B)
-    (f : (E →ₗ[F2] F) → ℝ) (Z : D →ₗ[F2] ((E ⧸ A) ⧸ C)) :
-    (𝔼 T, 𝔼 S, (𝔼 N,
-      mapDerivative Z (hybridDerivative C D S (hybridDerivative A B T f)) N ^ 2)^2) =
-    𝔼 U, (𝔼 N, mapDerivative (dualFactor A B C D Z)
-      (hybridDerivative (C.comap A.mkQ) (D.map B.subtype) U f) N ^ 2)^2 := by
-  simp_rw [nested_mapDerivative_energy A B C D f]
-  exact Restriction.real_translation_average (embed A B)
-    (fun U => (𝔼 N, mapDerivative (dualFactor A B C D Z)
-      (hybridDerivative (C.comap A.mkQ) (D.map B.subtype) U f) N ^ 2)^2)
 
 end Nested
 end UniqueGamesTheorem.Appendix.NaturalTransport

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.EmitRows
 import OAI.Computability.UniqueGames.PCP.RuntimeModel
 
@@ -117,13 +118,6 @@ theorem cursorBits_succ (input : GenericGraphTables.Table q) (e : Nat)
   rw [cursorBits, cursorWords_succ input e he, encodeWords_append]
   rfl
 
-@[simp] theorem cursorBits_full (input : GenericGraphTables.Table q) :
-    cursorBits input input.darts = [] := by
-  have finished := List.drop_length (l := GenericGraphTables.rowList input)
-  rw [GenericGraphTables.rowList_length] at finished
-  unfold cursorBits cursorWords
-  rw [finished]
-  rfl
 
 /-- Guard-to-guard tape contract. Only scan and indexScan may contain residues. -/
 structure Ready (input : GenericGraphTables.Table q) (e : Nat)
@@ -144,40 +138,6 @@ structure Ready (input : GenericGraphTables.Table q) (e : Nat)
   output : base .output = []
   reversed : base .reversed = (prefixBits input e).reverse
 
-/-- Changing only lookup residues preserves the complete loop contract. -/
-theorem Ready.of_agree {input : GenericGraphTables.Table q} {e : Nat}
-    {base next : Tape → List Bool} (ready : Ready input e base)
-    (agree : ∀ tape, tape ≠ .scan → tape ≠ .indexScan → next tape = base tape) :
-    Ready input e next where
-  le_darts := ready.le_darts
-  original := (agree .original (by decide) (by decide)).trans ready.original
-  cursor := (agree .cursor (by decide) (by decide)).trans ready.cursor
-  vertices := (agree .vertices (by decide) (by decide)).trans ready.vertices
-  darts := (agree .darts (by decide) (by decide)).trans ready.darts
-  counter := (agree .counter (by decide) (by decide)).trans ready.counter
-  edge := (agree .edge (by decide) (by decide)).trans ready.edge
-  tail := (agree .tail (by decide) (by decide)).trans ready.tail
-  reverseIndex := (agree .reverseIndex (by decide) (by decide)).trans ready.reverseIndex
-  head := (agree .head (by decide) (by decide)).trans ready.head
-  scratch := (agree .scratch (by decide) (by decide)).trans ready.scratch
-  compareLeft := (agree .compareLeft (by decide) (by decide)).trans ready.compareLeft
-  compareRight := (agree .compareRight (by decide) (by decide)).trans ready.compareRight
-  output := (agree .output (by decide) (by decide)).trans ready.output
-  reversed := (agree .reversed (by decide) (by decide)).trans ready.reversed
-
-theorem Ready.update_scan {input : GenericGraphTables.Table q} {e : Nat}
-    {base : Tape → List Bool} (ready : Ready input e base) (word : List Bool) :
-    Ready input e (Function.update base .scan word) := by
-  apply ready.of_agree
-  intro tape notScan _
-  simp [notScan]
-
-theorem Ready.update_indexScan {input : GenericGraphTables.Table q} {e : Nat}
-    {base : Tape → List Bool} (ready : Ready input e base) (word : List Bool) :
-    Ready input e (Function.update base .indexScan word) := by
-  apply ready.of_agree
-  intro tape _ notIndexScan
-  simp [notIndexScan]
 
 theorem Ready.counter_succ {input : GenericGraphTables.Table q} {e : Nat}
     {base : Tape → List Bool} (ready : Ready input e base) (he : e < input.darts) :
@@ -191,9 +151,6 @@ theorem Ready.counter_at_end {input : GenericGraphTables.Table q}
     base .counter = encodeWord 0 := by
   simpa only [Nat.sub_self] using ready.counter
 
-theorem Ready.cursor_at_end {input : GenericGraphTables.Table q}
-    {base : Tape → List Bool} (ready : Ready input input.darts base) :
-    base .cursor = [] := ready.cursor.trans (cursorBits_full input)
 
 theorem Ready.reversed_at_end {input : GenericGraphTables.Table q}
     {base : Tape → List Bool} (ready : Ready input input.darts base) :

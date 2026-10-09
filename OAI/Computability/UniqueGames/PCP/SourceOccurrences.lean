@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.PCP.ClauseVerifierLemmas
@@ -43,11 +44,7 @@ def sum {α β : Type} (a : Encoding α) (b : Encoding β) : Encoding (α ⊕ β
 /-- Function coordinate zero is the least significant radix digit. -/
 def function {α β : Type} (a : Encoding α) (b : Encoding β) : Encoding (α → β) where
   size := b.size ^ a.size
-  code := (show (α → β) ≃ (Fin a.size → Fin b.size) from
-    { toFun := fun f i => b.code (f (a.code.symm i))
-      invFun := fun f x => b.code.symm (f (a.code x))
-      left_inv := by intro f; funext x; simp
-      right_inv := by intro f; funext i; simp }).trans finFunctionFinEquiv
+  code := (Equiv.arrowCongr a.code b.code).trans finFunctionFinEquiv
 
 def enumerate {α : Type} (a : Encoding α) : List α := List.ofFn a.code.symm
 
@@ -58,8 +55,6 @@ theorem mem_enumerate {α : Type} (a : Encoding α) (x : α) : x ∈ a.enumerate
   rw [enumerate, List.mem_ofFn']
   exact ⟨a.code x, a.code.symm_apply_apply x⟩
 
-theorem nodup_enumerate {α : Type} (a : Encoding α) : a.enumerate.Nodup :=
-  List.nodup_ofFn_ofInjective a.code.symm.injective
 
 theorem card_eq_size {α : Type} [Fintype α] (a : Encoding α) :
     Fintype.card α = a.size := by
@@ -91,24 +86,6 @@ def extendRestricted {J : Type} (valid : J → Bool)
     (f : Cube {j : J // valid j = true}) (j : {j : J // valid j = true}) :
     extendRestricted valid f j.val = f j := by simp [extendRestricted, j.property]
 
-theorem extendRestricted_injective {J : Type} (valid : J → Bool) :
-    Function.Injective (extendRestricted valid) := by
-  intro f g h
-  funext j
-  have := congrFun h j.val
-  simpa only [extendRestricted_valid] using this
-
-@[simp] theorem restrictQuery_extendRestricted {J : Type} (valid : J → Bool)
-    (f : Cube {j : J // valid j = true}) :
-    restrictQuery valid (extendRestricted valid f) = f := by
-  funext j
-  exact extendRestricted_valid valid f j
-
-@[simp] theorem canonicalInput_half {I : Type} [Fintype I] [DecidableEq I]
-    (i₀ : I) (f : HalfCube i₀) :
-    canonicalInput i₀ f.val = f := by
-  apply Subtype.ext
-  simp [canonicalInput, representative, f.property]
 
 /-- The global index map is an explicit equivalence, including all padding. -/
 def assignmentOfKey {V C I J : Type}
@@ -122,13 +99,6 @@ def assignmentOfKey {V C I J : Type}
     assignmentOfKey v c i j bits ((globalEncoding v c i j).code key) = bits key := by
   exact congrArg bits ((globalEncoding v c i j).code.symm_apply_apply key)
 
-theorem assignmentOfKey_surjective {V C I J : Type}
-    (v : Encoding V) (c : Encoding C) (i : Encoding I) (j : Encoding J) :
-    Function.Surjective (assignmentOfKey v c i j) := by
-  intro bits
-  refine ⟨fun key => bits ((globalEncoding v c i j).code key), ?_⟩
-  funext q
-  exact congrArg bits ((globalEncoding v c i j).code.apply_symm_apply q)
 
 section LocalEquations
 
@@ -140,31 +110,6 @@ def localAddress (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Enc
   | .inl f => (globalEncoding vE cE iE jE).code (.inl (v, f.val))
   | .inr g => (globalEncoding vE cE iE jE).code (.inr (.inl (c, extendRestricted valid g.val)))
 
-omit [Fintype I] [DecidableEq I] [Fintype J] [DecidableEq J] in
-theorem localAddress_injective
-    (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Encoding J)
-    (v : V) (c : C) (valid : J → Bool) (i₀ : I) (j₀ : {j : J // valid j = true}) :
-    Function.Injective (localAddress vE cE iE jE v c valid i₀ j₀) := by
-  intro a b h
-  cases a with
-  | inl a =>
-    cases b with
-    | inl b =>
-      have h' := (globalEncoding vE cE iE jE).code.injective h
-      have hval : a.val = b.val := congrArg Prod.snd (Sum.inl.inj h')
-      exact congrArg Sum.inl (Subtype.ext hval)
-    | inr b =>
-      have h' := (globalEncoding vE cE iE jE).code.injective h
-      cases h'
-  | inr a =>
-    cases b with
-    | inl b =>
-      have h' := (globalEncoding vE cE iE jE).code.injective h
-      cases h'
-    | inr b =>
-      have h' := (globalEncoding vE cE iE jE).code.injective h
-      have hext := congrArg Prod.snd (Sum.inl.inj (Sum.inr.inj h'))
-      exact congrArg Sum.inr (Subtype.ext (extendRestricted_injective valid hext))
 
 def conditionedOccurrence
     (vE : Encoding V) (cE : Encoding C) (iE : Encoding I) (jE : Encoding J)
@@ -305,54 +250,6 @@ theorem rightAnchor_none_iff (F : Target.Formula) {u : ℕ} (c : ClauseContext F
     rightAnchor F c = none ↔ ∀ j : J u, validJ F c j = false :=
   firstValid_none_iff _ _
 
-/-- Independent actual half-tables extend to the explicit padded key space.
-Only the canonically selected right anchor is read at each clause context. -/
-def halfTableKeyAssignment (F : Target.Formula) (u : ℕ)
-    (a : VariableContext F u → HalfCube (leftAnchor u) → Bool)
-    (b : ∀ c : ClauseContext F u, ∀ j₀ : {j : J u // validJ F c j = true},
-      HalfCube j₀ → Bool) :
-    GlobalKey (VariableContext F u) (ClauseContext F u) (I u) (J u) → Bool
-  | .inl (v, f) => a v (canonicalInput (leftAnchor u) f)
-  | .inr (.inl (c, g)) =>
-    match rightAnchor F c with
-    | none => false
-    | some j₀ => b c j₀ (canonicalInput j₀ (restrictQuery (validJ F c) g))
-  | .inr (.inr _) => false
-
-def extendHalfTables (F : Target.Formula) (u : ℕ)
-    (a : VariableContext F u → HalfCube (leftAnchor u) → Bool)
-    (b : ∀ c : ClauseContext F u, ∀ j₀ : {j : J u // validJ F c j = true},
-      HalfCube j₀ → Bool) : Fin (nBits F u) → Bool :=
-  assignmentOfKey (variableEncoding F u) (clauseEncoding F u) (iEncoding u) (jEncoding u)
-    (halfTableKeyAssignment F u a b)
-
-@[simp] theorem extendHalfTables_left (F : Target.Formula) (u : ℕ)
-    (a : VariableContext F u → HalfCube (leftAnchor u) → Bool)
-    (b : ∀ c : ClauseContext F u, ∀ j₀ : {j : J u // validJ F c j = true},
-      HalfCube j₀ → Bool) (v : VariableContext F u) (h : HalfCube (leftAnchor u)) :
-    extendHalfTables F u a b ((proofEncoding F u).code (.inl (v, h.val))) = a v h := by
-  calc
-    _ = halfTableKeyAssignment F u a b (.inl (v, h.val)) :=
-      assignmentOfKey_code (variableEncoding F u) (clauseEncoding F u) (iEncoding u)
-        (jEncoding u) (halfTableKeyAssignment F u a b) (.inl (v, h.val))
-    _ = a v h := congrArg (a v) (canonicalInput_half (leftAnchor u) h)
-
-theorem extendHalfTables_right (F : Target.Formula) (u : ℕ)
-    (a : VariableContext F u → HalfCube (leftAnchor u) → Bool)
-    (b : ∀ c : ClauseContext F u, ∀ j₀ : {j : J u // validJ F c j = true},
-      HalfCube j₀ → Bool) (c : ClauseContext F u)
-    (j₀ : {j : J u // validJ F c j = true}) (hanchor : rightAnchor F c = some j₀)
-    (h : HalfCube j₀) :
-    extendHalfTables F u a b ((proofEncoding F u).code
-      (.inr (.inl (c, extendRestricted (validJ F c) h.val)))) = b c j₀ h := by
-  calc
-    _ = halfTableKeyAssignment F u a b
-        (.inr (.inl (c, extendRestricted (validJ F c) h.val))) :=
-      assignmentOfKey_code (variableEncoding F u) (clauseEncoding F u) (iEncoding u)
-        (jEncoding u) (halfTableKeyAssignment F u a b) _
-    _ = b c j₀ h := by
-      simp only [halfTableKeyAssignment, hanchor]
-      rw [restrictQuery_extendRestricted, canonicalInput_half]
 
 def emptyAddress (F : Target.Formula) (u : ℕ) (v : VariableContext F u) :
     EmptyContext.Address (leftAnchor u) → Fin (nBits F u)
@@ -464,14 +361,6 @@ theorem sourceList_nonempty (F : Target.Formula) (u D : ℕ) (h : F.clauses ≠ 
   rw [List.isEmpty_eq_false_iff.mpr h]
   rfl
 
-theorem sourceList_length_le_raw_add_one (F : Target.Formula) (u D : ℕ) :
-    (sourceList F u D).length ≤ (rawSourceList F u D).length + 1 := by
-  by_cases h : F.clauses = []
-  · rw [sourceList_empty F u D h]
-    rw [List.length_singleton]
-    omega
-  · rw [sourceList_nonempty F u D h]
-    omega
 
 theorem sourceList_ne_nil (F : Target.Formula) (u D : ℕ) (hD : 0 < D) :
     sourceList F u D ≠ [] := by

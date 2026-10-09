@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Basic.Real.Basic
 import Mathlib.Tactic.Linarith
@@ -61,23 +62,6 @@ def encode64 (label : InitialGraph.Label) : Label64 :=
   rcases label with ⟨a, b, c⟩
   rfl
 
-def initial64 (F : UniqueGamesTheorem.Foundations.Target.Formula) :
-    ConstraintGraph (InitialGraph.CompactVertex F) (InitialGraph.CompactDart F) Label64 :=
-  pullback (InitialGraph.build F) decode64
-
-theorem initial64_satisfiable_iff (F : UniqueGamesTheorem.Foundations.Target.Formula) :
-    (initial64 F).Satisfiable ↔ F.Satisfiable :=
-  (satisfiable_pullback_iff (InitialGraph.build F) decode64 encode64 decode_encode64).trans
-    (InitialGraph.build_satisfiable_iff F)
-
-theorem initial64_alphabet : Fintype.card Label64 = 64 :=
-  QueryIncidence.six_query_alphabet
-
-theorem initial64_inverse_size_gap (F : UniqueGamesTheorem.Foundations.Target.Formula)
-    (unsat : ¬ F.Satisfiable) (labeling : InitialGraph.CompactVertex F → Label64) :
-    Fintype.card (InitialGraph.CompactDart F) ≤
-      (6 * F.clauses.length + 1) * (initial64 F).rejectionCount labeling :=
-  InitialGraph.build_inverse_size_gap F unsat (decode64 ∘ labeling)
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetRetraction
 
@@ -316,21 +300,6 @@ section Profiles
 
 variable {V D : Type*} [Fintype V] [Fintype D] [Nonempty V] [Nonempty D]
 
-omit [Nonempty V] [Nonempty D] in
-/-- Density is exactly the uniform probability of a marked directed port-edge. -/
-theorem edgeDensity_eq_edge_mean (bad : V × D → Bool) :
-    edgeDensity bad = mean (fun e => if bad e then (1 : ℝ) else 0) :=
-  (mean_prod (fun e : V × D => if bad e then (1 : ℝ) else 0)).symm
-
-omit [Nonempty V] [Nonempty D] in
-/-- The edge convention counts each directed port once, including parallel
-edges and loops. Thus the density is literally the marked-edge cardinal ratio. -/
-theorem edgeDensity_eq_card (bad : V × D → Bool) :
-    edgeDensity bad =
-      ((Finset.univ.filter (fun e => bad e = true)).card : ℝ) /
-        (Fintype.card (V × D) : ℝ) := by
-  rw [edgeDensity_eq_edge_mean, mean_eq_sum_div_card]
-  simp only [Finset.sum_boole]
 
 omit [Fintype V] [Nonempty V] [Nonempty D] in
 theorem edgeProfile_nonnegative (bad : V × D → Bool) (v : V) : 0 ≤ edgeProfile bad v :=
@@ -348,10 +317,6 @@ omit [Nonempty V] [Nonempty D] in
 theorem edgeDensity_nonnegative (bad : V × D → Bool) : 0 ≤ edgeDensity bad :=
   mean_nonnegative _ (edgeProfile_nonnegative bad)
 
-theorem edgeDensity_le_one (bad : V × D → Bool) : edgeDensity bad ≤ 1 := by
-  calc
-    _ ≤ mean (fun _ : V => (1 : ℝ)) := mean_mono (edgeProfile_le_one bad)
-    _ = 1 := mean_const _
 
 omit [Nonempty V] in
 theorem edgeProfile_energy_le_density (bad : V × D → Bool) :
@@ -399,13 +364,6 @@ theorem returnMass_le (G : PortGraph V D) (lambda : ℝ)
   have hm := mul_le_mul_of_nonneg_left hvar (pow_nonneg certificate.nonnegative gap)
   nlinarith
 
-theorem adjacent_returnMass_le (G : PortGraph V D) (lambda : ℝ)
-    (certificate : SpectralCertificate G lambda) (bad : V × D → Bool)
-    (reversal : ∀ e, bad (G.rot e) = bad e) :
-    returnMass G bad 0 ≤ edgeDensity bad := by
-  have h := returnMass_le_sharp G lambda certificate bad reversal 0
-  norm_num at h
-  nlinarith
 
 end Profiles
 
@@ -524,16 +482,6 @@ theorem cubeXor_cancel_right (x y : Cube I) :
   funext i
   cases hx : x i <;> cases hy : y i <;> simp [cubeXor, hx, hy]
 
-theorem cubeXor_assoc (x y z : Cube I) :
-    cubeXor (cubeXor x y) z = cubeXor x (cubeXor y z) := by
-  funext i
-  cases hx : x i <;> cases hy : y i <;> cases hz : z i <;>
-    simp [cubeXor, hx, hy, hz]
-
-@[simp] theorem cubeXor_zeroFrequency (x : Cube I) :
-    cubeXor x zeroFrequency = x := by
-  funext i
-  cases hx : x i <;> simp [cubeXor, zeroFrequency, hx]
 
 /-- Uniform cube measure is invariant under this explicit xor translation. -/
 def xorTranslation (y : Cube I) : Cube I ≃ Cube I where
@@ -576,16 +524,6 @@ def powerGenerators (g : D → Cube I) : (n : Nat) → (Fin n → D) → Cube I
   | 0, _ => zeroFrequency
   | n + 1, p => cubeXor (g (p 0)) (powerGenerators g n (fun j => p j.succ))
 
-/-- These are actual walk displacements, including repeated vertices and ports. -/
-theorem wordEnd_eq_powerGenerators (g : D → Cube I) (n : Nat)
-    (x : Cube I) (p : Fin n → D) :
-    wordEnd (cayleyGraph g) n x p = cubeXor x (powerGenerators g n p) := by
-  induction n generalizing x with
-  | zero => simp [wordEnd, powerGenerators]
-  | succ n ih =>
-    change wordEnd (cayleyGraph g) n (cubeXor x (g (p 0))) (fun j => p j.succ) =
-      cubeXor x (cubeXor (g (p 0)) (powerGenerators g n (fun j => p j.succ)))
-    rw [ih, cubeXor_assoc]
 
 section Finite
 
@@ -629,14 +567,6 @@ theorem coefficient_xorTranslation (f : Cube I → ℝ) (s v : Cube I) :
       rfl
     _ = walsh s v * coefficient f s := mul_comm _ _
 
-/-- Each Walsh character is an eigenvector of the actual Cayley averaging. -/
-theorem cayleyAverage_walsh (g : D → Cube I) (s x : Cube I) :
-    cayleyAverage g (walsh s) x = eigenvalue g s * walsh s x := by
-  unfold cayleyAverage
-  simp only [cayleyGraph_rot, walsh_xor]
-  rw [← Finset.mul_expect]
-  rw [mul_comm]
-  rfl
 
 /-- Full Walsh diagonalization, obtained by swapping the two finite averages. -/
 theorem coefficient_cayleyAverage (g : D → Cube I) (f : Cube I → ℝ) (s : Cube I) :
@@ -682,14 +612,6 @@ theorem eigenvalue_powerGenerators (g : D → Cube I) (n : Nat) (s : Cube I) :
       _ = eigenvalue g s ^ (n + 1) := by
         rw [ih, pow_succ, mul_comm]
 
-/-- The port degree of the powered graph is the exact number of port words. -/
-theorem power_port_card (n : Nat) :
-    Fintype.card (Fin n → D) = Fintype.card D ^ n := by
-  simp only [Fintype.card_fun, Fintype.card_fin]
-
-theorem seven_power_port_card :
-    Fintype.card (Fin 7 → Fin (2 ^ 16)) = (2 ^ 16) ^ 7 := by
-  simp only [Fintype.card_fun, Fintype.card_fin]
 
 /-- A bias bound on all nonconstant generator characters contracts the actual
 mean-zero function energy. The constant coefficient is eliminated by its exact
@@ -751,16 +673,6 @@ theorem power_eigenvalue_bound (g : D → Cube I) (lambda : ℝ) (hlambda : 0 �
     rw [pow_succ, pow_succ]
     exact mul_le_mul ih (hbias s hs) (abs_nonneg _) (pow_nonneg hlambda _)
 
-/-- Seven actual generator steps turn one-half character bias into `2⁻⁷`. -/
-theorem sevenStep_halfCertificate (g : D → Cube I)
-    (hbias : ∀ s : Cube I, s ≠ zeroFrequency → |eigenvalue g s| ≤ (1 / 2 : ℝ)) :
-    SpectralReturn.SpectralCertificate (cayleyGraph (powerGenerators g 7))
-      ((1 / 2 : ℝ) ^ 7) := by
-  apply cayley_spectralCertificate
-  · norm_num
-  · norm_num
-  · intro s hs
-    exact power_eigenvalue_bound g (1 / 2) (by norm_num) hbias 7 s hs
 
 end Finite
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import OAI.Computability.UniqueGames.Foundations.SamplingLemmas
 import OAI.Computability.UniqueGames.Soundness.PartnerMapCoordinates
@@ -106,46 +107,6 @@ theorem uniform_visible_coefficients {I : Type} [Fintype I] [DecidableEq I]
         (Finset.expect_product (Finset.univ : Finset (I → W × A.range))
           (Finset.univ : Finset (I → A.ker)) (fun pieces => F pieces.1))
 
-/-- The full product law exposes mutual independence of every raw coefficient. -/
-theorem uniform_coordinate_product {I E : Type} [Fintype I] [DecidableEq I] [Fintype E]
-    (f : I → E → ℝ) :
-    (𝔼 columns : I → E, ∏ i, f i (columns i)) = ∏ i, 𝔼 e : E, f i e := by
-  simp only [Fintype.expect_eq_sum_div_card]
-  rw [← Fintype.prod_sum]
-  simp only [Fintype.card_pi, Nat.cast_prod]
-  exact (Finset.prod_div_distrib _ _).symm
-
-theorem visible_coefficient_product {I : Type} [Fintype I] [DecidableEq I]
-    [Fintype W] [Fintype K] [Fintype S]
-    (A : K →ₗ[F2] S) (f : I → W × A.range → ℝ) :
-    (𝔼 columns : I → W × K, ∏ i, f i (columnImage A (columns i))) =
-      ∏ i, 𝔼 e : W × A.range, f i e := by
-  exact (uniform_visible_coefficients A (fun visible => ∏ i, f i (visible i))).trans
-    (uniform_coordinate_product f)
-
-theorem uniform_pushforward_of_expect {Ω Γ : Type} [Fintype Ω] [Fintype Γ]
-    [Nonempty Ω] [Nonempty Γ] (f : Ω → Γ)
-    (h : ∀ F : Γ → ℝ, (𝔼 x : Ω, F (f x)) = 𝔼 y : Γ, F y) :
-    (FiniteDistribution.uniform Ω).pushforward f = FiniteDistribution.uniform Γ := by
-  apply FiniteDistribution.eq_of_weight_eq
-  intro y
-  have he : (FiniteDistribution.uniform Ω).expectation
-        (fun x => if f x = y then 1 else 0) =
-      (FiniteDistribution.uniform Γ).expectation (fun z => if z = y then 1 else 0) := by
-    simpa only [FiniteDistribution.expectation_uniform,
-      ← Fintype.expect_eq_sum_div_card] using h (fun z => if z = y then 1 else 0)
-  calc
-    _ = (FiniteDistribution.uniform Ω).expectation
-        (fun x => if f x = y then 1 else 0) := by
-      simp [FiniteDistribution.pushforward, FiniteDistribution.expectation, mul_ite]
-    _ = _ := he
-    _ = _ := by simp [FiniteDistribution.expectation, mul_ite]
-
-theorem visible_coefficients_pushforward {I : Type} [Fintype I] [DecidableEq I]
-    [Fintype W] [Nonempty W] [Fintype K] [Fintype S] (A : K →ₗ[F2] S) :
-    (FiniteDistribution.uniform (I → W × K)).pushforward (visibleCoefficients A) =
-      FiniteDistribution.uniform (I → W × A.range) :=
-  uniform_pushforward_of_expect (visibleCoefficients A) (uniform_visible_coefficients A)
 
 /-- The worst-case codomain cardinality suffices; no rank estimate is needed. -/
 theorem visible_card_le [Fintype W] [Fintype K] [Fintype S] (A : K →ₗ[F2] S) :
@@ -169,64 +130,6 @@ variable {P : Type} [Fintype P] [DecidableEq P]
   [AddCommGroup W] [Module F2 W]
   (rhs : P → Bool) (J : Finset P)
 
-abbrev PartnerSpace := UniqueGamesTheorem.Soundness.PartnerProjection.PartnerPoint rhs (activeOf J)
-
-/-- Raw coefficients commute with actual linear-map composition. -/
-theorem coefficients_comp (A : K →ₗ[F2] S) (M : PartnerSpace rhs J →ₗ[F2] K) :
-    coefficients rhs J S (A.comp M) = fun i => A (coefficients rhs J K M i) := by
-  funext i
-  simp [coefficients, mapEquiv, LinearMap.comp_apply]
-
-def actualVisibleCoefficients (A : K →ₗ[F2] S)
-    (maps : (PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K)) :
-    RawSlot J → W × A.range :=
-  fun i => (coefficients rhs J W maps.1 i, rangePoint A (coefficients rhs J K maps.2 i))
-
-/-- The displayed second component is precisely the coefficient of `S = A M`. -/
-theorem actualVisibleCoefficients_second (A : K →ₗ[F2] S)
-    (T : PartnerSpace rhs J →ₗ[F2] W) (M : PartnerSpace rhs J →ₗ[F2] K)
-    (i : RawSlot J) :
-    ((actualVisibleCoefficients rhs J A (T, M) i).2 : S) =
-      coefficients rhs J S (A.comp M) i := by
-  rw [coefficients_comp]
-  rfl
-
-def actualMapPairEquiv :
-    ((PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K)) ≃
-      (RawSlot J → W × K) :=
-  (Equiv.prodCongr (mapEquiv rhs J W).symm.toEquiv (mapEquiv rhs J K).symm.toEquiv).trans
-    (Equiv.arrowProdEquivProdArrow (RawSlot J) (fun _ => W) (fun _ => K)).symm
-
-/-- Sampling the actual independent maps `T` and `M` yields the claimed joint
-uniform coefficient law of `(T,A M)`, for every fixed equation tuple and mask. -/
-theorem actual_maps_visible_uniform [Fintype W] [Fintype K] [Fintype S]
-    (A : K →ₗ[F2] S) (F : (RawSlot J → W × A.range) → ℝ) :
-    (𝔼 maps : (PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K),
-        F (actualVisibleCoefficients rhs J A maps)) =
-      𝔼 gamma : RawSlot J → W × A.range, F gamma := by
-  calc
-    (𝔼 maps : (PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K),
-        F (actualVisibleCoefficients rhs J A maps)) =
-        𝔼 columns : RawSlot J → W × K, F (visibleCoefficients A columns) :=
-      Fintype.expect_equiv (actualMapPairEquiv rhs J) _ _ (fun _ => rfl)
-    _ = _ := uniform_visible_coefficients A F
-
-theorem actual_maps_visible_product [Fintype W] [Fintype K] [Fintype S]
-    (A : K →ₗ[F2] S) (f : RawSlot J → W × A.range → ℝ) :
-    (𝔼 maps : (PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K),
-        ∏ i, f i (actualVisibleCoefficients rhs J A maps i)) =
-      ∏ i, 𝔼 e : W × A.range, f i e := by
-  exact (actual_maps_visible_uniform rhs J A (fun gamma => ∏ i, f i (gamma i))).trans
-    (uniform_coordinate_product f)
-
-theorem actual_maps_visible_pushforward [Fintype W] [Fintype K] [Fintype S]
-    (A : K →ₗ[F2] S) :
-    (FiniteDistribution.uniform
-        ((PartnerSpace rhs J →ₗ[F2] W) × (PartnerSpace rhs J →ₗ[F2] K))).pushforward
-        (actualVisibleCoefficients rhs J A) =
-      FiniteDistribution.uniform (RawSlot J → W × A.range) :=
-  uniform_pushforward_of_expect (actualVisibleCoefficients rhs J A)
-    (actual_maps_visible_uniform rhs J A)
 
 end ActualMaps
 

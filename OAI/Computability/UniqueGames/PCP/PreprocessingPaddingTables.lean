@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Research.R22PcpPreprocessing
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.VertexPadding
 
@@ -54,21 +56,8 @@ def sumGraph (table : Table n d) (m : Nat) :
 
 /-- The same graph, with the explicit initial/final-interval vertex ordering. -/
 def paddedGraph (table : Table n d) (h : n ≤ m) :
-    ConstraintGraph (Fin m) (Fin m × Fin d) Label where
-  reverse := ((dartEquiv h).symm.trans (sumGraph table m).reverse).trans (dartEquiv h)
-  reverse_involutive e := by
-    change dartEquiv h ((sumGraph table m).reverse
-      ((dartEquiv h).symm (dartEquiv h ((sumGraph table m).reverse
-        ((dartEquiv h).symm e))))) = e
-    rw [Equiv.symm_apply_apply, (sumGraph table m).reverse_involutive,
-      Equiv.apply_symm_apply]
-  tail := Prod.fst
-  accepts e a b := (sumGraph table m).accepts ((dartEquiv h).symm e) a b
-  reverse_accepts e a b := by
-    change (sumGraph table m).accepts ((dartEquiv h).symm
-      (dartEquiv h ((sumGraph table m).reverse ((dartEquiv h).symm e)))) b a = _
-    rw [Equiv.symm_apply_apply]
-    exact (sumGraph table m).reverse_accepts _ _ _
+    ConstraintGraph (Fin m) (Fin m × Fin d) Label :=
+  (sumGraph table m).reindex (vertexEquiv h) (dartEquiv h) (Equiv.refl _)
 
 theorem paddedGraph_reverse_equiv (table : Table n d) (h : n ≤ m)
     (e : (Fin n ⊕ Fin (m - n)) × Fin d) :
@@ -101,33 +90,14 @@ def pad (table : Table n d) (h : n ≤ m) : Table m d :=
     PortTables.accepts (pad table h) e a b = (paddedGraph table h).accepts e a b := by
   exact accepts_ofPortGraph _ _ _ e a b
 
-/-- These are the actual finite table validity laws, not additional premises. -/
-theorem pad_valid (table : Table n d) (h : n ≤ m) :
-    Function.Involutive (rotation (pad table h)) ∧
-      ∀ e a b, PortTables.accepts (pad table h) (rotation (pad table h) e) b a =
-        PortTables.accepts (pad table h) e a b :=
-  ⟨rotation_involutive (pad table h), accepts_rotation (pad table h)⟩
-
-private theorem constraintGraph_ext {V E A : Type*} {G H : ConstraintGraph V E A}
-    (hr : ∀ e, G.reverse e = H.reverse e) (ht : G.tail = H.tail)
-    (hp : G.accepts = H.accepts) : G = H := by
-  cases G with
-  | mk reverse hinv tail accepts htranspose =>
-    cases H with
-    | mk reverse' hinv' tail' accepts' htranspose' =>
-      dsimp only at hr ht hp
-      have he : reverse = reverse' := Equiv.ext hr
-      cases he
-      cases ht
-      cases hp
-      rfl
 
 /-- Full semantic identity with the concrete padding and explicit reindexing. -/
 @[simp] theorem baseGraph_pad (table : Table n d) (h : n ≤ m) :
     baseGraph (pad table h) = paddedGraph table h := by
   apply constraintGraph_ext
   · exact rotation_pad table h
-  · rfl
+  · funext e
+    exact ((vertexEquiv h).apply_symm_apply e.1).symm
   · funext e a b
     exact accepts_pad table h e a b
 
@@ -178,21 +148,12 @@ theorem reverseIndex_pad_new (table : Table n d) (h : n ≤ m)
       rowIndex m d (vertexEquiv h (Sum.inr v), p) := by
   rw [← rowIndex_rotation, rotation_pad_new]
 
-private theorem relation_ext {r s : GraphTables.RelationTable}
-    (h : ∀ a b, GraphTables.relationAt r a b = GraphTables.relationAt s a b) : r = s := by
-  apply Vector.ext
-  intro i hi
-  simpa only [GraphTables.relationAt, Prod.eta, Equiv.apply_symm_apply,
-    Fin.getElem_fin] using
-    h (GraphTables.relationIndex.symm ⟨i, hi⟩).1
-      (GraphTables.relationIndex.symm ⟨i, hi⟩).2
-
 /-- The entire old 4096-bit relation row is retained. -/
 theorem relations_pad_old (table : Table n d) (h : n ≤ m)
     (v : Fin n) (p : Fin d) :
     (pad table h).relations[rowIndex m d (v.castLE h, p)] =
       table.relations[rowIndex n d (v, p)] := by
-  apply relation_ext
+  apply GraphTables.relation_ext
   intro a b
   exact accepts_pad_old table h v p a b
 
@@ -201,61 +162,26 @@ theorem relations_pad_new (table : Table n d) (h : n ≤ m)
     (v : Fin (m - n)) (p : Fin d) :
     (pad table h).relations[rowIndex m d (vertexEquiv h (Sum.inr v), p)] =
       Vector.replicate 4096 true := by
-  apply relation_ext
+  apply GraphTables.relation_ext
   intro a b
   simpa only [PortTables.accepts, GraphTables.relationAt, Fin.getElem_fin,
     Vector.getElem_replicate] using
     accepts_pad_new table h v p a b
-
-/-- Pointwise satisfaction commutes with the explicit sum-coordinate map. -/
-theorem paddedGraph_edgeSatisfied_equiv (table : Table n d) (h : n ≤ m)
-    (labeling : Fin m → Label) (e : (Fin n ⊕ Fin (m - n)) × Fin d) :
-    (paddedGraph table h).edgeSatisfied labeling (dartEquiv h e) =
-      (sumGraph table m).edgeSatisfied (fun v => labeling (vertexEquiv h v)) e := by
-  change (sumGraph table m).accepts ((dartEquiv h).symm (dartEquiv h e))
-    (labeling (dartEquiv h e).1)
-    (labeling (dartEquiv h ((sumGraph table m).reverse
-      ((dartEquiv h).symm (dartEquiv h e)))).1) =
-    (sumGraph table m).accepts e (labeling (vertexEquiv h e.1))
-      (labeling (vertexEquiv h ((sumGraph table m).reverse e).1))
-  simp only [Equiv.symm_apply_apply]
-  rfl
-
-theorem edgeSatisfied_pad_equiv (table : Table n d) (h : n ≤ m)
-    (labeling : Fin m → Label) (e : (Fin n ⊕ Fin (m - n)) × Fin d) :
-    (baseGraph (pad table h)).edgeSatisfied labeling (dartEquiv h e) =
-      (sumGraph table m).edgeSatisfied (fun v => labeling (vertexEquiv h v)) e := by
-  rw [baseGraph_pad]
-  exact paddedGraph_edgeSatisfied_equiv table h labeling e
-
-@[simp] theorem edgeSatisfied_pad_old (table : Table n d) (h : n ≤ m)
-    (labeling : Fin m → Label) (v : Fin n) (p : Fin d) :
-    (baseGraph (pad table h)).edgeSatisfied labeling (v.castLE h, p) =
-      (baseGraph table).edgeSatisfied (fun v => labeling (v.castLE h)) (v, p) := by
-  simpa only [dartEquiv_apply, vertexEquiv_inl, sumGraph,
-    VertexPadding.edgeSatisfied_inl (baseGraph table) rfl] using
-    edgeSatisfied_pad_equiv table h labeling (Sum.inl v, p)
-
-@[simp] theorem edgeSatisfied_pad_new (table : Table n d) (h : n ≤ m)
-    (labeling : Fin m → Label) (v : Fin (m - n)) (p : Fin d) :
-    (baseGraph (pad table h)).edgeSatisfied labeling (vertexEquiv h (Sum.inr v), p) = true := by
-  simpa only [dartEquiv_apply, sumGraph, VertexPadding.edgeSatisfied_inr] using
-    edgeSatisfied_pad_equiv table h labeling (Sum.inr v, p)
 
 /-- Exact occurrence counts for arbitrary labels on all old and added vertices. -/
 theorem pad_rejectionCount (table : Table n d) (h : n ≤ m)
     (labeling : Fin m → Label) :
     (baseGraph (pad table h)).rejectionCount labeling =
       (baseGraph table).rejectionCount (fun v => labeling (v.castLE h)) := by
-  classical
+  rw [baseGraph_pad]
   calc
-    (baseGraph (pad table h)).rejectionCount labeling =
+    (paddedGraph table h).rejectionCount labeling =
         (sumGraph table m).rejectionCount (fun v => labeling (vertexEquiv h v)) := by
-      unfold ConstraintGraph.rejectionCount
-      symm
-      apply Finset.card_equiv (dartEquiv h)
-      intro e
-      simp only [ConstraintGraph.mem_rejectedDarts, edgeSatisfied_pad_equiv]
+      simpa only [paddedGraph, ConstraintGraph.labelingEquiv, Equiv.arrowCongr,
+        Equiv.coe_fn_mk, Function.comp_def, Equiv.refl_apply, Equiv.apply_symm_apply] using
+        ConstraintGraph.reindex_rejectionCount (sumGraph table m)
+          (vertexEquiv h) (dartEquiv h) (Equiv.refl _)
+          (fun v => labeling (vertexEquiv h v))
     _ = (baseGraph table).rejectionCount (fun v => labeling (v.castLE h)) := by
       simpa only [sumGraph, vertexEquiv_inl] using
         VertexPadding.pad_rejectionCount (baseGraph table) rfl (m - n)
@@ -266,16 +192,8 @@ theorem pad_labeling_satisfies_iff (table : Table n d) (h : n ≤ m)
     (labeling : Fin m → Label) :
     (∀ e, (baseGraph (pad table h)).edgeSatisfied labeling e = true) ↔
       ∀ e, (baseGraph table).edgeSatisfied (fun v => labeling (v.castLE h)) e = true := by
-  constructor
-  · intro hs e
-    simpa only [edgeSatisfied_pad_old] using hs (e.1.castLE h, e.2)
-  · intro hs e
-    obtain ⟨v, hv⟩ := (vertexEquiv h).surjective e.1
-    have he : e = (vertexEquiv h v, e.2) := Prod.ext hv.symm rfl
-    rw [he]
-    cases v with
-    | inl v => simpa only [vertexEquiv_inl, edgeSatisfied_pad_old] using hs (v, e.2)
-    | inr v => exact edgeSatisfied_pad_new table h labeling v e.2
+  rw [← ConstraintGraph.rejectionCount_eq_zero_iff,
+    ← ConstraintGraph.rejectionCount_eq_zero_iff, pad_rejectionCount]
 
 /-- A computable extension uses label zero on every dummy vertex. -/
 def extendLabeling (h : n ≤ m) (labeling : Fin n → Label) : Fin m → Label :=

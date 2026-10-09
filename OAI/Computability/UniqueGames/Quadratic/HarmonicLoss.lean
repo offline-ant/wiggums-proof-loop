@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.FieldTheory.Finiteness
 import OAI.Computability.UniqueGames.Gadgets.ConcatenationLemmas
 import OAI.Computability.UniqueGames.Quadratic.OrientedRestrictionLemmas
@@ -83,18 +84,6 @@ theorem nextBlockRank_le (S : Submodule (ZMod 2) (Vec F))
     (A : FieldLine F) : nextBlockRank S g J A ≤ Module.finrank (ZMod 2) S :=
   LinearMap.finrank_range_le _
 
-/-- Changing the binary orientation of every child leaves its logical image rank unchanged. -/
-theorem nextBlockRank_independent (S : Submodule (ZMod 2) (Vec F))
-    (g : S →ₗ[ZMod 2] Vec F) (J J' : ∀ A : FieldLine F, BlockOrientation A)
-    (A : FieldLine F) : nextBlockRank S g J A = nextBlockRank S g J' A := by
-  have hk : (fieldLineRestrictions S g J A).ker =
-      (fieldLineRestrictions S g J' A).ker :=
-    ker_orientedBlockRestriction_independent S g (lineGenerator A) (J A) (J' A)
-  have hdim := (fieldLineRestrictions S g J A).finrank_range_add_finrank_ker
-  have hdim' := (fieldLineRestrictions S g J' A).finrank_range_add_finrank_ker
-  rw [hk] at hdim
-  unfold nextBlockRank
-  omega
 
 theorem generic_nextBlockRank_dichotomy (S : Submodule (ZMod 2) (Vec F))
     (g : S →ₗ[ZMod 2] Vec F) (J : ∀ A : FieldLine F, BlockOrientation A)

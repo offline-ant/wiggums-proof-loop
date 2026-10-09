@@ -1,3 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
+import OAI.Computability.UniqueGames.Decoding.CoefficientSampling
 import OAI.Computability.UniqueGames.Decoding.MaskMomentLemmas
 import OAI.Computability.UniqueGames.Decoding.UpperBound
 
@@ -41,10 +43,7 @@ def singletonSet {k : ℕ} (seed : SparseSeed k R) : Finset (Fin k) :=
 
 def coefficients {k : ℕ} (extra : Additional k R) (seed : SparseSeed k R) :
     RawCoefficients (singletonSet seed) (Coefficient R) :=
-  fun slot => match slot with
-  | none => extra.1
-  | some (.inl (i, j)) => if j = 0 then (extra.2 i.val).1 else (extra.2 i.val).2
-  | some (.inr i) => (seed i.val).2
+  CoefficientSampling.selectCoefficients (singletonSet seed) extra (fun i => (seed i).2)
 
 omit [DecidableEq R] in
 /-- The actual zero coefficient set is exactly the clean mask counted by the
@@ -55,7 +54,7 @@ theorem zeroSet_eq_cleanMask {k : ℕ} (extra : Additional k R) (seed : SparseSe
   classical
   ext i
   rw [mem_zeroSet]
-  simp [singletonSet, coefficients, cleanBit]
+  simp [singletonSet, coefficients, CoefficientSampling.selectCoefficients, cleanBit]
   intro _
   rfl
 
@@ -120,26 +119,6 @@ theorem success_le_of_repetition (k : ℕ) (μ : FiniteDistribution (O × Fin 3)
         _ = _ := clean_mask_moment β hβ₀ hβ₁ (ZeroInformation.zero : Coefficient R) k ρ
     _ = _ := expectation_const _ _
 
-/-- Uniform finite private/shared strategy seeds are also covered by the same
-constant bound; the seed is sampled before the questions. -/
-theorem randomized_success_le_of_repetition {Seed : Type*} [Fintype Seed]
-    (k : ℕ) (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N)
-    (extraLaw : FiniteDistribution (Additional k R))
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (seedLaw : FiniteDistribution Seed)
-    (strategy : Seed → Additional k R → SparseSeed k R → LocalStrategies k R O N)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (ρ : ℝ)
-    (rate : ∀ n, ((incidenceGame g (μ.pushforward (incidence g.name))).repetition n).value ≤ ρ ^ n) :
-    seedLaw.expectation (fun seed => success k μ g extraLaw β hβ₀ hβ₁ (strategy seed)) ≤
-      (1 - (β / (Fintype.card (Coefficient R) : ℝ)) * (1 - ρ)) ^ k := by
-  calc
-    _ ≤ seedLaw.expectation (fun _ =>
-      (1 - (β / (Fintype.card (Coefficient R) : ℝ)) * (1 - ρ)) ^ k) :=
-      expectation_mono _ (fun seed =>
-        success_le_of_repetition k μ g extraLaw β hβ₀ hβ₁ (strategy seed) distinct ρ rate)
-    _ = _ := expectation_const _ _
 
 end
 end UniqueGamesTheorem.Clean.Experiment

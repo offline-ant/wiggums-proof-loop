@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Reduction.AddressMachineSpace
 
@@ -39,20 +40,18 @@ abbrev Label := MachineDrainMany.Label (loadedFields k s d noiseCount)
 noncomputable abbrev cleared (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :=
   MachineDrainMany.finalTapes (loadedFields k s d noiseCount) base
 
-/-- Proof-side cost on the shared arena. Its arithmetic-header tape dimensions
-use the fixed polynomial coefficient representation in `PolynomialMachine`.
-The executable drain list, entry, and instructions do not evaluate this cost. -/
-noncomputable abbrev steps (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :=
-  MachineDrainMany.steps (loadedFields k s d noiseCount) base
-
 noncomputable abbrev budget (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :=
   MachineDrainMany.lengthSum (loadedFields k s d noiseCount) base + 4 * k
 
-@[simp] theorem cleared_field (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (position : Fin k) (slot : Fin 4) :
-    cleared k s d noiseCount base (.field position slot) = [] :=
-  MachineDrainMany.finalTapes_mem (loadedFields k s d noiseCount) base (.field position slot)
-    ((mem_loadedFields k s d noiseCount _).2 ⟨position, slot, rfl⟩)
+/-- Cleanup has one pointwise normal form: erase fields and preserve every other tape. -/
+@[simp] theorem cleared_apply (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
+    (tape : AddressMachineSpace.Tape k s d noiseCount) :
+    cleared k s d noiseCount base tape =
+      match tape with
+      | .field _ _ => []
+      | _ => base tape := by
+  rw [cleared, MachineDrainMany.finalTapes_apply]
+  cases tape <;> simp [mem_loadedFields]
 
 /-- Every tape outside the physical loaded fields is preserved verbatim. -/
 theorem cleared_outside (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
@@ -63,90 +62,6 @@ theorem cleared_outside (base : AddressMachineSpace.Tape k s d noiseCount → Li
   intro h
   obtain ⟨position, slot, same⟩ := (mem_loadedFields k s d noiseCount tape).1 h
   exact outside position slot same
-
-@[simp] theorem cleared_source (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base .source = base .source := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_savedIndex
-    (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) (position : Fin k) :
-    cleared k s d noiseCount base (.savedIndex position) = base (.savedIndex position) := by
-  apply cleared_outside
-  intro other slot h
-  cases h
-
-@[simp] theorem cleared_extra (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (extra : AddressMachineSpace.Extra k s d noiseCount) :
-    cleared k s d noiseCount base (.extra extra) = base (.extra extra) := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_index (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base .index = base .index := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_work (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base .work = base .work := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_scratch (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base .scratch = base .scratch := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_copyScratch (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base .copyScratch = base .copyScratch := by
-  apply cleared_outside
-  intro position slot h
-  cases h
-
-@[simp] theorem cleared_headerTape
-    (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (header : MachineAddressHeaders.Arithmetic.Control) :
-    cleared k s d noiseCount base (AddressMachineSpace.headerTape k s d noiseCount header) =
-      base (AddressMachineSpace.headerTape k s d noiseCount header) := by
-  simpa only [AddressMachineSpace.headerTape, AddressMachineSpace.headerArithmeticSlots] using
-    cleared_extra k s d noiseCount base (.inl (.inl header))
-
-@[simp] theorem cleared_current (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (position : Fin k) :
-    cleared k s d noiseCount base (AddressMachineSpace.current k s d noiseCount position) =
-      base (AddressMachineSpace.current k s d noiseCount position) := by
-  simpa only [AddressMachineSpace.current] using
-    cleared_savedIndex k s d noiseCount base position.rev
-
-@[simp] theorem cleared_remaining (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (position : Fin k) :
-    cleared k s d noiseCount base (AddressMachineSpace.remaining k s d noiseCount position) =
-      base (AddressMachineSpace.remaining k s d noiseCount position) := by
-  simpa only [AddressMachineSpace.remaining] using
-    cleared_extra k s d noiseCount base (.inr (.inr (.inl position)))
-
-@[simp] theorem cleared_finalOutput
-    (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    cleared k s d noiseCount base (AddressMachineSpace.finalOutput k s d noiseCount) =
-      base (AddressMachineSpace.finalOutput k s d noiseCount) := by
-  simpa only [AddressMachineSpace.finalOutput] using
-    cleared_extra k s d noiseCount base (.inr (.inr (.inr ())))
-
-theorem steps_le (base : AddressMachineSpace.Tape k s d noiseCount → List Bool) :
-    steps k s d noiseCount base ≤ budget k s d noiseCount base := by
-  simpa only [loadedFields_length] using
-    MachineDrainMany.steps_le (loadedFields k s d noiseCount) base
-
-theorem steps_le_uniform (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (bound : Nat) (h : ∀ tape, (base tape).length ≤ bound) :
-    steps k s d noiseCount base ≤ 4 * k * (bound + 1) := by
-  simpa only [loadedFields_length] using
-    MachineDrainMany.steps_le_uniform (loadedFields k s d noiseCount) base bound h
 
 variable {Λ : Type}
 
@@ -159,31 +74,6 @@ def instruction (labels : Label k s d noiseCount → Λ) (exit : Option Λ) :
       (fun _ : AddressMachineSpace.Tape k s d noiseCount => Bool) Λ (AddressMachineSpace.State k) :=
   MachineDrainMany.instruction (loadedFields k s d noiseCount) labels exit
 
-theorem trace (labels : Label k s d noiseCount → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : AddressMachineSpace.Tape k s d noiseCount => Bool)
-      Λ (AddressMachineSpace.State k))
-    (atLabels : ∀ l, program (labels l) = instruction k s d noiseCount labels exit l)
-    (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (control : AddressMachineSpace.Control k) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step program))^[steps k s d noiseCount base]
-      (some ⟨entry k s d noiseCount labels exit, (control, register), base⟩) =
-    some ⟨exit, (control, MachineDrainMany.finalRegister (loadedFields k s d noiseCount) register),
-      cleared k s d noiseCount base⟩ :=
-  MachineDrainMany.trace (loadedFields k s d noiseCount) labels exit program atLabels
-    base control register
-
-theorem trace_clean (labels : Label k s d noiseCount → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : AddressMachineSpace.Tape k s d noiseCount => Bool)
-      Λ (AddressMachineSpace.State k))
-    (atLabels : ∀ l, program (labels l) = instruction k s d noiseCount labels exit l)
-    (base : AddressMachineSpace.Tape k s d noiseCount → List Bool)
-    (control : AddressMachineSpace.Control k) :
-    (MachineComposition.advance (TM2.step program))^[steps k s d noiseCount base]
-      (some ⟨entry k s d noiseCount labels exit, (control, none), base⟩) =
-    some ⟨exit, (control, none), cleared k s d noiseCount base⟩ := by
-  simpa only [MachineDrainMany.finalRegister_none] using
-    trace k s d noiseCount labels exit program atLabels base control none
-
 noncomputable def execution (labels : Label k s d noiseCount → Λ) (exit : Option Λ)
     (program : Λ → TM2.Stmt (fun _ : AddressMachineSpace.Tape k s d noiseCount => Bool)
       Λ (AddressMachineSpace.State k))
@@ -194,10 +84,10 @@ noncomputable def execution (labels : Label k s d noiseCount → Λ) (exit : Opt
       ⟨entry k s d noiseCount labels exit, (control, register), base⟩
       (some ⟨exit,
         (control, MachineDrainMany.finalRegister (loadedFields k s d noiseCount) register),
-        cleared k s d noiseCount base⟩) (budget k s d noiseCount base) where
-  steps := steps k s d noiseCount base
-  evals_in_steps := trace k s d noiseCount labels exit program atLabels base control register
-  steps_le_m := steps_le k s d noiseCount base
+        cleared k s d noiseCount base⟩) (budget k s d noiseCount base) := by
+  simpa only [loadedFields_length] using
+    MachineDrainMany.execution (loadedFields k s d noiseCount) labels exit program atLabels
+      base control register
 
 end UniqueGamesTheorem.Integration.AddressTupleCleanup
 
@@ -213,55 +103,6 @@ abbrev Arena (k s d noiseCount : Nat) := AddressMachineSpace.Tape k s d noiseCou
 
 variable {k s d noiseCount : Nat}
 
-/-- The explicit field assignment performed by all `k` real lookup stages.
-Unrelated tapes, including the loader's empty index/work tapes, are unchanged. -/
-def fieldAssignment (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) : Arena k s d noiseCount → List Bool
-  | .field j slot => encodeWord
-      ((SourceEncoding.equationWords F.equations[(tuple j).val])[slot.val]'(by simp)) ++
-        baseArena (.field j slot)
-  | tape => baseArena tape
-
-theorem stageTapes_eq (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hindex : baseArena .index = []) (hwork : baseArena .work = []) :
-    MachineSourceTuple.stageTapes F tuple baseArena k = fieldAssignment F tuple baseArena := by
-  funext tape
-  cases tape with
-  | index => exact (MachineSourceTuple.stageTapes_clean F tuple baseArena k hindex hwork).1.trans hindex.symm
-  | work => exact (MachineSourceTuple.stageTapes_clean F tuple baseArena k hindex hwork).2.trans hwork.symm
-  | field j slot =>
-    simp only [MachineSourceTuple.stageTapes_field, ite_eq_left j.isLt, fieldAssignment]
-  | source =>
-    exact MachineSourceTuple.stageTapes_frame F tuple baseArena k _
-      (by simp) (by simp) (by intros; simp)
-  | scratch =>
-    exact MachineSourceTuple.stageTapes_frame F tuple baseArena k _
-      (by simp) (by simp) (by intros; simp)
-  | copyScratch =>
-    exact MachineSourceTuple.stageTapes_frame F tuple baseArena k _
-      (by simp) (by simp) (by intros; simp)
-  | savedIndex j =>
-    exact MachineSourceTuple.stageTapes_frame F tuple baseArena k _
-      (by simp) (by simp) (by intros; simp)
-  | extra value =>
-    exact MachineSourceTuple.stageTapes_frame F tuple baseArena k _
-      (by simp) (by simp) (by intros; simp)
-
-theorem fieldAssignment_frame (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) (tape : Arena k s d noiseCount)
-    (hfield : ∀ j slot, tape ≠ .field j slot) :
-    fieldAssignment F tuple baseArena tape = baseArena tape := by
-  cases tape <;> simp_all [fieldAssignment]
-
-theorem loaded_frame (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hindex : baseArena .index = []) (hwork : baseArena .work = [])
-    (tape : Arena k s d noiseCount) (hfield : ∀ j slot, tape ≠ .field j slot) :
-    MachineSourceTuple.stageTapes F tuple baseArena k tape = baseArena tape := by
-  rw [stageTapes_eq F tuple baseArena hindex hwork]
-  exact fieldAssignment_frame F tuple baseArena tape hfield
-
 theorem loaded_field (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (baseArena : Arena k s d noiseCount → List Bool)
     (hempty : ∀ j slot, baseArena (.field j slot) = []) (j : Fin k) (slot : Fin 4) :
@@ -269,11 +110,6 @@ theorem loaded_field (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equatio
       encodeWord ((SourceEncoding.equationWords F.equations[(tuple j).val])[slot.val]'(by simp)) := by
   rw [MachineSourceTuple.stageTapes_field, ite_eq_left j.isLt, hempty, List.append_nil]
 
-theorem loaded_source (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hsource : baseArena .source = SourceEncoding.inputBits F) :
-    MachineSourceTuple.stageTapes F tuple baseArena k .source = SourceEncoding.inputBits F :=
-  (MachineSourceTuple.output_source F tuple baseArena).trans hsource
 
 theorem loaded_extra (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (baseArena : Arena k s d noiseCount → List Bool)
@@ -298,49 +134,6 @@ theorem loaded_radix (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equatio
         .radix) = encodeWord B := by
   rw [AddressMachineSpace.addressSlots_radix, loaded_header, hB]
 
-theorem loaded_capacity (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) (C : Nat)
-    (hC : baseArena (AddressMachineSpace.headerTape k s d noiseCount .capacity) = encodeWord C) :
-    MachineSourceTuple.stageTapes F tuple baseArena k
-      (MachineAddressEdge.capacityTape (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) =
-        encodeWord C := by
-  rw [AddressMachineSpace.addressSlots_capacity, loaded_header, hC]
-
-theorem loaded_current (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) (j : Fin k) :
-    MachineSourceTuple.stageTapes F tuple baseArena k
-      (AddressMachineSpace.current k s d noiseCount j) =
-        baseArena (AddressMachineSpace.current k s d noiseCount j) :=
-  MachineSourceTuple.output_savedIndex F tuple baseArena j.rev
-
-theorem loaded_remaining (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) (j : Fin k) :
-    MachineSourceTuple.stageTapes F tuple baseArena k
-      (AddressMachineSpace.remaining k s d noiseCount j) =
-        baseArena (AddressMachineSpace.remaining k s d noiseCount j) :=
-  loaded_extra F tuple baseArena _
-
-theorem loaded_finalOutput (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool) :
-    MachineSourceTuple.stageTapes F tuple baseArena k
-      (AddressMachineSpace.finalOutput k s d noiseCount) =
-        baseArena (AddressMachineSpace.finalOutput k s d noiseCount) :=
-  loaded_extra F tuple baseArena _
-
-theorem loaded_loaderWork (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hindex : baseArena .index = []) (hwork : baseArena .work = [])
-    (hscratch : baseArena .scratch = []) (hcopy : baseArena .copyScratch = []) :
-    MachineSourceTuple.stageTapes F tuple baseArena k .index = [] ∧
-      MachineSourceTuple.stageTapes F tuple baseArena k .work = [] ∧
-      MachineSourceTuple.stageTapes F tuple baseArena k .scratch = [] ∧
-      MachineSourceTuple.stageTapes F tuple baseArena k .copyScratch = [] := by
-  have clean := MachineSourceTuple.stageTapes_clean F tuple baseArena k hindex hwork
-  refine ⟨clean.1, clean.2, ?_, ?_⟩
-  · exact (MachineSourceTuple.stageTapes_frame F tuple baseArena k .scratch
-      (by simp) (by simp) (by intros; simp)).trans hscratch
-  · exact (MachineSourceTuple.stageTapes_frame F tuple baseArena k .copyScratch
-      (by simp) (by simp) (by intros; simp)).trans hcopy
 
 theorem loaded_privateAddress (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (baseArena : Arena k s d noiseCount → List Bool)
@@ -371,30 +164,6 @@ theorem loaded_clean (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equatio
       exact (loaded_privateAddress F tuple baseArena (.digit j)).trans (clean.address.digit j)
   · exact (loaded_privateAddress F tuple baseArena .output).trans clean.work
 
-theorem loaded_rhs (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hempty : ∀ j slot, baseArena (.field j slot) = []) (j : Fin k) :
-    MachineSourceTuple.stageTapes F tuple baseArena k
-      (AddressMachineSpace.rhsField k s d noiseCount j) =
-        encodeWord (if F.equations[(tuple j).val].rhs then 1 else 0) := by
-  rw [AddressMachineSpace.tupleOutput_rhs]
-  change _ ++ baseArena (.field j 3) = _
-  rw [hempty, List.append_nil]
-
-theorem loaded_name (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hempty : ∀ j slot, baseArena (.field j slot) = []) (j : Fin k) (slot : Fin 3) :
-    MachineSourceTuple.stageTapes F tuple baseArena k (MachineSourceTuple.nameField j slot) =
-      encodeWord (MachineSourceTuple.equationName F.equations[(tuple j).val] slot) := by
-  rw [MachineSourceTuple.output_name]
-  change _ ++ baseArena (.field j (MachineSourceTuple.nameSlot slot)) = _
-  rw [hempty, List.append_nil]
-
-theorem loaded_occurrence (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (baseArena : Arena k s d noiseCount → List Bool)
-    (hsaved : ∀ j, baseArena (.savedIndex j) = encodeWord (tuple j).val) (j : Fin k) :
-    MachineSourceTuple.stageTapes F tuple baseArena k (.savedIndex j) = encodeWord (tuple j).val :=
-  MachineSourceTuple.output_savedIndex_unary F tuple baseArena hsaved j
 
 def canonicalValues (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (j : Fin k) : Fin 4 → Nat :=
@@ -410,18 +179,10 @@ theorem loaded_canonicalField (F : SourceEncoding.Input) (tuple : Fin k → Fin 
     MachineSourceTuple.stageTapes F tuple baseArena k
       (AddressMachineSpace.canonicalField k s d noiseCount j slot) =
         encodeWord (canonicalValues F tuple j slot) := by
-  fin_cases slot
-  · simpa [AddressMachineSpace.canonicalField, canonicalValues, CanonicalBodyTemplate.recordFields,
-      MachineSourceTuple.nameField, MachineSourceTuple.nameSlot, MachineSourceTuple.equationName] using
-      loaded_name F tuple baseArena hempty j 0
-  · simpa [AddressMachineSpace.canonicalField, canonicalValues, CanonicalBodyTemplate.recordFields,
-      MachineSourceTuple.nameField, MachineSourceTuple.nameSlot, MachineSourceTuple.equationName] using
-      loaded_name F tuple baseArena hempty j 1
-  · simpa [AddressMachineSpace.canonicalField, canonicalValues, CanonicalBodyTemplate.recordFields,
-      MachineSourceTuple.nameField, MachineSourceTuple.nameSlot, MachineSourceTuple.equationName] using
-      loaded_name F tuple baseArena hempty j 2
-  · simpa [AddressMachineSpace.canonicalField, canonicalValues, CanonicalBodyTemplate.recordFields] using
-      loaded_occurrence F tuple baseArena hsaved j
+  fin_cases slot <;>
+    simp [AddressMachineSpace.canonicalField, canonicalValues, CanonicalBodyTemplate.recordFields,
+      loaded_field F tuple baseArena hempty, MachineSourceTuple.output_savedIndex, hsaved,
+      MachineSourceTuple.equationName, SourceEncoding.equationWords]
 
 /-- Literal input function used by the generic field-template machine. -/
 theorem loaded_savedFields (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
@@ -494,22 +255,14 @@ theorem cleared_appended (base : Arena k s d noiseCount → List Bool) (bits : L
   simp [AddressMachineSpace.addressSlots_output, AddressMachineSpace.headerTape]
 
 /-- Cleanup erases exactly the fields assigned by the tuple loader. -/
-theorem cleared_fieldAssignment (F : SourceEncoding.Input)
-    (tuple : Fin k → Fin F.equations.length) (base : Arena k s d noiseCount → List Bool)
-    (hfields : ∀ j slot, base (.field j slot) = []) :
-    AddressTupleCleanup.cleared k s d noiseCount
-      (AddressTupleLoaded.fieldAssignment F tuple base) = base := by
-  funext tape
-  cases tape <;> simp [AddressTupleLoaded.fieldAssignment, hfields]
-
 theorem cleared_loaded (F : SourceEncoding.Input)
     (tuple : Fin k → Fin F.equations.length) (base : Arena k s d noiseCount → List Bool)
     (hindex : base .index = []) (hwork : base .work = [])
     (hfields : ∀ j slot, base (.field j slot) = []) :
     AddressTupleCleanup.cleared k s d noiseCount
       (MachineSourceTuple.stageTapes F tuple base k) = base := by
-  rw [AddressTupleLoaded.stageTapes_eq F tuple base hindex hwork]
-  exact cleared_fieldAssignment F tuple base hfields
+  funext tape
+  cases tape <;> simp [MachineSourceTuple.stageTapes, hindex, hwork, hfields]
 
 /-- Exact endpoint of load, edge-byte append, and actual loaded-field cleanup. -/
 theorem cleared_appended_loaded (F : SourceEncoding.Input)
@@ -522,92 +275,6 @@ theorem cleared_appended_loaded (F : SourceEncoding.Input)
       MachineAddressEdge.appended (AddressMachineSpace.addressEdgeSlots k s d noiseCount)
         base bits := by
   rw [cleared_appended, cleared_loaded F tuple base hindex hwork hfields]
-
-/-- Literal final arena; this abbreviation contains no execution assumption. -/
-noncomputable abbrev finalTapes (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (base : Arena k s d noiseCount → List Bool) (bits : List Bool) :
-    Arena k s d noiseCount → List Bool :=
-  AddressTupleCleanup.cleared k s d noiseCount
-    (MachineAddressEdge.appended (AddressMachineSpace.addressEdgeSlots k s d noiseCount)
-      (MachineSourceTuple.stageTapes F tuple base k) bits)
-
-section Frame
-
-variable (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-  (base : Arena k s d noiseCount → List Bool)
-  (hindex : base .index = []) (hwork : base .work = [])
-  (hfields : ∀ j slot, base (.field j slot) = []) (bits : List Bool)
-
-include hindex hwork hfields
-
-theorem finalTapes_other (tape : Arena k s d noiseCount)
-    (hne : tape ≠ MachineAddressEdge.outputTape
-      (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) :
-    finalTapes F tuple base bits tape = base tape := by
-  rw [finalTapes, cleared_appended_loaded F tuple base hindex hwork hfields bits]
-  exact MachineAddressEdge.appended_other _ base bits tape hne
-
-theorem finalTapes_source : finalTapes F tuple base bits .source = base .source := by
-  apply finalTapes_other F tuple base hindex hwork hfields bits
-  simp [AddressMachineSpace.addressSlots_output, AddressMachineSpace.headerTape]
-
-theorem finalTapes_current (j : Fin k) :
-    finalTapes F tuple base bits (AddressMachineSpace.current k s d noiseCount j) =
-      base (AddressMachineSpace.current k s d noiseCount j) := by
-  apply finalTapes_other F tuple base hindex hwork hfields bits
-  simpa only [AddressMachineSpace.addressSlots_output] using
-    (AddressMachineSpace.headerTape_ne_current k s d noiseCount .reversed j).symm
-
-theorem finalTapes_remaining (j : Fin k) :
-    finalTapes F tuple base bits (AddressMachineSpace.remaining k s d noiseCount j) =
-      base (AddressMachineSpace.remaining k s d noiseCount j) := by
-  apply finalTapes_other F tuple base hindex hwork hfields bits
-  simpa only [AddressMachineSpace.addressSlots_output] using
-    (AddressMachineSpace.headerTape_ne_remaining k s d noiseCount .reversed j).symm
-
-/-- All arithmetic headers except the reversed-output tape remain literal. -/
-theorem finalTapes_header (header : MachineAddressHeaders.Arithmetic.Control)
-    (hne : header ≠ .reversed) :
-    finalTapes F tuple base bits (AddressMachineSpace.headerTape k s d noiseCount header) =
-      base (AddressMachineSpace.headerTape k s d noiseCount header) := by
-  apply finalTapes_other F tuple base hindex hwork hfields bits
-  intro same
-  apply hne
-  exact (AddressMachineSpace.headerTape_eq_iff k s d noiseCount header .reversed).mp same
-
-theorem finalTapes_radix :
-    finalTapes F tuple base bits (MachineAddressEdge.addressSlots
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount) .radix) =
-      base (MachineAddressEdge.addressSlots
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount) .radix) := by
-  rw [finalTapes, cleared_appended_loaded F tuple base hindex hwork hfields bits]
-  exact MachineAddressEdge.appended_address _ base bits .radix
-
-theorem finalTapes_capacity :
-    finalTapes F tuple base bits (MachineAddressEdge.capacityTape
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) =
-      base (MachineAddressEdge.capacityTape
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) := by
-  rw [finalTapes, cleared_appended_loaded F tuple base hindex hwork hfields bits]
-  exact MachineAddressEdge.appended_capacity _ base bits
-
-theorem finalTapes_output :
-    finalTapes F tuple base bits (MachineAddressEdge.outputTape
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) =
-      bits.reverse ++ base (MachineAddressEdge.outputTape
-        (AddressMachineSpace.addressEdgeSlots k s d noiseCount)) := by
-  rw [finalTapes, cleared_appended_loaded F tuple base hindex hwork hfields bits]
-  exact MachineAddressEdge.appended_output _ base bits
-
-theorem finalTapes_clean
-    (clean : MachineAddressEdge.Clean
-      (AddressMachineSpace.addressEdgeSlots k s d noiseCount) base) :
-    MachineAddressEdge.Clean (AddressMachineSpace.addressEdgeSlots k s d noiseCount)
-      (finalTapes F tuple base bits) := by
-  rw [finalTapes, cleared_appended_loaded F tuple base hindex hwork hfields bits]
-  exact MachineAddressEdge.Clean.appended _ base clean bits
-
-end Frame
 
 end UniqueGamesTheorem.Integration.AddressTupleFrame
 

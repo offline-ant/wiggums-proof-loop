@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.TableKeysGame
 import OAI.Computability.UniqueGames.Reduction.EncodingLemmas
 import OAI.Computability.UniqueGames.Reduction.RealTargetLemmas
@@ -58,20 +59,6 @@ theorem explicitToAddress_injective (S : Source) (k s d : Nat) :
       vertexAddress S k s d v := by
   simp only [explicitToAddress, Equiv.symm_apply_apply]
 
-noncomputable def semanticToAddress (S : Source) (k s d : Nat) :
-    Fin (TableKeysGame.vertexCount S k s d) → Fin (vertexCount S k s d) :=
-  fun i => vertexAddress S k s d ((TableKeysGame.vertexEncoding S k s d).symm i)
-
-theorem semanticToAddress_injective (S : Source) (k s d : Nat) :
-    Function.Injective (semanticToAddress S k s d) :=
-  (vertexAddress_injective S k s d).comp
-    (TableKeysGame.vertexEncoding S k s d).symm.injective
-
-@[simp] theorem semanticToAddress_apply (S : Source) (k s d : Nat)
-    (v : TableKeysGame.Vertex S k s d) :
-    semanticToAddress S k s d (TableKeysGame.vertexEncoding S k s d v) =
-      vertexAddress S k s d v := by
-  simp only [semanticToAddress, Equiv.symm_apply_apply]
 
 def addressEdge (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d)
     (ω : TableKeysGame.Outcome S k g) : Constraint (vertexCount S k s d) (2^s) where
@@ -88,12 +75,6 @@ theorem addressEdge_eq_embed (S : Source) (k : Nat) {s d : Nat}
   simp only [addressEdge, embedConstraint, TableKeysGame.explicitEdge,
     explicitToAddress_apply, vertexAddress_query]
 
-theorem addressEdge_eq_semantic_embed (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (ω : TableKeysGame.Outcome S k g) :
-    addressEdge S k g ω = embedConstraint (semanticToAddress S k s d)
-      (TableKeysGame.edge S k g ω) := by
-  simp only [addressEdge, embedConstraint, TableKeysGame.edge,
-    semanticToAddress_apply, vertexAddress_query]
 
 /-- The correcting function is not evaluated when producing an edge list. -/
 def outputInstance (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d)
@@ -107,15 +88,6 @@ def outputInstance (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d)
     rw [hempty]
     rfl
 
-/-- Every occurrence, its order, and its full permutation table are retained. -/
-theorem outputInstance_eq_embed (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    outputInstance S k g en =
-      embedInstance (TableKeysGame.outputInstanceWithEnumeration S k g en)
-        (explicitToAddress S k s d) (explicitToAddress_injective S k s d) := by
-  unfold outputInstance embedInstance TableKeysGame.outputInstanceWithEnumeration
-  congr 1
-  simp only [List.map_map, Function.comp_def, ← addressEdge_eq_embed]
 
 @[simp] theorem outputInstance_length (S : Source) (k : Nat) {s d : Nat}
     (g : SplitGadget s d) (en : NoiseEnumeration g) :
@@ -135,33 +107,6 @@ theorem outputInstance_count (S : Source) (k : Nat) {s d : Nat}
     count_map (explicitToAddress S k s d)
       ((ActualGame.explicitOutcomes S k g en).map (TableKeysGame.explicitEdge S k g)) labeling
 
-theorem completeAt_outputInstance_iff_explicit (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    CompleteAt error (outputInstance S k g en) ↔
-      CompleteAt error (TableKeysGame.outputInstanceWithEnumeration S k g en) := by
-  rw [outputInstance_eq_embed]
-  exact completeAt_embed_iff error _ _ _ (by positivity)
-
-theorem soundAt_outputInstance_iff_explicit (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    SoundAt error (outputInstance S k g en) ↔
-      SoundAt error (TableKeysGame.outputInstanceWithEnumeration S k g en) := by
-  rw [outputInstance_eq_embed]
-  exact soundAt_embed_iff error _ _ _ (by positivity)
-
-theorem completeAt_outputInstance_iff (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    CompleteAt error (outputInstance S k g en) ↔
-      CompleteAt error (TableKeysGame.outputInstance S k g) :=
-  (completeAt_outputInstance_iff_explicit error S k g en).trans
-    (TableKeysGame.completeAt_outputInstanceWithEnumeration_iff error S k g en)
-
-theorem soundAt_outputInstance_iff (error : RationalError)
-    (S : Source) (k : Nat) {s d : Nat} (g : SplitGadget s d) (en : NoiseEnumeration g) :
-    SoundAt error (outputInstance S k g en) ↔
-      SoundAt error (TableKeysGame.outputInstance S k g) :=
-  (soundAt_outputInstance_iff_explicit error S k g en).trans
-    (TableKeysGame.soundAt_outputInstanceWithEnumeration_iff error S k g en)
 
 theorem outputInstance_translations (S : Source) (k : Nat) {s d : Nat}
     (g : SplitGadget s d) (en : NoiseEnumeration g) :
@@ -194,32 +139,12 @@ theorem tableOutput_eq_with_witness (S : Source) (k : Nat) {s d : Nat}
       (Integration.TableReduction.tableEnumeration T f hf) := by
   rfl
 
-theorem completeAt_tableOutput_iff (error : RationalError) (S : Source) (k : Nat)
-    {s d : Nat} (T : Integration.NoiseTables.Table s d)
-    (f : Ambient s d → Alphabet s) (hf : ∀ x c, f (x + (c, 0)) = f x + c) :
-    CompleteAt error (tableOutput S k T) ↔
-      CompleteAt error (TableKeysGame.outputInstance S k (T.gadget f hf)) := by
-  rw [tableOutput_eq_with_witness S k T f hf]
-  exact completeAt_outputInstance_iff error S k _ _
-
-theorem soundAt_tableOutput_iff (error : RationalError) (S : Source) (k : Nat)
-    {s d : Nat} (T : Integration.NoiseTables.Table s d)
-    (f : Ambient s d → Alphabet s) (hf : ∀ x c, f (x + (c, 0)) = f x + c) :
-    SoundAt error (tableOutput S k T) ↔
-      SoundAt error (TableKeysGame.outputInstance S k (T.gadget f hf)) := by
-  rw [tableOutput_eq_with_witness S k T f hf]
-  exact soundAt_outputInstance_iff error S k _ _
 
 theorem tableOutput_translations (S : Source) (k : Nat) {s d : Nat}
     (T : Integration.NoiseTables.Table s d) :
     Integration.TranslationTarget.IsTranslationInstance (Encoding.alphabetEquiv s).symm
       (tableOutput S k T) := outputInstance_translations S k _ _
 
-/-- Exact polynomial capacity, without the legacy two-side factor. -/
-theorem vertexCount_eq_polynomial (S : Source) (k s d : Nat) :
-    vertexCount S k s d = (CanonicalAddress.capacityPolynomial k s d).eval
-      (S.variables + S.occurrences) := by
-  rw [CanonicalAddress.capacityPolynomial_eval]
 
 end UniqueGamesTheorem.Decoder.TableKeysAddressGame
 

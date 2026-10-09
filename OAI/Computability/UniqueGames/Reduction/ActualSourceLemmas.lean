@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.LinearAlgebra.Basis.VectorSpace
@@ -39,13 +40,6 @@ def Source.ofList {n : Nat} (es : List (CloneGap.Equation (Fin n)))
 @[simp] theorem Source.sourceList_length (S : Source) :
     S.sourceList.length = S.occurrences := by simp [Source.sourceList]
 
-theorem Source.sourceList_nonempty (S : Source) : S.sourceList ≠ [] := by
-  intro h
-  have hp := S.nonempty
-  have hn := S.sourceList_length
-  rw [h] at hn
-  simp only [List.length_nil] at hn
-  omega
 
 instance sourceIndexNonempty (S : Source) : Nonempty (Fin S.occurrences) :=
   ⟨⟨0, S.nonempty⟩⟩
@@ -89,17 +83,6 @@ def SplitGadget.kernelError {s d p : Nat} (g : SplitGadget s d)
     (S : Ambient s d →ₗ[F2] UniqueGamesTheorem.Integration.BinaryLinear.Vector p) : ℚ :=
   Finset.univ.expect (fun i => if S (g.noise i) = 0 then (1 : ℚ) else 0)
 
-theorem SplitGadget.stabilityError_nonneg {s d : Nat} (g : SplitGadget s d) :
-    0 ≤ g.stabilityError := by
-  apply Finset.expect_nonneg
-  intro x _
-  split <;> norm_num
-
-theorem SplitGadget.stabilityError_le_one {s d : Nat} (g : SplitGadget s d) :
-    g.stabilityError ≤ 1 := by
-  apply Finset.expect_le Finset.univ_nonempty
-  intro x _
-  split <;> norm_num
 
 end UniqueGamesTheorem.Reduction.ActualSource
 
@@ -142,13 +125,6 @@ noncomputable def kernelProbability {s d : Nat} (g : SplitGadget s d)
   classical
   exact Finset.univ.expect (fun i => if S (g.noise i) = 0 then (1 : ℚ) else 0)
 
-theorem kernelProbability_eq_kernelError {s d p : Nat} (g : SplitGadget s d)
-    (S : Ambient s d →ₗ[F2] Vector p) :
-    kernelProbability g S = g.kernelError S := by
-  unfold kernelProbability SplitGadget.kernelError
-  congr 1
-  funext i
-  by_cases h : S (g.noise i) = 0 <;> simp_all
 
 /-- Move all ambient vectors through a linear equivalence, retaining the same
 noise indices and their multiplicities. -/
@@ -175,16 +151,6 @@ theorem transport_stabilityError {s d : Nat} (g : Data (Vector s))
   intro x
   simp [transport, failureIndicator, map_add]
 
-/-- Every zero-image probability is invariant under the same coordinate change. -/
-theorem transport_kernelError {s d p : Nat} (g : Data (Vector s))
-    (φ : g.Ambient ≃ₗ[F2] Ambient s d)
-    (he : ∀ c, φ (g.embed c) = (c, 0))
-    (S : Ambient s d →ₗ[F2] Vector p) :
-    (transport g φ he).kernelError S = kernelError g (S.comp φ.toLinearMap) := by
-  unfold SplitGadget.kernelError kernelError Gadget.ActualGadget.kernelIndicator
-  congr 1
-  funext i
-  by_cases h : S (φ (g.noise i)) = 0 <;> simp_all [transport]
 
 /-- The restriction to the symbol space is exactly the same linear map. -/
 theorem transport_symbol_map {s d : Nat} (g : Data (Vector s))
@@ -207,34 +173,6 @@ theorem transport_kernelProbability {s d : Nat} (g : Data (Vector s))
       kernelError g (S.comp φ.toLinearMap) := by
   rfl
 
-/-- Both numerical gadget guarantees survive the coordinate change. -/
-theorem transport_satisfies {s d : Nat} (g : Data (Vector s))
-    (φ : g.Ambient ≃ₗ[F2] Ambient s d)
-    (he : ∀ c, φ (g.embed c) = (c, 0))
-    {ζ ν : ℚ} {r : Nat} (hg : Satisfies g ζ ν r) :
-    (transport g φ he).stabilityError ≤ ζ ∧
-      ∀ p (S : Ambient s d →ₗ[F2] Vector p),
-        r ≤ Module.finrank F2 (S.comp (alphabetEmbedding s d)).range →
-        (transport g φ he).kernelError S ≤ ν := by
-  constructor
-  · rw [transport_stabilityError]
-    exact hg.1
-  · intro p S hS
-    rw [transport_kernelError g φ he S]
-    apply hg.2 (Vector p) (S.comp φ.toLinearMap)
-    rwa [transport_symbol_map g φ he S]
-
-/-- Every actual gadget satisfying the quantitative guarantees has a split
-coordinate representative with exactly those guarantees. -/
-theorem exists_split_gadget {s : Nat} (g : Data (Vector s))
-    {ζ ν : ℚ} {r : Nat} (hg : Satisfies g ζ ν r) :
-    ∃ d : Nat, ∃ h : SplitGadget s d,
-      h.stabilityError ≤ ζ ∧
-      ∀ p (S : Ambient s d →ₗ[F2] Vector p),
-        r ≤ Module.finrank F2 (S.comp (alphabetEmbedding s d)).range →
-        h.kernelError S ≤ ν := by
-  obtain ⟨d, φ, he⟩ := exists_split_equiv g.embed g.embed_injective
-  exact ⟨d, transport g φ he, transport_satisfies g φ he hg⟩
 
 /-- The coordinate representative preserves dispersion for every target,
 including the question spaces used directly by the soundness analysis. -/

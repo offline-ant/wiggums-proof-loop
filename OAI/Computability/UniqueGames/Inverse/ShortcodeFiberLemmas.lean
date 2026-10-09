@@ -1,107 +1,10 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import OAI.Computability.UniqueGames.Inverse.EqualityFiber
-import OAI.Computability.UniqueGames.Inverse.FactorSampling
 import OAI.Computability.UniqueGames.Inverse.MatrixChartLemmas
 import OAI.Computability.UniqueGames.Inverse.ShortcodeInterfaceLemmas
 
 namespace OAI
-
-section
-
-/-! The actual uniform matrix test supplies a positive-mass output fiber with
-large retention. The transition kernel averages independent full vectors,
-including zero. -/
-
-namespace UniqueGamesTheorem.Inverse.Shortcode
-
-noncomputable section
-open scoped BigOperators Classical
-open UniqueGamesTheorem.Foundations.Information
-
-def matrixWeight {ell m : ℕ} (_ : Mat ell m) : ℝ :=
-  (Fintype.card (Mat ell m) : ℝ)⁻¹
-
-theorem matrixWeight_probability (ell m : ℕ) :
-    IsProbability (matrixWeight (ell := ell) (m := m)) := by
-  constructor
-  · intro M
-    exact inv_nonneg.mpr (Nat.cast_nonneg _)
-  · have hcard : (Fintype.card (Mat ell m) : ℝ) ≠ 0 := by
-      exact_mod_cast Fintype.card_ne_zero
-    simp [matrixWeight, hcard]
-
-def matrixKernel {ell m : ℕ} (M N : Mat ell m) : ℝ :=
-  𝔼 a : Vector ell, 𝔼 l : Vector m,
-    if N = M + rankOne a l then 1 else 0
-
-theorem matrixKernel_nonneg {ell m : ℕ} (M N : Mat ell m) :
-    0 ≤ matrixKernel M N := by
-  apply Finset.expect_nonneg
-  intro a _
-  apply Finset.expect_nonneg
-  intro l _
-  split <;> norm_num
-
-theorem matrixKernel_probability {ell m : ℕ} (M : Mat ell m) :
-    IsProbability (matrixKernel M) := by
-  refine ⟨matrixKernel_nonneg M, ?_⟩
-  unfold matrixKernel
-  rw [← Finset.expect_sum_comm]
-  have hpoint (a : Vector ell) :
-      (∑ N : Mat ell m, 𝔼 l : Vector m,
-        if N = M + rankOne a l then (1 : ℝ) else 0) = 1 := by
-    rw [← Finset.expect_sum_comm]
-    simp
-  simp only [hpoint]
-  simp
-
-theorem matrixKernel_equality {ell m : ℕ} (f : Mat ell m → Vector ell)
-    (M : Mat ell m) :
-    (∑ N, matrixKernel M N * if f M = f N then (1 : ℝ) else 0) =
-      𝔼 a, 𝔼 l, if f M = f (M + rankOne a l) then 1 else 0 := by
-  simp only [matrixKernel, Finset.expect_mul]
-  rw [← Finset.expect_sum_comm]
-  apply Finset.expect_congr rfl
-  intro a _
-  rw [← Finset.expect_sum_comm]
-  apply Finset.expect_congr rfl
-  intro l _
-  simp only [ite_mul, one_mul, zero_mul, Finset.sum_ite_eq', Finset.mem_univ, ite_true]
-
-theorem equalityAcceptance_eq_kernel {ell m : ℕ} (f : Mat ell m → Vector ell) :
-    equalityAcceptance f = EqualityFiber.equalityAcceptance matrixWeight matrixKernel f := by
-  calc
-    equalityAcceptance f = ∑ M, matrixWeight M *
-        (𝔼 a, 𝔼 l, if f M = f (M + rankOne a l) then (1 : ℝ) else 0) := by
-      unfold equalityAcceptance matrixWeight
-      rw [Fintype.expect_eq_sum_div_card]
-      simp only [div_eq_mul_inv, ← Finset.mul_sum, mul_comm]
-    _ = EqualityFiber.equalityAcceptance matrixWeight matrixKernel f := by
-      unfold EqualityFiber.equalityAcceptance
-      apply Finset.sum_congr rfl
-      intro M _
-      congr 1
-      convert (matrixKernel_equality f M).symm using 1
-      apply Finset.sum_congr rfl
-      intro N _
-      by_cases h : f M = f N <;> simp [h]
-
-/-- Positive-mass fibers, with their actual transition flow, are obtained from
-the full uniform factor law. This is the first step before conditioning both
-factors to be nonzero and passing to Grassmann neighbors. -/
-theorem exists_output_fiber {ell m : ℕ} (f : Mat ell m → Vector ell)
-    {η : ℝ} (haccept : η ≤ equalityAcceptance f) :
-    ∃ y : Vector ell, 0 < EqualityFiber.fiberMass matrixWeight f y ∧
-      η ≤ EqualityFiber.fiberFlow matrixWeight matrixKernel f y /
-        EqualityFiber.fiberMass matrixWeight f y := by
-  apply EqualityFiber.exists_fiber_retention matrixWeight matrixKernel
-    (matrixWeight_probability ell m) matrixKernel_probability f
-  rwa [← equalityAcceptance_eq_kernel]
-
-end
-end UniqueGamesTheorem.Inverse.Shortcode
-
-end
 
 section
 
@@ -214,89 +117,18 @@ end
 
 section
 
-/-! Exact finite output-fiber sampling identities. These connect the weighted
-kernel extraction to uniform sampling of a matrix in the actual output fiber.
--/
+/-! Extract a nonempty output fiber directly from the finite equality-test
+average, retaining the actual full uniform factor law. -/
 
 namespace UniqueGamesTheorem.Inverse.ShortcodeFromGrassmann
 
 noncomputable section
 open scoped BigOperators Classical
-open Shortcode UniqueGamesTheorem.Foundations.Information
-
-theorem matrixKernel_average {ell m : ℕ} (M : Mat ell m) (g : Mat ell m → ℝ) :
-    (∑ N, matrixKernel M N * g N) = 𝔼 a, 𝔼 l, g (M + rankOne a l) := by
-  simp only [matrixKernel, Finset.expect_mul]
-  rw [← Finset.expect_sum_comm]
-  apply Finset.expect_congr rfl
-  intro a _
-  rw [← Finset.expect_sum_comm]
-  apply Finset.expect_congr rfl
-  intro l _
-  simp [ite_mul]
-
-theorem fiberMass_eq_card {ell m : ℕ} (f : Mat ell m → Vector ell)
-    (y : Vector ell) :
-    EqualityFiber.fiberMass matrixWeight f y =
-      ((matrixFiber f y).card : ℝ) / Fintype.card (Mat ell m) := by
-  unfold EqualityFiber.fiberMass
-  calc
-    _ = ∑ M ∈ matrixFiber f y, matrixWeight M := by
-      rw [matrixFiber, Finset.sum_filter]
-      apply Finset.sum_congr rfl
-      intro M _
-      by_cases h : f M = y <;> simp [h]
-    _ = _ := by simp [matrixWeight, div_eq_mul_inv]
-
-theorem fiberMass_pos_iff {ell m : ℕ} (f : Mat ell m → Vector ell)
-    (y : Vector ell) :
-    0 < EqualityFiber.fiberMass matrixWeight f y ↔ (matrixFiber f y).Nonempty := by
-  rw [fiberMass_eq_card]
-  have hcard : (0 : ℝ) < Fintype.card (Mat ell m) := by
-    exact_mod_cast Fintype.card_pos
-  rw [div_pos_iff_of_pos_right hcard, Nat.cast_pos, Finset.card_pos]
+open Shortcode
 
 def fiberFactorRetention {ell m : ℕ} (f : Mat ell m → Vector ell)
     (y : Vector ell) (a : Vector ell) (l : Vector m) : ℝ :=
   (matrixFiber f y).expect fun M => if f (M + rankOne a l) = y then 1 else 0
-
-theorem fiberFlow_eq {ell m : ℕ} (f : Mat ell m → Vector ell)
-    (y : Vector ell) :
-    EqualityFiber.fiberFlow matrixWeight matrixKernel f y =
-      (∑ M ∈ matrixFiber f y,
-        𝔼 a, 𝔼 l, if f (M + rankOne a l) = y then (1 : ℝ) else 0) /
-        Fintype.card (Mat ell m) := by
-  unfold EqualityFiber.fiberFlow
-  simp_rw [matrixKernel_average]
-  rw [div_eq_mul_inv, Finset.sum_mul]
-  rw [matrixFiber, Finset.sum_filter]
-  apply Finset.sum_congr rfl
-  intro M _
-  by_cases h : f M = y
-  · simp [h, matrixWeight, mul_comm]
-  · simp [h]
-
-theorem fiber_retention_eq_factor_average {ell m : ℕ}
-    (f : Mat ell m → Vector ell) (y : Vector ell) :
-    EqualityFiber.fiberFlow matrixWeight matrixKernel f y /
-      EqualityFiber.fiberMass matrixWeight f y =
-        𝔼 a, 𝔼 l, fiberFactorRetention f y a l := by
-  rw [fiberFlow_eq, fiberMass_eq_card]
-  have hcard : (Fintype.card (Mat ell m) : ℝ) ≠ 0 := by
-    exact_mod_cast Fintype.card_ne_zero
-  have hswap : (𝔼 a, 𝔼 l, fiberFactorRetention f y a l) =
-      (matrixFiber f y).expect (fun M =>
-        𝔼 a, 𝔼 l, if f (M + rankOne a l) = y then (1 : ℝ) else 0) := by
-    unfold fiberFactorRetention
-    calc
-      _ = 𝔼 a, (matrixFiber f y).expect (fun M =>
-          𝔼 l, if f (M + rankOne a l) = y then (1 : ℝ) else 0) := by
-        apply Finset.expect_congr rfl
-        intro a _
-        rw [Finset.expect_comm]
-      _ = _ := Finset.expect_comm _ _ _
-  rw [hswap, Finset.expect_eq_sum_div_card]
-  simp [div_div_div_cancel_right₀ hcard]
 
 theorem fiberFactorRetention_zero_left {ell m : ℕ}
     (f : Mat ell m → Vector ell) (y : Vector ell)
@@ -325,9 +157,21 @@ is at least the original equality acceptance threshold. -/
 theorem exists_output_fiber_factor_retention {ell m : ℕ}
     (f : Mat ell m → Vector ell) {η : ℝ} (haccept : η ≤ equalityAcceptance f) :
     ∃ y, (matrixFiber f y).Nonempty ∧ η ≤ 𝔼 a, 𝔼 l, fiberFactorRetention f y a l := by
-  obtain ⟨y, hy, hret⟩ := Shortcode.exists_output_fiber f haccept
-  exact ⟨y, (fiberMass_pos_iff f y).mp hy,
-    by simpa only [fiber_retention_eq_factor_average] using hret⟩
+  obtain ⟨y, hy, hret⟩ := EqualityFiber.exists_fiber_expect_ge f
+    (fun M => 𝔼 a, 𝔼 l, if f M = f (M + rankOne a l) then 1 else 0) haccept
+  refine ⟨y, by simpa [matrixFiber, Finset.filter_nonempty_iff] using hy, hret.trans_eq ?_⟩
+  calc
+    _ = (matrixFiber f y).expect (fun M =>
+        𝔼 a, 𝔼 l, if f (M + rankOne a l) = y then (1 : ℝ) else 0) := by
+      apply Finset.expect_congr (by ext M; simp [matrixFiber])
+      intro M hM
+      simp only [(Finset.mem_filter.mp hM).2, eq_comm]
+    _ = _ := by
+      unfold fiberFactorRetention
+      rw [Finset.expect_comm]
+      apply Finset.expect_congr rfl
+      intro a _
+      rw [Finset.expect_comm]
 
 end
 end UniqueGamesTheorem.Inverse.ShortcodeFromGrassmann

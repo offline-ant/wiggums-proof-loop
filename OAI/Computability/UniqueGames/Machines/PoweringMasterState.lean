@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryEqualityBit
 import OAI.Computability.UniqueGames.Machines.PoweringMachineLoop
@@ -137,35 +138,9 @@ theorem step_rowAt_clean {t S q : Nat} (src dst : K)
     step_encodedBlockAt src dst (PoweringMachineRow.rowBlock labelAt) exit
       program label atLabel hne bits suffix (withBuffer register) tapes hinput
 
-def rowInTime {t S q : Nat} (src dst : K)
-    (labelAt : Fin q → Fin S → PCP.GraphTables.Label) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ
-      (Master (PoweringMachineRow.inputSize t S)))
-    (label : Λ) (atLabel : program label = rowAt (t := t) src dst labelAt exit)
-    (hne : src ≠ dst) (bits register : Buffer (PoweringMachineRow.inputSize t S))
-    (suffix : List Bool) (tapes : K → List Bool)
-    (hinput : tapes src = PoweringMachineRow.encodeBits (List.ofFn bits) ++ suffix) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some label, withBuffer register, tapes⟩
-      (some ⟨exit, clean (PoweringMachineRow.inputSize t S),
-        Function.update (Function.update tapes src suffix) dst
-          (PoweringMachineRow.encodeBits (List.ofFn (PoweringMachineRow.rowBlock labelAt bits)) ++
-            tapes dst)⟩) 1 where
-  steps := 1
-  evals_in_steps := by
-    simpa only [Function.iterate_one, flip, bind, Option.bind] using
-      step_rowAt_clean src dst labelAt exit program label atLabel hne bits register suffix tapes hinput
-  steps_le_m := le_rfl
 
 end Row
 
-/-- Header preparation already has the common trailing-bit register layout. -/
-def headerInTime (N B n : Nat) (suffix : List Bool) (state : Master N) :
-    StateTransition.EvalsToInTime
-      (TM2.step (PoweringMachineLoop.headerProgram (σ := OtherRegisters N) B))
-      ⟨some .initialize, state, PoweringMachineLoop.initialTapes n suffix⟩
-      (some (PoweringMachineLoop.finalConfiguration B n suffix state.1)) (n + 2) :=
-  PoweringMachineLoop.headerInTime B n suffix state.1 state.2
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMasterState
 

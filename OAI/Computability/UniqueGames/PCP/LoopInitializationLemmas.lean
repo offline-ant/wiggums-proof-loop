@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Ring
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Machines.MachineFiniteAlphabet
@@ -52,7 +53,6 @@ theorem initialization_ready {q : Nat} (input : GenericGraphTables.Table q) :
     rfl
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.LoopInitialization
-
 
 
 namespace UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Loop
@@ -180,15 +180,11 @@ def runPrefix (input : GenericGraphTables.Table q) : PrefixResult input := by
   unfold prefixTime
   omega
 
-theorem PrefixResult.reversed {input : GenericGraphTables.Table q} (result : PrefixResult input) :
-    result.tapes .reversed = (GraphTables.tableBits (Table.build input)).reverse :=
-  result.ready.reversed_at_end
 
 theorem PrefixResult.output {input : GenericGraphTables.Table q} (result : PrefixResult input) :
     result.tapes .output = [] := result.ready.output
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Loop
-
 
 
 namespace UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Runtime
@@ -259,7 +255,6 @@ noncomputable def tablePolynomialTime (q : Nat) :
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Runtime
 
 
-
 /-! Every work tape of the actual alphabet-table machine stores Bool symbols.
 This checks the work alphabets separately from the finite-machine structure's
 input-alphabet condition, without changing the runtime certificate. -/
@@ -281,7 +276,6 @@ theorem Runtime.finiteAlphabet (q : Nat) :
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable
 
 
-
 /-! The actual padding, expander overlay, and lazy-loop stages composed into
 one polynomial-time finite machine. The initial degree-replacement stage is
 assembled separately. -/
@@ -295,9 +289,6 @@ def finish (H : PreprocessingTables.BaseTable) (d : Nat) (input : PortTables.Inp
   PreprocessingStageMaps.lazy (d + internalDegree)
     (PreprocessingStageMaps.paddedOverlay H d input)
 
-theorem output_eq_finish (H : PreprocessingTables.BaseTable) (t : GraphTables.Table) :
-    PreprocessingTables.output H t =
-      finish H (internalDegree + 1) (PreprocessingStageMaps.regular H t) := rfl
 
 theorem finish_degree_positive (d : Nat) (hd : 0 < d) : 0 < d + internalDegree :=
   hd.trans_le (Nat.le_add_right d internalDegree)
@@ -326,7 +317,6 @@ theorem finite_alphabet (H : PreprocessingTables.BaseTable) (d : Nat) (hd : 0 < 
       (finish_degree_positive d hd))
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingFinishRuntime
-
 
 
 /-! The complete actual preprocessing machine, including degree replacement,
@@ -361,7 +351,6 @@ theorem finiteAlphabet (H : PreprocessingTables.BaseTable) :
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingRuntime
 
 
-
 /-!
 Actual sequential finite-machine composition for the concrete numbered round.
 The initial composition lemma isolates the preprocessing and powering execution
@@ -388,10 +377,6 @@ abbrev PoweringCertificate :=
     (GenericGraphTables.tableBits (q := RoundTables.alphabet))
     (PoweringTables.transform PreprocessingTables.degree RoundTables.walkParameter)
 
-theorem powered_eq_transform (H : RoundTables.BaseTable) (table : GraphTables.Table) :
-    RoundTables.powered H table =
-      PoweringTables.transform PreprocessingTables.degree RoundTables.walkParameter
-        (PreprocessingTables.output H table) := rfl
 
 /-- Both actual transfer loops between the machines are included by
 `MachineSequential.composeBits`; their work contributes to its polynomial. -/

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Data.ZMod.Basic
 import Mathlib.FieldTheory.Finiteness
@@ -223,41 +224,6 @@ noncomputable def binaryRankOneEquiv :
 @[simp] theorem binaryRankOneEquiv_apply (p : BinaryRankOneFactors X Y) :
     (binaryRankOneEquiv p).val = p.1.val.smulRight p.2.val := rfl
 
-/-- The number of binary rank-one maps is exactly the product of the two
-nonzero-factor counts, including the zero-dimensional edge cases. -/
-theorem card_binaryRankOneMaps [Fintype (X →ₗ[ZMod 2] ZMod 2)] [Fintype Y] :
-    Nat.card (BinaryRankOneMaps X Y) =
-      (Fintype.card (X →ₗ[ZMod 2] ZMod 2) - 1) * (Fintype.card Y - 1) := by
-  classical
-  calc
-    Nat.card (BinaryRankOneMaps X Y) = Nat.card (BinaryRankOneFactors X Y) :=
-      (Nat.card_congr (binaryRankOneEquiv (X := X) (Y := Y))).symm
-    _ = (Fintype.card (X →ₗ[ZMod 2] ZMod 2) - 1) * (Fintype.card Y - 1) := by
-      simp only [BinaryRankOneFactors, Nat.card_eq_fintype_card, Fintype.card_prod,
-        Fintype.card_subtype_compl, Fintype.card_subtype_eq]
-
-/-- Dimensional form of the exact rank-one count. -/
-theorem card_binaryRankOneMaps_pow [Fintype (X →ₗ[ZMod 2] ZMod 2)] [Fintype Y] :
-    Nat.card (BinaryRankOneMaps X Y) =
-      (2 ^ Module.finrank (ZMod 2) X - 1) *
-        (2 ^ Module.finrank (ZMod 2) Y - 1) := by
-  rw [card_binaryRankOneMaps,
-    Module.card_eq_pow_finrank (K := ZMod 2) (V := X →ₗ[ZMod 2] ZMod 2),
-    Module.card_eq_pow_finrank (K := ZMod 2) (V := Y)]
-  simp only [ZMod.card]
-  change (2 ^ Module.finrank (ZMod 2) (Module.Dual (ZMod 2) X) - 1) *
-      (2 ^ Module.finrank (ZMod 2) Y - 1) = _
-  rw [Subspace.dual_finrank_eq]
-
-theorem card_binaryRankOneMaps_coordinates (ell m : ℕ) :
-    Nat.card (BinaryRankOneMaps (Fin ell → ZMod 2) (Fin m → ZMod 2)) =
-      (2 ^ ell - 1) * (2 ^ m - 1) := by
-  classical
-  let : Fintype ((Fin ell → ZMod 2) →ₗ[ZMod 2] ZMod 2) :=
-    Fintype.ofInjective (fun a : (Fin ell → ZMod 2) →ₗ[ZMod 2] ZMod 2 =>
-      (a : (Fin ell → ZMod 2) → ZMod 2)) DFunLike.coe_injective
-  simpa using card_binaryRankOneMaps_pow
-    (X := Fin ell → ZMod 2) (Y := Fin m → ZMod 2)
 
 end Binary
 
@@ -458,13 +424,6 @@ def fixedFunctionalEquivPairFiber (X : E →ₗ[ZMod 2] F)
     ⟨fixedToPairFiber_injective X a ha y₀,
       fixedToPairFiber_surjective X hX a ha hy₀⟩
 
-/-- The full rank-one neighbor-sampling fiber is the functional kernel. -/
-def outsideNeighborPairFiberEquiv (X : E →ₗ[ZMod 2] F)
-    (hX : Function.Injective X) (a : E →ₗ[ZMod 2] ZMod 2)
-    (ha : a ≠ 0) {y₀ : F} (hy₀ : y₀ ∉ X.range) :
-    a.ker ≃ OutsideNeighborPairFiber X a y₀ :=
-  (fixedFunctionalNeighborFiberEquiv X hX a ha hy₀).trans
-    (fixedFunctionalEquivPairFiber X hX a ha hy₀)
 
 theorem card_outsideNeighborPairFiber [Fintype E]
     (X : E →ₗ[ZMod 2] F) (hX : Function.Injective X)
@@ -567,51 +526,6 @@ noncomputable def binaryFactorsEquivGraphNeighbors (T : X →ₗ[ZMod 2] Y) :
     (binaryFactorsEquivGraphNeighbors T p).val =
       (T - p.1.val.smulRight p.2.val).graph := rfl
 
-/-- In characteristic two the same parametrization is addition of the
-rank-one perturbation used in the matrix test. -/
-theorem binaryFactorsEquivGraphNeighbors_apply_add (T : X →ₗ[ZMod 2] Y)
-    (p : BinaryRankOneFactors X Y) :
-    (binaryFactorsEquivGraphNeighbors T p).val =
-      (T + p.1.val.smulRight p.2.val).graph := by
-  have hneg : -(p.1.val.smulRight p.2.val) = p.1.val.smulRight p.2.val := by
-    have hscalar : (-1 : ZMod 2) = 1 := by decide
-    calc
-      -(p.1.val.smulRight p.2.val) =
-          (-1 : ZMod 2) • (p.1.val.smulRight p.2.val) := (neg_one_smul _ _).symm
-      _ = p.1.val.smulRight p.2.val := by rw [hscalar, one_smul]
-  rw [binaryFactorsEquivGraphNeighbors_apply, sub_eq_add_neg, hneg]
-
-/-- Every neighbor in the chart has the required Grassmann dimension. -/
-theorem graphChartNeighbor_finrank (T : X →ₗ[ZMod 2] Y)
-    (L : BinaryGraphChartNeighbors T) :
-    Module.finrank (ZMod 2) L.val = Module.finrank (ZMod 2) X := by
-  obtain ⟨U, hU⟩ := L.property.1
-  rw [hU]
-  exact finrank_graph U
-
-/-- The dimension condition excludes the starting vertex itself. -/
-theorem graphChartNeighbor_ne_self (T : X →ₗ[ZMod 2] Y)
-    (L : BinaryGraphChartNeighbors T) : L.val ≠ T.graph := by
-  intro h
-  have hL := L.property.2
-  rw [h, inf_idem, finrank_graph] at hL
-  omega
-
-theorem card_binaryGraphChartNeighbors [Fintype (X →ₗ[ZMod 2] ZMod 2)] [Fintype Y]
-    (T : X →ₗ[ZMod 2] Y) :
-    Nat.card (BinaryGraphChartNeighbors T) =
-      (2 ^ Module.finrank (ZMod 2) X - 1) *
-        (2 ^ Module.finrank (ZMod 2) Y - 1) := by
-  rw [← Nat.card_congr
-    ((rankOneEquivChartNeighbors T).trans (chartNeighborsEquivGraphNeighbors T))]
-  exact card_binaryRankOneMaps_pow
-
-theorem card_binaryGraphChartNeighbors_coordinates (ell m : ℕ)
-    (T : (Fin ell → ZMod 2) →ₗ[ZMod 2] (Fin m → ZMod 2)) :
-    Nat.card (BinaryGraphChartNeighbors T) = (2 ^ ell - 1) * (2 ^ m - 1) := by
-  rw [← Nat.card_congr
-    ((rankOneEquivChartNeighbors T).trans (chartNeighborsEquivGraphNeighbors T))]
-  exact card_binaryRankOneMaps_coordinates ell m
 
 end UniqueGamesTheorem.Inverse.MatrixChart
 
@@ -630,15 +544,6 @@ variable {ell m : ℕ}
 abbrev CoordinateMatrix (ell m : ℕ) :=
   (Fin ell → ZMod 2) →ₗ[ZMod 2] (Fin m → ZMod 2)
 
-/-- Inclusion into actual full neighbors preserves the subspace. -/
-def graphChartNeighborsEmbedding (T : CoordinateMatrix ell m) :
-    BinaryGraphChartNeighbors T ↪ GrassmannNeighbors T.graph where
-  toFun L := ⟨L.val, by
-    rw [finrank_graph]
-    exact ⟨graphChartNeighbor_finrank T L, L.property.2⟩⟩
-  inj' := by
-    intro L W h
-    exact Subtype.ext (congrArg (fun N : GrassmannNeighbors T.graph => N.val) h)
 
 theorem card_grassmann_neighbors_graph (T : CoordinateMatrix ell m) :
     Nat.card (GrassmannNeighbors T.graph) =
@@ -649,34 +554,6 @@ theorem card_grassmann_neighbors_graph (T : CoordinateMatrix ell m) :
   simpa only [finrank_graph, Module.finrank_fintype_fun_eq_card,
     Fintype.card_fin] using h
 
-/-- Exactly twice as many full neighbors as chart neighbors. This natural
-number identity also covers a zero-dimensional side. -/
-theorem full_degree_eq_twice_chart_degree (T : CoordinateMatrix ell m) :
-    Nat.card (GrassmannNeighbors T.graph) =
-      2 * Nat.card (BinaryGraphChartNeighbors T) := by
-  rw [card_grassmann_neighbors_graph, card_binaryGraphChartNeighbors_coordinates]
-  have hpow : 2 ^ (m + 1) - 2 = 2 * (2 ^ m - 1) := by
-    rw [pow_succ, Nat.mul_sub_left_distrib]
-    simp [Nat.mul_comm]
-  rw [hpow]
-  ac_rfl
-
-/-- The neighbor sampling probability of remaining in the chart is one half
-when both dimensions are positive. -/
-theorem chart_degree_ratio (T : CoordinateMatrix ell m)
-    (hell : 0 < ell) (hm : 0 < m) :
-    (Nat.card (BinaryGraphChartNeighbors T) : ℚ) /
-      (Nat.card (GrassmannNeighbors T.graph) : ℚ) = 1 / 2 := by
-  have hpos : 0 < Nat.card (BinaryGraphChartNeighbors T) := by
-    rw [card_binaryGraphChartNeighbors_coordinates]
-    apply Nat.mul_pos
-    · exact Nat.sub_pos_of_lt (one_lt_pow₀ (by decide : 1 < (2 : ℕ)) (by omega))
-    · exact Nat.sub_pos_of_lt (one_lt_pow₀ (by decide : 1 < (2 : ℕ)) (by omega))
-  rw [full_degree_eq_twice_chart_degree]
-  have hne : (Nat.card (BinaryGraphChartNeighbors T) : ℚ) ≠ 0 := by
-    exact_mod_cast (Nat.ne_of_gt hpos)
-  simp only [Nat.cast_mul, Nat.cast_ofNat]
-  rw [mul_comm (2 : ℚ), div_mul_eq_div_div, div_self hne]
 
 end UniqueGamesTheorem.Inverse.MatrixChart
 
@@ -797,19 +674,6 @@ theorem exists_matrix_interval_slice (A B : Submodule K ((ι → K) × (κ → K
     exact column_equation_iff M (qv j) (tv j)
   simp only [Matrix.vecMulLinear_apply, hj]
 
-/-- An interval order bound yields separate row and column budgets. -/
-theorem exists_bounded_matrix_interval_slice
-    (A B : Submodule K ((ι → K) × (κ → K))) (r : Nat)
-    (horder : Module.finrank K A +
-      Module.finrank K (((ι → K) × (κ → K)) ⧸ B) ≤ r) :
-    ∃ (n_r n_c : Nat) (d : Fin n_r → ι → K) (s : Fin n_r → κ → K)
-      (t : Fin n_c → ι → K) (q : Fin n_c → κ → K),
-      n_r ≤ r ∧ n_c ≤ r ∧
-      ∀ M : Matrix ι κ K,
-        (A ≤ matrixGraph M ∧ matrixGraph M ≤ B) ↔
-          ((∀ i, d i ᵥ* M = s i) ∧ (∀ j, M *ᵥ q j = t j)) := by
-  obtain ⟨nr, nc, d, s, t, q, hnr, hnc, h⟩ := exists_matrix_interval_slice A B
-  refine ⟨nr, nc, d, s, t, q, ?_, ?_, h⟩ <;> omega
 
 end UniqueGamesTheorem.Inverse.MatrixChart
 

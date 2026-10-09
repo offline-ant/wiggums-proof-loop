@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Ring.Finset
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
 import Mathlib.Data.Finset.Max
@@ -14,8 +15,8 @@ section
 /-!
 Actual finite counting for rounding copied dart labels. Minority color classes
 are small enough for the cloud's directed-cut expansion. Their boundary darts
-inject into all label disagreements. A separate endpoint charge counts at
-most two affected original darts per changed copied label.
+form disjoint fibers within the label disagreements. A separate endpoint charge
+counts at most two affected original darts per changed copied label.
 -/
 
 namespace UniqueGamesTheorem.Foundations.PCP.CloudRounding
@@ -31,40 +32,19 @@ theorem dart_rejection_count_le
     (Finset.univ.filter (fun e => accepts e (ell e) (ell (reverse e)) = false)).card +
       2 * (Finset.univ.filter (fun e => ell e ≠ rounded (tail e))).card := by
   classical
-  let R : Finset E := Finset.univ.filter (fun e =>
-    accepts e (rounded (tail e)) (rounded (tail (reverse e))) = false)
-  let B : Finset E := Finset.univ.filter (fun e =>
-    accepts e (ell e) (ell (reverse e)) = false)
-  let M : Finset E := Finset.univ.filter (fun e => ell e ≠ rounded (tail e))
-  let MR : Finset E := Finset.univ.filter (fun e =>
-    ell (reverse e) ≠ rounded (tail (reverse e)))
-  have hrev : MR.card = M.card := by
-    have hsets : MR = M.map reverse.symm.toEmbedding := by
-      ext e
-      constructor
-      · intro he
-        apply Finset.mem_map.mpr
-        refine ⟨reverse e, ?_, reverse.symm_apply_apply e⟩
-        simpa [MR, M] using he
-      · intro he
-        obtain ⟨d, hd, rfl⟩ := Finset.mem_map.mp he
-        simpa [MR, M] using hd
-    rw [hsets, Finset.card_map]
-  have hsub : R ⊆ (B ∪ M) ∪ MR := by
-    intro e he
-    by_cases hl : ell e = rounded (tail e)
-    · by_cases hr : ell (reverse e) = rounded (tail (reverse e))
-      · have hb : e ∈ B := by simpa [B, R, hl, hr] using he
-        exact Finset.mem_union_left _ (Finset.mem_union_left _ hb)
-      · exact Finset.mem_union_right _ (by simp [MR, hr])
-    · exact Finset.mem_union_left _ (Finset.mem_union_right _ (by simp [M, hl]))
-  change R.card ≤ B.card + 2 * M.card
-  calc
-    R.card ≤ ((B ∪ M) ∪ MR).card := Finset.card_le_card hsub
-    _ ≤ (B ∪ M).card + MR.card := Finset.card_union_le _ _
-    _ ≤ (B.card + M.card) + MR.card :=
-      Nat.add_le_add_right (Finset.card_union_le B M) _
-    _ = B.card + 2 * M.card := by rw [hrev]; omega
+  simp only [Finset.card_eq_sum_ones, Finset.sum_filter]
+  have hrev := Equiv.sum_comp reverse
+    (fun e => if ell e ≠ rounded (tail e) then (1 : Nat) else 0)
+  have charge (e : E) :
+      (if accepts e (rounded (tail e)) (rounded (tail (reverse e))) = false then 1 else 0) ≤
+      (if accepts e (ell e) (ell (reverse e)) = false then 1 else 0) +
+        (if ell e ≠ rounded (tail e) then 1 else 0) +
+        (if ell (reverse e) ≠ rounded (tail (reverse e)) then 1 else 0) := by
+    by_cases hl : ell e = rounded (tail e) <;>
+      by_cases hr : ell (reverse e) = rounded (tail (reverse e)) <;>
+      simp [hl, hr] <;> split <;> omega
+  have bound := Finset.sum_le_sum (fun e (_ : e ∈ Finset.univ) => charge e)
+  simpa only [Finset.sum_add_distrib, hrev, two_mul, ← Nat.add_assoc] using bound
 
 section CloudCounts
 
@@ -107,76 +87,39 @@ theorem nonchosen_color_twice_le (ell : X → A) (m : A)
     (maximal : ∀ a, (colorSet ell a).card ≤ (colorSet ell m).card)
     (a : A) (ha : a ≠ m) :
     2 * (colorSet ell a).card ≤ Fintype.card X := by
-  have hd : Disjoint (colorSet ell a) (colorSet ell m) := by
-    apply Finset.disjoint_left.mpr
-    intro x hx hm
-    have hxa : ell x = a := by simpa [colorSet] using hx
-    have hxm : ell x = m := by simpa [colorSet] using hm
-    exact ha (hxa.symm.trans hxm)
-  have hu : (colorSet ell a).card + (colorSet ell m).card ≤ Fintype.card X := by
-    calc
-      _ = (colorSet ell a ∪ colorSet ell m).card :=
-        (Finset.card_union_of_disjoint hd).symm
-      _ ≤ Finset.univ.card := Finset.card_le_card (Finset.subset_univ _)
-      _ = Fintype.card X := Finset.card_univ
+  have hd : Disjoint (colorSet ell a) (colorSet ell m) :=
+    Finset.disjoint_filter.mpr (fun x _ hxa hxm => ha (hxa.symm.trans hxm))
+  have hu := Finset.card_le_card
+    (Finset.subset_univ (colorSet ell a ∪ colorSet ell m))
+  rw [Finset.card_union_of_disjoint hd, Finset.card_univ] at hu
   have hm := maximal a
   omega
-
-def minorityEquiv (ell : X → A) (m : A) :
-    (Σ a : Nonmajor m, ↥(colorSet ell a.val)) ≃ ↥(minoritySet ell m) where
-  toFun t := ⟨t.2.val, by
-    have hc : ell t.2.val = t.1.val := (Finset.mem_filter.mp t.2.property).2
-    have hn : ell t.2.val ≠ m := fun h => t.1.property (hc.symm.trans h)
-    simpa [minoritySet] using hn⟩
-  invFun x :=
-    ⟨⟨ell x.val, by simpa [minoritySet] using x.property⟩,
-      ⟨x.val, by simp [colorSet]⟩⟩
-  left_inv t := by
-    rcases t with ⟨⟨a, ha⟩, ⟨x, hx⟩⟩
-    have hxa : ell x = a := by simpa [colorSet] using hx
-    cases hxa
-    rfl
-  right_inv x := by apply Subtype.ext; rfl
 
 omit [DecidableEq X] in
 theorem minority_card_eq_sum (ell : X → A) (m : A) :
     (minoritySet ell m).card = ∑ a : Nonmajor m, (colorSet ell a.val).card := by
-  have h := Fintype.card_congr (minorityEquiv ell m)
-  simpa only [Fintype.card_sigma, Fintype.card_coe] using h.symm
+  rw [← Finset.sum_subtype (Finset.univ.filter (· ≠ m)) (by simp)
+    (fun a => (colorSet ell a).card)]
+  simpa [colorSet, minoritySet] using
+    (Finset.sum_card_fiberwise_eq_card_filter Finset.univ
+      (Finset.univ.filter (· ≠ m)) ell).symm
 
-/-- The tail label determines the forgotten minority color. -/
-def minorityCutEmbedding (ell : X → A) (next : X × D → X) (m : A) :
-    (Σ a : Nonmajor m, ↥(directedCut next (colorSet ell a.val))) ↪
-      ↥(disagreementSet ell next) where
-  toFun t := ⟨t.2.val, by
-    have hc : ell t.2.val.1 = t.1.val ∧ ell (next t.2.val) ≠ t.1.val := by
-      simpa [directedCut, colorSet] using t.2.property
-    have hn : ell t.2.val.1 ≠ ell (next t.2.val) :=
-      fun h => hc.2 (h.symm.trans hc.1)
-    simpa [disagreementSet] using hn⟩
-  inj' p q h := by
-    rcases p with ⟨⟨a, ha⟩, ⟨x, hx⟩⟩
-    rcases q with ⟨⟨b, hb⟩, ⟨y, hy⟩⟩
-    have hxy : x = y := congrArg Subtype.val h
-    cases hxy
-    have hxa : ell x.1 = a := by
-      have hc : ell x.1 = a ∧ ell (next x) ≠ a := by
-        simpa [directedCut, colorSet] using hx
-      exact hc.1
-    have hxb : ell x.1 = b := by
-      have hc : ell x.1 = b ∧ ell (next x) ≠ b := by
-        simpa [directedCut, colorSet] using hy
-      exact hc.1
-    have hab : a = b := hxa.symm.trans hxb
-    cases hab
-    rfl
-
+/-- The cuts are disjoint fibers of the tail label on disagreement darts. -/
 theorem minority_cut_sum_le (ell : X → A) (next : X × D → X) (m : A) :
     (∑ a : Nonmajor m, (directedCut next (colorSet ell a.val)).card) ≤
       (disagreementSet ell next).card := by
-  have h := Fintype.card_le_of_injective
-    (minorityCutEmbedding ell next m) (minorityCutEmbedding ell next m).injective
-  simpa only [Fintype.card_sigma, Fintype.card_coe] using h
+  classical
+  have fiber (a : A) : directedCut next (colorSet ell a) =
+      (disagreementSet ell next).filter (fun xd => ell xd.1 = a) := by
+    ext xd
+    simp only [directedCut, colorSet, disagreementSet, Finset.mem_filter,
+      Finset.mem_univ, true_and]
+    aesop
+  simp_rw [fiber]
+  rw [← Finset.sum_subtype (Finset.univ.filter (· ≠ m)) (by simp)
+    (fun a => ((disagreementSet ell next).filter (fun xd => ell xd.1 = a)).card),
+    Finset.sum_card_fiberwise_eq_card_filter]
+  exact Finset.card_filter_le _ _
 
 /-- Sum genuine directed-cut expansion over the nonchosen color classes. -/
 theorem minority_expansion_bound (ell : X → A) (next : X × D → X) (m : A)
@@ -224,62 +167,28 @@ noncomputable def roundLabels [Nonempty A]
     (G : ConstraintGraph V E A) (ell : E → A) : V → A :=
   fun v => majority (fun e : Cloud G v => ell e.val)
 
-/-- Every changed dart belongs to precisely one tail fiber. -/
-def mismatchFiberEquiv (G : ConstraintGraph V E A) (ell : E → A)
-    (rounded : V → A) :
-    (Σ v, ↥(minoritySet (fun e : Cloud G v => ell e.val) (rounded v))) ≃
-      ↥(mismatchSet G ell rounded) where
-  toFun := by
-    rintro ⟨v, ⟨⟨e, he⟩, hbad⟩⟩
-    cases he
-    exact ⟨e, by simpa [mismatchSet, minoritySet] using hbad⟩
-  invFun e :=
-    ⟨G.tail e.val, ⟨⟨e.val, rfl⟩, by
-      simpa [mismatchSet, minoritySet] using e.property⟩⟩
-  left_inv := by
-    rintro ⟨v, ⟨⟨e, he⟩, hbad⟩⟩
-    cases he
-    rfl
-  right_inv := by intro e; apply Subtype.ext; rfl
-
 omit [Fintype A] [DecidableEq E] in
+/-- Every changed dart belongs to precisely one tail fiber. -/
 theorem mismatch_card_eq_sum (G : ConstraintGraph V E A) (ell : E → A)
     (rounded : V → A) :
     (mismatchSet G ell rounded).card =
       ∑ v, (minoritySet (fun e : Cloud G v => ell e.val) (rounded v)).card := by
-  have h := Fintype.card_congr (mismatchFiberEquiv G ell rounded)
-  simpa only [Fintype.card_sigma, Fintype.card_coe] using h.symm
-
-/-- A cloud disagreement is the same actual internal dart in global coordinates. -/
-def disagreementFiberEquiv (G : ConstraintGraph V E A)
-    (H : ∀ v, PortGraph (Cloud G v) D) (ell : E → A) :
-    (Σ v, ↥(disagreementSet (fun e : Cloud G v => ell e.val)
-      (fun ed => ((H v).rot ed).1))) ≃ ↥(innerDisagreementSet G H ell) where
-  toFun := by
-    rintro ⟨v, ⟨⟨⟨e, he⟩, d⟩, hbad⟩⟩
-    cases he
-    refine ⟨(e, d), ?_⟩
-    simpa [disagreementSet, innerDisagreementSet, innerRotation,
-      cloudIndexEquiv, cloudRotation] using hbad
-  invFun := by
-    rintro ⟨⟨e, d⟩, hbad⟩
-    refine ⟨G.tail e, ⟨(⟨e, rfl⟩, d), ?_⟩⟩
-    simpa [disagreementSet, innerDisagreementSet, innerRotation,
-      cloudIndexEquiv, cloudRotation] using hbad
-  left_inv := by
-    rintro ⟨v, ⟨⟨⟨e, he⟩, d⟩, hbad⟩⟩
-    cases he
-    rfl
-  right_inv := by intro ed; apply Subtype.ext; rfl
+  classical
+  simp only [mismatchSet, minoritySet, Finset.card_eq_sum_ones,
+    Finset.sum_filter, ← Fintype.sum_sigma']
+  exact Fintype.sum_equiv (Equiv.sigmaFiberEquiv G.tail).symm _ _ (fun _ => rfl)
 
 omit [Fintype A] [DecidableEq E] in
+/-- Reindex the sum by the existing cloud coordinates, rather than recounting darts. -/
 theorem disagreement_card_eq_sum (G : ConstraintGraph V E A)
     (H : ∀ v, PortGraph (Cloud G v) D) (ell : E → A) :
     (innerDisagreementSet G H ell).card =
       ∑ v, (disagreementSet (fun e : Cloud G v => ell e.val)
         (fun ed => ((H v).rot ed).1)).card := by
-  have h := Fintype.card_congr (disagreementFiberEquiv G H ell)
-  simpa only [Fintype.card_sigma, Fintype.card_coe] using h.symm
+  classical
+  simp only [innerDisagreementSet, disagreementSet, Finset.card_eq_sum_ones,
+    Finset.sum_filter, ← Fintype.sum_sigma']
+  exact Fintype.sum_equiv (cloudIndexEquiv G) _ _ (fun _ => rfl)
 
 /-- No uniform cloud-size hypothesis occurs in this finite sum. -/
 theorem rounded_mismatch_expansion [Nonempty A]
@@ -364,24 +273,6 @@ theorem padded_replacement_soundness [Nonempty A]
 
 end GraphRounding
 
-/-- The exact coefficient obtained by combining endpoint charging and expansion. -/
-theorem combine_counts (R b M c : Nat) (h : ℚ) (hh : 0 < h)
-    (endpoint : R ≤ b + 2 * M) (cloud : h * (M : ℚ) ≤ (c : ℚ)) :
-    (R : ℚ) ≤ max 1 (2 / h) * ((b : ℚ) + (c : ℚ)) := by
-  let K : ℚ := max 1 (2 / h)
-  have hK : 1 ≤ K := le_max_left _ _
-  have hK0 : 0 ≤ K := le_trans zero_le_one hK
-  have hcoef : 2 ≤ K * h := (div_le_iff₀ hh).mp (le_max_right _ _)
-  have hm : (2 : ℚ) * M ≤ K * c := by
-    calc
-      (2 : ℚ) * M ≤ (K * h) * M :=
-        mul_le_mul_of_nonneg_right hcoef (Nat.cast_nonneg M)
-      _ = K * (h * M) := mul_assoc _ _ _
-      _ ≤ K * c := mul_le_mul_of_nonneg_left cloud hK0
-  have hb : (b : ℚ) ≤ K * b := by
-    simpa only [one_mul] using mul_le_mul_of_nonneg_right hK (Nat.cast_nonneg b)
-  have hr : (R : ℚ) ≤ (b : ℚ) + 2 * (M : ℚ) := by exact_mod_cast endpoint
-  exact hr.trans ((add_le_add hb hm).trans_eq (mul_add K (b : ℚ) (c : ℚ)).symm)
 
 end UniqueGamesTheorem.Foundations.PCP.CloudRounding
 
@@ -548,9 +439,6 @@ def inputBits {ports : Nat} (input : Input ports) : List Bool := tableBits input
 theorem tableWords_eq (table : Table n d) :
     tableWords table = [n, n * d] ++ (flatRows table).toList.flatMap GraphTables.rowWords := rfl
 
-theorem tableWords_length (table : Table n d) :
-    (tableWords table).length = 2 + 4098 * (n * d) :=
-  GraphTables.tableWords_length (graphTable table)
 
 theorem vertices_le_tableBits_length (table : Table n d) : n ≤ (tableBits table).length :=
   GraphTables.vertices_le_tableBits_length (graphTable table)

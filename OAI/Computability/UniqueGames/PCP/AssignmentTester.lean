@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import OAI.Computability.UniqueGames.PCP.SourceNoiseParameterLemmas
 
@@ -76,27 +77,12 @@ omit [Fintype A] [DecidableEq A] in
 
 theorem expect_cubeXor (F : Cube A → ℝ) (g : Cube A) :
     (𝔼 f, F (cubeXor f g)) = 𝔼 f, F f := by
-  rw [Fintype.expect_eq_sum_div_card, Fintype.expect_eq_sum_div_card]
-  congr 1
-  refine Finset.sum_bij (fun f _ => cubeXor f g) ?_ ?_ ?_ ?_
-  · intro f _
-    exact Finset.mem_univ _
-  · intro f _ h _ heq
-    have hh := congrArg (fun x => cubeXor x g) heq
-    simpa only [cubeXor_right_twice] using hh
-  · intro f _
-    exact ⟨cubeXor f g, Finset.mem_univ _, cubeXor_right_twice f g⟩
-  · intro f _
-    rfl
+  exact Fintype.expect_equiv
+    (Function.Involutive.toPerm (fun f => cubeXor f g) (fun f => cubeXor_right_twice f g)) _ _ (fun _ => rfl)
 
 def distance {K : Type*} [Fintype K] (f g : K → Bool) : ℝ :=
   𝔼 k, disagree (f k) (g k)
 
-theorem distance_nonneg {K : Type*} [Fintype K] (f g : K → Bool) :
-    0 ≤ distance f g := by
-  apply Finset.expect_nonneg
-  intro k _
-  exact disagree_nonneg _ _
 
 theorem distance_parity (F : Cube A → Bool) (s : Cube A) :
     distance F (parity s) = (1 - coefficient (fun f => bitSign (F f)) s) / 2 := by
@@ -150,29 +136,15 @@ theorem blr_near_parity (F : Cube A → Bool) :
   classical
   let c := coefficient (fun f => bitSign (F f))
   have hmass : (∑ s, c s ^ 2) = 1 := sign_parseval F
-  have hlarge : ∃ s, (∑ t, c t ^ 3) ≤ c s := by
-    by_contra hn
-    push Not at hn
-    have hpos : ∃ s, 0 < c s ^ 2 := by
-      by_contra hh
-      push Not at hh
-      have hz := Finset.sum_nonpos (s := Finset.univ) (fun s _ => hh s)
-      linarith
-    obtain ⟨s₀, hs₀⟩ := hpos
-    have hle (s : Cube A) (_ : s ∈ Finset.univ) :
-        c s ^ 3 ≤ (∑ t, c t ^ 3) * c s ^ 2 := by
-      have h := mul_le_mul_of_nonneg_right (hn s).le (sq_nonneg (c s))
-      nlinarith
-    have hlt : c s₀ ^ 3 < (∑ t, c t ^ 3) * c s₀ ^ 2 := by
-      have h := mul_lt_mul_of_pos_right (hn s₀) hs₀
-      nlinarith
-    have hsum := Finset.sum_lt_sum hle ⟨s₀, Finset.mem_univ _, hlt⟩
-    rw [← Finset.mul_sum, hmass, mul_one] at hsum
-    exact (lt_irrefl _ hsum)
-  obtain ⟨s, hs⟩ := hlarge
+  obtain ⟨s, _, hs⟩ := Finset.exists_max_image Finset.univ c Finset.univ_nonempty
+  have hle : (∑ t, c t ^ 3) ≤ c s := calc
+    _ ≤ ∑ t, c s * c t ^ 2 := Finset.sum_le_sum (fun t ht => by
+      simpa only [pow_succ, mul_comm] using
+        mul_le_mul_of_nonneg_right (hs t ht) (sq_nonneg (c t)))
+    _ = c s := by rw [← Finset.mul_sum, hmass, mul_one]
   refine ⟨s, ?_⟩
   rw [distance_parity, blrReject_fourier]
-  dsimp [c] at hs
+  dsimp [c] at hle
   linarith
 
 def selfCorrect (F : Cube A → Bool) (x r : Cube A) : Bool :=
@@ -198,43 +170,17 @@ theorem selfCorrect_error (F : Cube A → Bool) (s x : Cube A) :
   change _ ≤ distance F (parity s) + distance F (parity s) at h
   linarith
 
-def singleMask (i : A) : Cube A := fun j => decide (j = i)
+theorem expect_cubeToggle (F : Cube A → ℝ) (i : A) :
+    (𝔼 f, F (cubeToggle i f)) = 𝔼 f, F f :=
+  expect_cubeXor F _
 
-def flipAt (i : A) (f : Cube A) : Cube A :=
-  fun j => if j = i then !(f j) else f j
-
-omit [Fintype A] in
-@[simp] theorem flipAt_twice (i : A) (f : Cube A) : flipAt i (flipAt i f) = f := by
-  funext j
-  by_cases h : j = i <;> simp [flipAt, h]
-
-omit [Fintype A] in
-theorem flipAt_eq_xor (i : A) (f : Cube A) : flipAt i f = cubeXor f (singleMask i) := by
-  funext j
-  by_cases h : j = i <;> simp [flipAt, cubeXor, singleMask, h]
-
-theorem expect_flipAt (F : Cube A → ℝ) (i : A) :
-    (𝔼 f, F (flipAt i f)) = 𝔼 f, F f := by
-  simp_rw [flipAt_eq_xor]
-  exact expect_cubeXor F _
-
-theorem walsh_singleMask (s : Cube A) (i : A) :
-    walsh s (singleMask i) = bitSign (s i) := by
-  unfold walsh
-  rw [Finset.prod_eq_single i]
-  · simp [singleMask]
-  · intro j _ hj
-    simp [singleMask, hj, bitSign]
-  · intro h
-    exact False.elim (h (Finset.mem_univ _))
-
-theorem parity_singleMask (s : Cube A) (i : A) : parity s (singleMask i) = s i := by
+theorem parity_coordinateMask (s : Cube A) (i : A) : parity s (coordinateMask i) = s i := by
   apply bitSign_injective
-  rw [bitSign_parity, walsh_singleMask]
+  rw [bitSign_parity, walsh_coordinateMask]
 
-theorem parity_flipAt (s : Cube A) (i : A) (f : Cube A) (hs : s i = true) :
-    parity s (flipAt i f) = !(parity s f) := by
-  rw [flipAt_eq_xor, parity_xor, parity_singleMask, hs]
+theorem parity_cubeToggle (s : Cube A) (i : A) (f : Cube A) (hs : s i = true) :
+    parity s (cubeToggle i f) = !(parity s f) := by
+  rw [cubeToggle, parity_xor, parity_coordinateMask, hs]
   cases parity s f <;> rfl
 
 def cubeAnd (f g : Cube A) : Cube A := fun a => f a && g a
@@ -242,19 +188,19 @@ def cubeAnd (f g : Cube A) : Cube A := fun a => f a && g a
 def andLawFailure (s f g : Cube A) : Bool :=
   parity s (cubeAnd f g) ^^ (parity s f && parity s g)
 
-theorem andLawFailure_flipAt_second (s : Cube A) (i : A) (f g : Cube A)
+theorem andLawFailure_cubeToggle_second (s : Cube A) (i : A) (f g : Cube A)
     (hi : s i = true) :
-    andLawFailure s f (flipAt i g) =
+    andLawFailure s f (cubeToggle i g) =
       (andLawFailure s f g ^^ (parity s f ^^ f i)) := by
-  have hAnd : cubeAnd f (flipAt i g) =
-      (if f i then flipAt i (cubeAnd f g) else cubeAnd f g) := by
+  have hAnd : cubeAnd f (cubeToggle i g) =
+      (if f i then cubeToggle i (cubeAnd f g) else cubeAnd f g) := by
     funext a
     by_cases ha : a = i
     · subst a
-      cases hfi : f i <;> simp [cubeAnd, flipAt, hfi]
-    · cases hfi : f i <;> simp [cubeAnd, flipAt, ha]
-  have hg := parity_flipAt s i g hi
-  have hfg := parity_flipAt s i (cubeAnd f g) hi
+      cases hfi : f i <;> simp [cubeToggle, cubeXor, coordinateMask, cubeAnd, hfi]
+    · cases hfi : f i <;> simp [cubeToggle, cubeXor, coordinateMask, cubeAnd, ha]
+  have hg := parity_cubeToggle s i g hi
+  have hfg := parity_cubeToggle s i (cubeAnd f g) hi
   cases hfi : f i <;> cases hf : parity s f <;>
     cases hg₀ : parity s g <;> cases ha : parity s (cubeAnd f g) <;>
     simp [andLawFailure, hAnd, hg, hfg, hfi, hf, hg₀, ha]
@@ -269,28 +215,27 @@ theorem parity_and_rejection (s : Cube A) (i j : A)
     (hi : s i = true) (hj : s j = true) (hij : i ≠ j) :
     (1 : ℝ) / 4 ≤ 𝔼 f, 𝔼 g, truth (andLawFailure s f g) := by
   have hpoint (f g : Cube A) : (1 : ℝ) ≤
-      truth (andLawFailure s f g) + truth (andLawFailure s f (flipAt i g)) +
-      truth (andLawFailure s (flipAt j f) g) +
-      truth (andLawFailure s (flipAt j f) (flipAt i g)) := by
-    rw [andLawFailure_flipAt_second s i f g hi,
-      andLawFailure_flipAt_second s i (flipAt j f) g hi]
-    have hD : (parity s (flipAt j f) ^^ (flipAt j f) i) =
+      truth (andLawFailure s f g) + truth (andLawFailure s f (cubeToggle i g)) +
+      truth (andLawFailure s (cubeToggle j f) g) +
+      truth (andLawFailure s (cubeToggle j f) (cubeToggle i g)) := by
+    rw [andLawFailure_cubeToggle_second s i f g hi,
+      andLawFailure_cubeToggle_second s i (cubeToggle j f) g hi]
+    have hD : (parity s (cubeToggle j f) ^^ (cubeToggle j f) i) =
         !(parity s f ^^ f i) := by
-      rw [parity_flipAt s j f hj]
-      simp only [flipAt, ite_eq_right hij]
-      cases hf : parity s f <;> cases hfi : f i <;> simp
+      rw [parity_cubeToggle s j f hj]
+      simp [cubeToggle, cubeXor, coordinateMask, hij]
     rw [hD]
     exact four_truth_lower _ _ _
   have havg := Finset.expect_le_expect (s := Finset.univ) (fun f _ =>
     Finset.expect_le_expect (s := Finset.univ) (fun g _ => hpoint f g))
   simp only [Finset.expect_add_distrib, Fintype.expect_const] at havg
   have hinner (f : Cube A) :
-      (𝔼 g, truth (andLawFailure s f (flipAt i g))) =
+      (𝔼 g, truth (andLawFailure s f (cubeToggle i g))) =
         𝔼 g, truth (andLawFailure s f g) :=
-    expect_flipAt (fun g => truth (andLawFailure s f g)) i
-  have houter : (𝔼 f, 𝔼 g, truth (andLawFailure s (flipAt j f) g)) =
+    expect_cubeToggle (fun g => truth (andLawFailure s f g)) i
+  have houter : (𝔼 f, 𝔼 g, truth (andLawFailure s (cubeToggle j f) g)) =
       𝔼 f, 𝔼 g, truth (andLawFailure s f g) :=
-    expect_flipAt (fun f => 𝔼 g, truth (andLawFailure s f g)) j
+    expect_cubeToggle (fun f => 𝔼 g, truth (andLawFailure s f g)) j
   simp only [hinner, houter] at havg
   linarith
 
@@ -394,24 +339,24 @@ theorem unitReject_zero_parity (F : Cube A → Bool) :
     simp only [hp, Fintype.expect_const]
   linarith
 
-theorem parity_singleMask_eval (a : A) (f : Cube A) :
-    parity (singleMask a) f = f a := by
+theorem parity_coordinateMask_eval (a : A) (f : Cube A) :
+    parity (coordinateMask a) f = f a := by
   apply bitSign_injective
-  rw [bitSign_parity, walsh_symm, walsh_singleMask]
+  rw [bitSign_parity, walsh_symm, walsh_coordinateMask]
 
 theorem inputReject_transfer (label : A → K → Bool) (σ : K → Bool)
     (F : Cube A → Bool) (a : A) :
     distance σ (label a) ≤ inputReject label σ F +
-      2 * distance F (parity (singleMask a)) := by
+      2 * distance F (parity (coordinateMask a)) := by
   have hlocal (k : K) : disagree (σ k) (label a k) ≤
       (𝔼 r, disagree (σ k) (selfCorrect F (fun a => label a k) r)) +
-        2 * distance F (parity (singleMask a)) := by
+        2 * distance F (parity (coordinateMask a)) := by
     have hp (r : Cube A) := disagree_triangle (σ k)
       (selfCorrect F (fun a => label a k) r) (label a k)
     have havg := Finset.expect_le_expect (s := Finset.univ) (fun r _ => hp r)
     simp only [Fintype.expect_const, Finset.expect_add_distrib] at havg
-    have herr := selfCorrect_error F (singleMask a) (fun a => label a k)
-    simp only [parity_singleMask_eval] at herr
+    have herr := selfCorrect_error F (coordinateMask a) (fun a => label a k)
+    simp only [parity_coordinateMask_eval] at herr
     linarith
   have h := Finset.expect_le_expect (s := Finset.univ) (fun k _ => hlocal k)
   simpa only [Finset.expect_add_distrib, Fintype.expect_const, inputReject, distance] using h
@@ -449,16 +394,16 @@ theorem tester_proximity_soundness (label : A → K → Bool) (σ : K → Bool)
     have ht := andReject_transfer F s
     unfold testerReject
     linarith
-  · have heq : s = singleMask i := by
+  · have heq : s = coordinateMask i := by
       funext j
       by_cases hji : j = i
       · subst j
-        simp [singleMask, hi]
+        simp [coordinateMask, hi]
       · have hj : s j = false := by
           cases hv : s j
           · rfl
           · exact False.elim (htwo ⟨j, Ne.symm hji, hv⟩)
-        simp [singleMask, hji, hj]
+        simp [coordinateMask, hji, hj]
     subst s
     have ht := inputReject_transfer label σ F i
     have hf := hfar i
@@ -471,19 +416,6 @@ theorem selfCorrect_dictator (a : A) (x r : Cube A) :
   change (r a ^^ (r a ^^ x a)) = x a
   cases r a <;> cases x a <;> rfl
 
-omit [Nonempty K] in
-/-- Every legal assignment has an honest proof accepted on every test. -/
-theorem tester_perfect_completeness (label : A → K → Bool) (a : A) :
-    testerReject label (label a) (fun f => f a) = 0 := by
-  have hb : blrReject (fun f : Cube A => f a) = 0 := by
-    simp [blrReject, cubeXor, disagree]
-  have ha : andReject (fun f : Cube A => f a) = 0 := by
-    simp [andReject, selfCorrect_dictator, cubeAnd, disagree]
-  have hu : unitReject (fun f : Cube A => f a) = 0 := by
-    simp [unitReject, selfCorrect_dictator, disagree]
-  have hi : inputReject label (label a) (fun f => f a) = 0 := by
-    simp [inputReject, selfCorrect_dictator, disagree]
-  simp [testerReject, hb, ha, hu, hi]
 
 /-- The actual six oracle addresses for each test. Unused slots repeat an
 address already queried, so every event has the same fixed six-slot format. -/

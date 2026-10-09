@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import OAI.Computability.UniqueGames.Machines.MachineCompare
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -77,9 +78,6 @@ theorem clearTapes_apply {n : Nat} (selected : Fin n → K) (base : K → List B
         by_cases later : ∃ i : Fin n, selected i.succ = k <;>
           simp [Fin.exists_fin_succ, first, later, Function.update, notFirst]
 
-@[simp] theorem clearTapes_selected {n : Nat} (selected : Fin n → K)
-    (base : K → List Bool) (i : Fin n) : clearTapes selected base (selected i) = [] := by
-  rw [clearTapes_apply, ite_eq_left ⟨i, rfl⟩]
 
 theorem clearTapes_unselected {n : Nat} (selected : Fin n → K)
     (base : K → List Bool) (k : K) (notSelected : ∀ i, selected i ≠ k) :
@@ -165,16 +163,6 @@ def machine [Fintype K] [Fintype σ] {n : Nat} (selected : Fin n → K)
   initialState := (initial, none)
   m := program selected initial
 
-def machineInTime [Fintype K] [Fintype σ] {n : Nat} (selected : Fin n → K)
-    (input output : K) (initial : σ) (base : K → List Bool)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine selected input output initial).step
-      ⟨some (0 : Fin (n + 1)), (ambient, register), base⟩
-      (some ⟨none, (initial, none), clearTapes selected base⟩)
-      ((∑ i, (base (selected i)).length) + n + 1) :=
-  cleanupInTime selected id initial none (program selected initial)
-    (fun i => instruction_drain selected id initial none i)
-    (instruction_finish selected id initial none) base ambient register
 
 /-- Enumerating exactly the nonoutput stacks yields the standard final tape
 family. Repeated selected stacks are permitted. -/
@@ -190,24 +178,6 @@ theorem clearTapes_outputOnly {n : Nat} (selected : Fin n → K)
   · rw [clearTapes_apply]
     simp [h, coversOther k h]
 
-/-- Full cleanup reaches `haltList`, with all nonoutput stacks empty and the
-machine's actual initial finite state restored. -/
-def machineHaltInTime [Fintype K] [Fintype σ] {n : Nat} (selected : Fin n → K)
-    (input output : K) (initial : σ) (base : K → List Bool)
-    (ambient : σ) (register : Option Bool)
-    (excludesOutput : ∀ i, selected i ≠ output)
-    (coversOther : ∀ k, k ≠ output → ∃ i, selected i = k) :
-    StateTransition.EvalsToInTime (machine selected input output initial).step
-      ⟨some (0 : Fin (n + 1)), (ambient, register), base⟩
-      (some (haltList (machine selected input output initial) (base output)))
-      ((∑ i, (base (selected i)).length) + n + 1) := by
-  have tapeEq := clearTapes_outputOnly selected output base excludesOutput coversOther
-  have haltEq : (⟨none, (initial, none), clearTapes selected base⟩ :
-      (machine selected input output initial).Cfg) =
-      haltList (machine selected input output initial) (base output) := by
-    congr 1
-  rw [← haltEq]
-  exact machineInTime selected input output initial base ambient register
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Cleanup
 
@@ -252,44 +222,15 @@ theorem stepAux_skipBits (source : K) (bits : List Bool)
         Option.getD_some, Bool.cond_false, Bool.cond_true, Function.update_idem] using
           ih none
 
-theorem stepAux_skipBits_fromTapes (source : K) (bits : List Bool)
-    (next : TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (base : K → List Bool) (suffix : List Bool)
-    (hinput : base source = encodeWords (bits.map bitWord) ++ suffix)
-    (ambient : σ) (register : Option Bool) :
-    TM2.stepAux (skipBits source bits.length next) (ambient, register) base =
-      TM2.stepAux next (ambient, none) (Function.update base source suffix) := by
-  have h := stepAux_skipBits source bits next base suffix ambient register
-  have hbase : Function.update base source (encodeWords (bits.map bitWord) ++ suffix) =
-      base := by rw [← hinput]; exact Function.update_eq_self source base
-  rw [hbase] at h
-  exact h
-
-omit [DecidableEq K] in
-theorem skipBits_pushBound (source : K) (count : Nat)
-    (next : TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool)) :
-    Runtime.statementPushBound (skipBits source count next) =
-      Runtime.statementPushBound next := by
-  induction count with
-  | zero => rfl
-  | succ count ih => simp only [skipBits, Runtime.statementPushBound, ih, max_self]
 
 inductive Label
   | guard | skipTail | skipReverse | skipPredicate | select | copy
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.guard, .skipTail, .skipReverse, .skipPredicate,
-  .select, .copy]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.guard, .skipTail, .skipReverse, .skipPredicate,
+  .select, .copy}
+  complete x := by cases x <;> simp
 
 /-- Six fixed control labels implement row selection. `q` fixes the finite
 predicate parser; no data-dependent number is placed in the program syntax. -/
@@ -494,29 +435,6 @@ theorem lookupCost_le {q n m : Nat} (prior : List (DartRow q n m)) (row : DartRo
   simp only [lookupCost, List.length_append, encodeWord_length]
   omega
 
-/-- The exact row-selection trace packaged with its linear transition budget. -/
-def lookupTailInTime {q n m : Nat}
-    (counter source destination : K) (labels : Label → Λ) (exit : Option Λ)
-    (P : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atStatement : ∀ label, P (labels label) = statement q counter source destination labels exit label)
-    (hcs : counter ≠ source) (hcd : counter ≠ destination) (hsd : source ≠ destination)
-    (base : K → List Bool) (prior : List (DartRow q n m)) (row : DartRow q n m)
-    (counterSuffix suffix output : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step P)
-      ⟨some (labels .guard), (ambient, register),
-        MachineLookup.tapes counter source destination base
-          (encodeWord prior.length ++ counterSuffix)
-          (rowsBits prior ++ (rowBits row ++ suffix)) output⟩
-      (some ⟨exit, (ambient, none),
-        MachineLookup.tapes counter source destination base
-          (encodeWord 0 ++ counterSuffix)
-          (encodeWord row.reverseIndex.val ++ (encodeWords (relationWords row.relation) ++ suffix))
-          (encodeWord row.tail.val ++ output)⟩)
-      ((rowsBits prior ++ rowBits row).length + 2 * (encodeWord prior.length).length + 1) where
-  steps := lookupCost prior row
-  evals_in_steps := lookupTailTrace counter source destination labels exit P atStatement
-    hcs hcd hsd base prior row counterSuffix suffix output ambient register
-  steps_le_m := lookupCost_le prior row
 
 /-- The input's actual stored row vector determines the selected row. This
 specialization derives the literal lookup prefix from the checked codec. -/
@@ -595,11 +513,6 @@ theorem fullTableTailTrace {q : Nat}
   exact tableTailTrace counter source destination labels exit P atStatement hcs hcd hsd
     base table e counterSuffix suffix output ambient none
 
-theorem lookup_frame (counter source destination other : K)
-    (hc : other ≠ counter) (hs : other ≠ source) (hd : other ≠ destination)
-    (base : K → List Bool) (counterBits input output : List Bool) :
-    MachineLookup.tapes counter source destination base counterBits input output other = base other :=
-  MachineLookup.tapes_other counter source destination other hc hs hd base counterBits input output
 
 def tableTailCost {q : Nat} (table : Table q) (e : Fin table.darts) : Nat :=
   lookupCost ((rowList table).take e.val) table.rows[e] +
@@ -758,55 +671,16 @@ def headLookupInTime {q : Nat}
   unfold headLookupCost at hb
   omega
 
-theorem headLookupTapes_head {q : Nat} (tape : HeadTapes K) (base : K → List Bool)
-    (table : Table q) (e : Fin table.darts) :
-    headLookupTapes tape base table e (tape 4) = encodeWord (headValue table e) := by
-  simp [headLookupTapes]
-
-theorem headLookupTapes_frame {q : Nat} (tape : HeadTapes K) (base : K → List Bool)
-    (table : Table q) (e : Fin table.darts) (other : K)
-    (hc : other ≠ tape 3) (hs : other ≠ tape 2) (hh : other ≠ tape 4) :
-    headLookupTapes tape base table e other = base other :=
-  lookup_frame (tape 3) (tape 2) (tape 4) other hc hs hh base _ _ _
 
 def readRowTapes {q n m : Nat} (source tail reverse : K) (base : K → List Bool)
     (row : DartRow q n m) (suffix : List Bool) : K → List Bool :=
   Function.update (Function.update (Function.update base source suffix)
     tail (encodeWord row.tail.val)) reverse (encodeWord row.reverseIndex.val)
 
-theorem readRowTapes_source {q n m : Nat} (source tail reverse : K)
-    (hst : source ≠ tail) (hsr : source ≠ reverse)
-    (base : K → List Bool) (row : DartRow q n m) (suffix : List Bool) :
-    readRowTapes source tail reverse base row suffix source = suffix := by
-  simp [readRowTapes, hst, hsr]
-
-theorem readRowTapes_tail {q n m : Nat} (source tail reverse : K)
-    (htr : tail ≠ reverse) (base : K → List Bool)
-    (row : DartRow q n m) (suffix : List Bool) :
-    readRowTapes source tail reverse base row suffix tail = encodeWord row.tail.val := by
-  simp [readRowTapes, htr]
-
-theorem readRowTapes_reverse {q n m : Nat} (source tail reverse : K)
-    (base : K → List Bool) (row : DartRow q n m) (suffix : List Bool) :
-    readRowTapes source tail reverse base row suffix reverse =
-      encodeWord row.reverseIndex.val := by
-  simp [readRowTapes]
-
-theorem readRowTapes_frame {q n m : Nat} (source tail reverse other : K)
-    (hs : other ≠ source) (ht : other ≠ tail) (hr : other ≠ reverse)
-    (base : K → List Bool) (row : DartRow q n m) (suffix : List Bool) :
-    readRowTapes source tail reverse base row suffix other = base other := by
-  simp [readRowTapes, hs, ht, hr]
 
 def readRowCost {q n m : Nat} (row : DartRow q n m) : Nat :=
   row.tail.val + row.reverseIndex.val + 5
 
-theorem readRowCost_le {q n m : Nat} (row : DartRow q n m) :
-    readRowCost row ≤ (rowBits row).length + 3 := by
-  rw [rowBits_eq]
-  simp only [List.length_append, encodeWord_length]
-  unfold readRowCost
-  omega
 
 theorem readRowCost_table_le {q : Nat} (table : Table q) (e : Fin table.darts) :
     readRowCost table.rows[e] ≤ 2 * (tableBits table).length + 5 := by

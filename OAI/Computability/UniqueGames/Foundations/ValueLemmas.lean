@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Finset.Max
 import Mathlib.Data.Fintype.BigOperators
 import OAI.Computability.UniqueGames.Foundations.FiniteTrialsLemmas
@@ -62,46 +63,6 @@ theorem randomized_success_le_value (G : Game Q₁ Q₂ A₁ A₂)
       exact mul_le_mul_of_nonneg_left (G.success_le_value _) (seedLaw.nonnegative seed)
     _ = G.value := by rw [← Finset.sum_mul, seedLaw.normalized, one_mul]
 
-omit [Nonempty A₁] [Nonempty A₂] in
-theorem success_repetition_zero (G : Game Q₁ Q₂ A₁ A₂)
-    (strategy : Strategy (Fin 0 → Q₁) (Fin 0 → Q₂) (Fin 0 → A₁) (Fin 0 → A₂)) :
-    (G.repetition 0).success strategy = 1 := by
-  have h : (G.repetition 0).wins strategy = fun _ => true := by
-    funext questions
-    simp [wins, repetition]
-  unfold success
-  rw [h, FiniteDistribution.probability_true]
-
-@[simp] theorem value_repetition_zero (G : Game Q₁ Q₂ A₁ A₂) :
-    (G.repetition 0).value = 1 := by
-  obtain ⟨strategy, h⟩ := (G.repetition 0).exists_optimal_strategy
-  rw [← h]
-  exact G.success_repetition_zero strategy
-
-/-- The product strategy supplies a lower bound, not an upper bound, for
-parallel repetition. A genuine decay upper bound needs a separate theorem. -/
-theorem pow_value_le_repetition_value (G : Game Q₁ Q₂ A₁ A₂) (n : Nat) :
-    G.value ^ n ≤ (G.repetition n).value := by
-  obtain ⟨strategy, h⟩ := G.exists_optimal_strategy
-  rw [← h, ← G.success_repeatStrategy strategy n]
-  exact (G.repetition n).success_le_value (repeatStrategy strategy n)
-
-theorem value_le_of_localSimulation {R₁ R₂ B₁ B₂ : Type*}
-    [Fintype R₁] [Fintype R₂] [Fintype B₁] [Fintype B₂]
-    [Nonempty B₁] [Nonempty B₂]
-    (G : Game Q₁ Q₂ A₁ A₂) (H : Game R₁ R₂ B₁ B₂)
-    (questionMap₁ : Q₁ → R₁) (questionMap₂ : Q₂ → R₂)
-    (answerMap₁ : Q₁ → B₁ → A₁) (answerMap₂ : Q₂ → B₂ → A₂)
-    (questionLaw : H.questions =
-      G.questions.pushforward (fun q => (questionMap₁ q.1, questionMap₂ q.2)))
-    (acceptance : ∀ x y a b,
-      H.accepts (questionMap₁ x) (questionMap₂ y) a b = true →
-      G.accepts x y (answerMap₁ x a) (answerMap₂ y b) = true) :
-    H.value ≤ G.value := by
-  apply (H.value_le_iff _).2
-  intro strategy
-  exact (G.success_le_of_localSimulation H questionMap₁ questionMap₂
-    answerMap₁ answerMap₂ questionLaw acceptance strategy).trans (G.success_le_value _)
 
 end Game
 

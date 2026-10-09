@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.TakeDrop
 import Mathlib.Tactic.DeriveFintype
 import OAI.Computability.UniqueGames.Machines.MachineTransducerCopy
@@ -123,10 +124,6 @@ theorem identity_output (bits : List Bool) :
   | nil => rfl
   | cons b bits ih => simp [MachineTransducer.output, identityEmit, ih]
 
-private theorem chain {α : Type*} {f : α → α} {x y z : α} {m n : Nat}
-    (first : f^[m] x = y) (second : f^[n] y = z) : f^[n + m] x = z := by
-  rw [Function.iterate_add_apply, first, second]
-
 section Execution
 
 variable (tokens : List (Token q)) (field : Fin q → K) (scratch output : K)
@@ -235,21 +232,14 @@ private theorem suffixTrace (remaining : Nat) :
       have fieldsAfter : (fun j => after (field j)) = (fun j => base (field j)) :=
         fieldValues_outputTapes field output fieldOutput base bits
       rw [fieldsAfter] at second
-      have combined := chain first second
+      have combined := MachineComposition.iterate_trans first second
       simp only [reset_reset, after, outputTapes_append] at combined
       have dropHead : tokens.drop i = tokens.get index :: tokens.drop (i + 1) :=
         List.drop_eq_getElem_cons hiLt
       have hstart : startAt tokens.length i = .entry index := by
         simp [startAt, hiLt, index]
       rw [hstart, dropHead]
-      simp only [templateOutput, List.flatMap_cons]
-      change _ = some (⟨exit, reset state, outputTapes base output
-        (bits ++ templateOutput (tokens.drop (i + 1)) (fun j => base (field j)))⟩ :
-        TM2.Cfg (Alphabet (K := K)) Λ (State σ))
-      convert combined using 1
-      congr 1
-      simp only [workSteps, List.map_cons, List.sum_cons]
-      omega
+      exact combined
 
 /-- The complete phase is derived from concrete instruction traces. The code
 placement premise identifies instructions; it assumes no whole-phase run. -/

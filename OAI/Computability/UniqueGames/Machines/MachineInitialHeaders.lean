@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineSubstitution
@@ -33,37 +34,6 @@ def prefixScan (source scratch output : K) (scale : ℕ) (again restore : Λ) :
           (.load (fun state => (state.1, none)) (.goto fun _ => restore)))
         (.load (fun state => (state.1, none)) (.goto fun _ => restore))))
 
-private theorem update_source (source scratch output : K)
-    (hst : source ≠ scratch) (hso : source ≠ output) (hto : scratch ≠ output)
-    (base : K → List Bool) (input saved emitted replacement : List Bool) :
-    Function.update (forkTapes source scratch output base input saved emitted)
-      source replacement = forkTapes source scratch output base replacement saved emitted := by
-  funext k
-  by_cases hs : k = source
-  · subst k; simp [forkTapes, hst, hso]
-  · by_cases ht : k = scratch
-    · subst k; simp [forkTapes, Ne.symm hst, hto]
-    · by_cases ho : k = output
-      · subst k; simp [forkTapes, Ne.symm hso]
-      · simp [forkTapes, hs, ht, ho]
-
-private theorem update_scratch (source scratch output : K) (hto : scratch ≠ output)
-    (base : K → List Bool) (input saved emitted replacement : List Bool) :
-    Function.update (forkTapes source scratch output base input saved emitted)
-      scratch replacement = forkTapes source scratch output base input replacement emitted := by
-  funext k
-  by_cases ht : k = scratch
-  · subst k; simp [forkTapes, hto]
-  · by_cases ho : k = output
-    · subst k; simp [forkTapes, Ne.symm hto]
-    · simp [forkTapes, ht, ho]
-
-private theorem update_output (source scratch output : K)
-    (base : K → List Bool) (input saved emitted replacement : List Bool) :
-    Function.update (forkTapes source scratch output base input saved emitted)
-      output replacement = forkTapes source scratch output base input saved replacement := by
-  simp [forkTapes]
-
 theorem prefixStep_true (source scratch output : K)
     (hst : source ≠ scratch) (hso : source ≠ output) (hto : scratch ≠ output)
     (scale : ℕ) (again restore : Λ) (base : K → List Bool)
@@ -72,8 +42,8 @@ theorem prefixStep_true (source scratch output : K)
       (ambient, register) (forkTapes source scratch output base (true :: input) saved emitted) =
       ⟨some again, (ambient, some true), forkTapes source scratch output base input
         (true :: saved) (List.replicate scale true ++ emitted)⟩ := by
-  simp [prefixScan, TM2.stepAux, hst, hso, hto, update_source, update_scratch,
-    stepAux_pushWord, update_output]
+  simp [prefixScan, TM2.stepAux, hst, hso, hto, update_fork_source, update_fork_left,
+    stepAux_pushWord, update_fork_right]
 
 theorem prefixStep_false (source scratch output : K)
     (hst : source ≠ scratch) (hso : source ≠ output) (hto : scratch ≠ output)
@@ -83,7 +53,7 @@ theorem prefixStep_false (source scratch output : K)
       (ambient, register) (forkTapes source scratch output base (false :: suffix) saved emitted) =
       ⟨some restore, (ambient, none),
         forkTapes source scratch output base (false :: suffix) saved emitted⟩ := by
-  simp [prefixScan, TM2.stepAux, hst, hso, hto, update_source]
+  simp [prefixScan, TM2.stepAux, hst, hso, hto, update_fork_source]
 
 private theorem replicate_append_cons (n : ℕ) (xs : List Bool) :
     List.replicate n true ++ true :: xs = List.replicate (n + 1) true ++ xs := by
@@ -218,10 +188,6 @@ theorem literalTrace (output : K) (word : List Bool) (label : Λ) (exit : Option
   rw [atLabel, stepAux_pushWord]
   cases exit <;> rfl
 
-private theorem trace_trans {α : Type*} (f : α → α) {a b : ℕ} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 /-- The complete raw initial-graph header phase, in an arbitrary caller program.
 Only the output tape changes; its old suffix is preserved verbatim. -/
 theorem headerTrace (nTape mTape scratch output : K)
@@ -289,7 +255,7 @@ theorem headerTrace (nTape mTape scratch output : K)
   change (MachineComposition.advance (TM2.step program))^[1]
     (some ⟨some closeSecond, (ambient, none), b4⟩) =
     some ⟨exit, (ambient, none), b5⟩ at fifth
-  have total := trace_trans _ (trace_trans _ (trace_trans _ (trace_trans _ first second)
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second)
     third) fourth) fifth
   have hsteps : (((2 * n + 2) + (2 * m + 2)) + 1 + (2 * m + 2)) + 1 =
       2 * n + 4 * m + 8 := by omega
@@ -304,36 +270,6 @@ theorem headerTrace (nTape mTape scratch output : K)
       List.nil_append, List.append_assoc]
   simpa only [b5, hout] using total
 
-def headerInTime (nTape mTape scratch output : K)
-    (hnm : nTape ≠ mTape) (hnt : nTape ≠ scratch) (hno : nTape ≠ output)
-    (hmt : mTape ≠ scratch) (hmo : mTape ≠ output) (hto : scratch ≠ output)
-    (scanN restoreN scanM1 restoreM1 closeFirst scanM6 restoreM6 closeSecond : Λ)
-    (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atScanN : program scanN = prefixScan nTape scratch output 1 scanN restoreN)
-    (atRestoreN : program restoreN = loopAt scratch nTape id false restoreN (some scanM1))
-    (atScanM1 : program scanM1 = prefixScan mTape scratch output 1 scanM1 restoreM1)
-    (atRestoreM1 : program restoreM1 = loopAt scratch mTape id false restoreM1 (some closeFirst))
-    (atCloseFirst : program closeFirst = pushWord output [true, false]
-      (exitAt output (some scanM6)))
-    (atScanM6 : program scanM6 = prefixScan mTape scratch output 6 scanM6 restoreM6)
-    (atRestoreM6 : program restoreM6 = loopAt scratch mTape id false restoreM6 (some closeSecond))
-    (atCloseSecond : program closeSecond = pushWord output [true, false] (exitAt output exit))
-    (base : K → List Bool) (n m : ℕ) (nSuffix mSuffix : List Bool)
-    (hn : base nTape = encodeWord n ++ nSuffix)
-    (hm : base mTape = encodeWord m ++ mSuffix) (ht : base scratch = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some scanN, (ambient, register), base⟩
-      (some ⟨exit, (ambient, none), Function.update base output
-        ((encodeWords [n + m + 1, 6 * m + 1]).reverse ++ base output)⟩)
-      (2 * n + 4 * m + 8) where
-  steps := 2 * n + 4 * m + 8
-  evals_in_steps := headerTrace nTape mTape scratch output hnm hnt hno hmt hmo hto
-    scanN restoreN scanM1 restoreM1 closeFirst scanM6 restoreM6 closeSecond exit
-    program atScanN atRestoreN atScanM1 atRestoreM1 atCloseFirst atScanM6 atRestoreM6
-    atCloseSecond base n m nSuffix mSuffix hn hm ht ambient register
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineInitialHeaders
 

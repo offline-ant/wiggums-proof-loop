@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Logic.Equiv.Fin.Basic
 import Mathlib.Logic.Function.Basic
@@ -37,11 +38,7 @@ def product (G : BipartiteGame L R E A) (t : ℕ) :
     BipartiteGame (Fin t → L) (Fin t → R) (Fin t → E) (Fin t → A) where
   left e i := G.left (e i)
   right e i := G.right (e i)
-  permutation e :=
-    { toFun := fun a i => G.permutation (e i) (a i)
-      invFun := fun a i => (G.permutation (e i)).symm (a i)
-      left_inv := fun a => by funext i; exact (G.permutation (e i)).left_inv (a i)
-      right_inv := fun a => by funext i; exact (G.permutation (e i)).right_inv (a i) }
+  permutation e := Equiv.piCongrRight (fun i => G.permutation (e i))
   simple := by
     intro e f h
     funext i
@@ -59,25 +56,6 @@ def product (G : BipartiteGame L R E A) (t : ℕ) :
     (e : Fin t → E) (a : Fin t → A) (i : Fin t) :
     (G.product t).permutation e a i = G.permutation (e i) (a i) := rfl
 
-theorem product_isTranslation [Add A] (G : BipartiteGame L R E A)
-    (hG : G.IsTranslation) (t : ℕ) : (G.product t).IsTranslation := by
-  obtain ⟨offset, hoffset⟩ := hG
-  refine ⟨fun e i => offset (e i), ?_⟩
-  intro e a
-  funext i
-  exact hoffset (e i) (a i)
-
-theorem product_edge_card [Fintype E] (t : ℕ) :
-    Fintype.card (Fin t → E) = Fintype.card E ^ t := by simp
-
-theorem product_left_card [Fintype L] (t : ℕ) :
-    Fintype.card (Fin t → L) = Fintype.card L ^ t := by simp
-
-theorem product_right_card [Fintype R] (t : ℕ) :
-    Fintype.card (Fin t → R) = Fintype.card R ^ t := by simp
-
-theorem product_edges_nonempty [Nonempty E] (t : ℕ) :
-    Nonempty (Fin t → E) := inferInstance
 
 section
 
@@ -160,12 +138,6 @@ theorem toGame_success_eq_satisfiedCount [DecidableEq A]
   intro e _
   by_cases h : G.Satisfied strategy.1 strategy.2 e <;> simp [h]
 
-/-- Independent uniform draws of base edges are exactly the uniform product
-edge law, without reweighting or collapsing occurrences. -/
-theorem product_uniform_edge_law (t : ℕ) :
-    (FiniteDistribution.uniform E).iid t =
-      FiniteDistribution.uniform (Fin t → E) :=
-  FiniteDistribution.iid_uniform t
 
 /-- The graph construction agrees with the ordinary independent repeated
 game for arbitrary local tuple strategies. This is the soundness interface. -/
@@ -209,14 +181,7 @@ theorem product_coordinate_success (G : BipartiteGame L R E A) (t : ℕ)
 /-- Scalar union bound, proved for the actual base success probability. -/
 theorem one_sub_mul_one_sub_le_pow {p : ℝ} (hp0 : 0 ≤ p) (_hp1 : p ≤ 1) (t : ℕ) :
     1 - (t : ℝ) * (1 - p) ≤ p ^ t := by
-  induction t with
-  | zero => simp
-  | succ t ih =>
-      have hmul := mul_le_mul_of_nonneg_right ih hp0
-      have hnonneg : 0 ≤ (t : ℝ) * (1 - p) ^ 2 := by positivity
-      rw [pow_succ]
-      push_cast
-      nlinarith
+  convert one_add_mul_sub_le_pow (by linarith : -1 ≤ p) t using 1 <;> ring
 
 /-- The coordinatewise honest labeling loses at most `t` times the base
 error. This does not restrict the strategies covered by the soundness bridge. -/
@@ -278,14 +243,6 @@ def relabel {B : Type*} (G : BipartiteGame L R E A) (e : A ≃ B) :
   permutation f := e.symm.trans ((G.permutation f).trans e)
   simple := G.simple
 
-theorem relabel_isTranslation {B : Type*} [Add A] [Add B]
-    (G : BipartiteGame L R E A) (e : A ≃+ B) (hG : G.IsTranslation) :
-    (G.relabel e.toEquiv).IsTranslation := by
-  obtain ⟨offset, hoffset⟩ := hG
-  refine ⟨fun f => e (offset f), ?_⟩
-  intro f b
-  change e (G.permutation f (e.symm b)) = b + e (offset f)
-  rw [hoffset, map_add, e.apply_symm_apply]
 
 section
 
@@ -352,34 +309,9 @@ def binaryProductEquiv (ell t : ℕ) :
     rw [Equiv.apply_symm_apply]
   map_add' _ _ := rfl
 
-def binaryProduct {ell : ℕ} (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ) :
-    BipartiteGame (Fin t → L) (Fin t → R) (Fin t → E) (Fin (ell * t) → ZMod 2) :=
-  (G.product t).relabel (binaryProductEquiv ell t).toEquiv
-
-theorem binaryProduct_isTranslation {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (hG : G.IsTranslation) (t : ℕ) :
-    (G.binaryProduct t).IsTranslation :=
-  relabel_isTranslation _ (binaryProductEquiv ell t) (G.product_isTranslation hG t)
-
-theorem binaryProduct_dimension_positive {ell t : ℕ} (hell : 0 < ell) (ht : 0 < t) :
-    0 < ell * t := Nat.mul_pos hell ht
-
-theorem binaryProduct_alphabet_card (ell t : ℕ) :
-    Fintype.card (Fin (ell * t) → ZMod 2) = 2 ^ (ell * t) := by simp
 
 variable [Fintype L] [Fintype R] [Fintype E] [Nonempty E]
 
-theorem binaryProduct_value_eq_repetition {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ) :
-    (G.binaryProduct t).toGame.value = (G.toGame.repetition t).value := by
-  rw [binaryProduct, relabel_value, product_value_eq_repetition]
-
-theorem binaryProduct_completeness {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ) {error : ℝ}
-    (hcomplete : 1 - error ≤ G.toGame.value) :
-    1 - (t : ℝ) * error ≤ (G.binaryProduct t).toGame.value := by
-  rw [binaryProduct, relabel_value]
-  exact G.product_completeness t hcomplete
 
 end BipartiteGame
 
@@ -418,9 +350,6 @@ def tupleCode {X : Type*} {n : ℕ} (code : X ≃ Fin n) (t : ℕ) :
     (t : ℕ) (a : Fin (n ^ t)) (i : Fin t) :
     (tupleCode code t).symm a i = code.symm (finFunctionFinEquiv.symm a i) := rfl
 
-theorem tupleCode_val {X : Type*} {n : ℕ} (code : X ≃ Fin n)
-    (t : ℕ) (f : Fin t → X) :
-    (tupleCode code t f : ℕ) = ∑ i : Fin t, (code (f i) : ℕ) * n ^ (i : ℕ) := rfl
 
 def vertexCode (leftCode : L ≃ Fin l) (rightCode : R ≃ Fin r) (t : ℕ) :
     ((Fin t → L) ⊕ (Fin t → R)) ≃ Fin (l ^ t + r ^ t) :=
@@ -465,18 +394,6 @@ def output (G : BipartiteGame L R E (Fin q))
     (output G leftCode rightCode edgeCode t hm).constraints =
       List.ofFn (outputRow G leftCode rightCode edgeCode t) := rfl
 
-@[simp] theorem output_length (G : BipartiteGame L R E (Fin q))
-    (leftCode : L ≃ Fin l) (rightCode : R ≃ Fin r) (edgeCode : E ≃ Fin m)
-    (t : ℕ) (hm : 0 < m) :
-    (output G leftCode rightCode edgeCode t hm).constraints.length = m ^ t := by
-  exact List.length_ofFn
-
-def output_simpleBipartite (G : BipartiteGame L R E (Fin q))
-    (leftCode : L ≃ Fin l) (rightCode : R ≃ Fin r) (edgeCode : E ≃ Fin m)
-    (t : ℕ) (hm : 0 < m) :
-    SimpleBipartite (output G leftCode rightCode edgeCode t hm) :=
-  render_simpleBipartite (graph G t) (vertexCode leftCode rightCode t)
-    (tupleCode edgeCode t).symm (tables G t) (pow_pos hm t)
 
 theorem outputRow_source (G : BipartiteGame L R E (Fin q))
     (leftCode : L ≃ Fin l) (rightCode : R ≃ Fin r) (edgeCode : E ≃ Fin m)
@@ -486,13 +403,6 @@ theorem outputRow_source (G : BipartiteGame L R E (Fin q))
         (leftCode (G.left (edgeCode.symm (finFunctionFinEquiv.symm i j))) : ℕ) *
           l ^ (j : ℕ) := rfl
 
-theorem outputRow_target (G : BipartiteGame L R E (Fin q))
-    (leftCode : L ≃ Fin l) (rightCode : R ≃ Fin r) (edgeCode : E ≃ Fin m)
-    (t : ℕ) (i : Fin (m ^ t)) :
-    ((outputRow G leftCode rightCode edgeCode t i).target : ℕ) = l ^ t +
-      ∑ j : Fin t,
-        (rightCode (G.right (edgeCode.symm (finFunctionFinEquiv.symm i j))) : ℕ) *
-          r ^ (j : ℕ) := rfl
 
 /-- Each complete output-table entry is coordinatewise application of the
 base permutation, followed by the same radix alphabet encoding. -/
@@ -504,7 +414,8 @@ theorem outputRow_images (G : BipartiteGame L R E (Fin q))
         G.permutation (edgeCode.symm (finFunctionFinEquiv.symm i j))
           (finFunctionFinEquiv.symm a j)) := by
   simp [outputRow, ProductTarget.row, tables, graph, BipartiteGame.relabel,
-    BipartiteGame.product, tupleCode, fullTable]
+    BipartiteGame.product, Equiv.piCongrRight, tupleCode, fullTable]
+  rfl
 
 variable [Fintype L] [Fintype R] [Fintype E]
 
@@ -695,31 +606,13 @@ def vertices (t : ℕ) (ht : 0 < t) :
   toFun := Sum.elim
     (fun x => finFunctionFinEquiv (fun i => (x i).val))
     (fun y => finFunctionFinEquiv (fun i => (y i).val))
-  inj' := by
-    intro x y h
-    cases x with
-    | inl x =>
-      cases y with
-      | inl y =>
-        apply congrArg Sum.inl
-        funext i
-        exact Subtype.ext (congrFun (finFunctionFinEquiv.injective h) i)
-      | inr y =>
-        have hfirst := congrFun (finFunctionFinEquiv.injective h) ⟨0, ht⟩
-        have hs := congrArg presentation.side hfirst
-        rw [(x ⟨0, ht⟩).property, (y ⟨0, ht⟩).property] at hs
-        cases hs
-    | inr x =>
-      cases y with
-      | inl y =>
-        have hfirst := congrFun (finFunctionFinEquiv.injective h) ⟨0, ht⟩
-        have hs := congrArg presentation.side hfirst
-        rw [(x ⟨0, ht⟩).property, (y ⟨0, ht⟩).property] at hs
-        cases hs
-      | inr y =>
-        apply congrArg Sum.inr
-        funext i
-        exact Subtype.ext (congrFun (finFunctionFinEquiv.injective h) i)
+  inj' := Sum.elim_injective.mpr
+    ⟨fun _ _ h => funext fun i => Subtype.ext (congrFun (finFunctionFinEquiv.injective h) i),
+      fun _ _ h => funext fun i => Subtype.ext (congrFun (finFunctionFinEquiv.injective h) i),
+      fun x y h => by
+        have hs := congrArg presentation.side
+          (congrFun (finFunctionFinEquiv.injective h) ⟨0, ht⟩)
+        simp only [(x ⟨0, ht⟩).property, (y ⟨0, ht⟩).property, Bool.false_eq_true] at hs⟩
 
 def side (t : ℕ) (ht : 0 < t) (v : Fin (H.vertices ^ t)) : Bool :=
   presentation.side (finFunctionFinEquiv.symm v ⟨0, ht⟩)
@@ -755,8 +648,6 @@ def output (t : ℕ) (ht : 0 < t) : Instance (q ^ t) :=
 @[simp] theorem output_constraints (t : ℕ) (ht : 0 < t) :
     (output H presentation t ht).constraints = List.ofFn (outputRow H presentation t ht) := rfl
 
-@[simp] theorem output_length (t : ℕ) (ht : 0 < t) :
-    (output H presentation t ht).constraints.length = H.constraints.length ^ t := by simp
 
 def simpleBipartite (t : ℕ) (ht : 0 < t) : SimpleBipartite (output H presentation t ht) :=
   Embedded.simpleBipartite _ _ _ _ (side H presentation t ht)
@@ -768,11 +659,6 @@ theorem outputRow_source (t : ℕ) (ht : 0 < t)
       ∑ j : Fin t, (H.constraints[finFunctionFinEquiv.symm i j].source : ℕ) *
         H.vertices ^ (j : ℕ) := rfl
 
-theorem outputRow_target (t : ℕ) (ht : 0 < t)
-    (i : Fin (H.constraints.length ^ t)) :
-    ((outputRow H presentation t ht i).target : ℕ) =
-      ∑ j : Fin t, (H.constraints[finFunctionFinEquiv.symm i j].target : ℕ) *
-        H.vertices ^ (j : ℕ) := rfl
 
 theorem outputRow_images (t : ℕ) (ht : 0 < t)
     (i : Fin (H.constraints.length ^ t)) (a : Fin (q ^ t)) :
@@ -781,7 +667,8 @@ theorem outputRow_images (t : ℕ) (ht : 0 < t)
         H.constraints[finFunctionFinEquiv.symm i j].permutation.images[
           finFunctionFinEquiv.symm a j]) := by
   simp [outputRow, Embedded.row, graph, BipartiteGame.relabel, BipartiteGame.product,
-    SimpleBipartite.toBipartiteGame, permutationEquiv, fullTable]
+    Equiv.piCongrRight, SimpleBipartite.toBipartiteGame, permutationEquiv, fullTable]
+  rfl
 
 theorem output_gameWords (t : ℕ) (ht : 0 < t) :
     Complexity.gameWords (output H presentation t ht) =

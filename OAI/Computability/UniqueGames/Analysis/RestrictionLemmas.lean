@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Analysis.SpecialFunctions.Pow.Real
 import Mathlib.Tactic.Ring
@@ -18,190 +19,6 @@ section
 
 namespace UniqueGamesTheorem.Appendix.Restriction
 
-def isum {α : Type} : List α → (α → Int) → Int
-  | [], _ => 0
-  | a :: as, f => f a + isum as f
-
-theorem isum_congr {α : Type} (as : List α) (f g : α → Int)
-    (h : ∀ a, f a = g a) : isum as f = isum as g := by
-  induction as with
-  | nil => rfl
-  | cons a as ih => simp only [isum, h, ih]
-
-theorem isum_zero {α : Type} (as : List α) : isum as (fun _ => 0) = 0 := by
-  induction as with
-  | nil => rfl
-  | cons a as ih => simp only [isum, ih, Int.zero_add]
-
-theorem isum_add {α : Type} (as : List α) (f g : α → Int) :
-    isum as (fun a => f a + g a) = isum as f + isum as g := by
-  induction as with
-  | nil => rfl
-  | cons a as ih => simp only [isum, ih]; omega
-
-theorem isum_mul_left {α : Type} (as : List α) (c : Int) (f : α → Int) :
-    isum as (fun a => c * f a) = c * isum as f := by
-  induction as with
-  | nil => simp only [isum, Int.mul_zero]
-  | cons a as ih => simp only [isum, ih, Int.mul_add]
-
-theorem isum_mul_right {α : Type} (as : List α) (f : α → Int) (c : Int) :
-    isum as (fun a => f a * c) = isum as f * c := by
-  induction as with
-  | nil => simp only [isum, Int.zero_mul]
-  | cons a as ih => simp only [isum, ih, Int.add_mul]
-
-theorem isum_const {α : Type} (as : List α) (c : Int) :
-    isum as (fun _ => c) = (as.length : Int) * c := by
-  induction as with
-  | nil => simp only [isum, List.length_nil, Int.natCast_zero, Int.zero_mul]
-  | cons a as ih =>
-    simp only [isum, ih, List.length_cons, Int.natCast_add, Int.natCast_one,
-      Int.add_mul, Int.one_mul]
-    omega
-
-theorem isum_swap {α β : Type} (as : List α) (bs : List β) (f : α → β → Int) :
-    isum as (fun a => isum bs (f a)) = isum bs (fun b => isum as (fun a => f a b)) := by
-  induction as with
-  | nil => simp only [isum, isum_zero]
-  | cons a as ih => simp only [isum, isum_add, ih]
-
-theorem isum_map {α β : Type} (as : List α) (g : α → β) (f : β → Int) :
-    isum (as.map g) f = isum as (fun a => f (g a)) := by
-  induction as with
-  | nil => rfl
-  | cons a as ih => simp only [List.map_cons, isum, ih]
-
-theorem isum_perm {α : Type} {as bs : List α} (h : as.Perm bs) (f : α → Int) :
-    isum as f = isum bs f := by
-  induction h with
-  | nil => rfl
-  | cons a h ih => simp only [isum, ih]
-  | swap a b as => simp only [isum]; omega
-  | trans h₁ h₂ ih₁ ih₂ => exact ih₁.trans ih₂
-
-/-- The binary character is multiplicative across addition of its exponents. -/
-def binarySign (b : Bool) : Int := if b then -1 else 1
-
-theorem binarySign_xor (a b : Bool) :
-    binarySign (a.xor b) = binarySign a * binarySign b := by
-  cases a <;> cases b <;> decide
-
-/-- The character part of (A.1), given the trace-pairing compatibility equation.
-`traceCompatibility` states the actual mathematical hypothesis still required
-when instantiating this result with binary matrix spaces and quotient maps. -/
-theorem binary_character_restriction {M N Y Z : Type}
-    (translate : M → N → M) (compress : Y → Z)
-    (ambientPair : Y → M → Bool) (restrictedPair : Z → N → Bool)
-    (traceCompatibility : ∀ y t n,
-      ambientPair y (translate t n) = (ambientPair y t).xor (restrictedPair (compress y) n))
-    (y : Y) (t : M) (n : N) :
-    binarySign (ambientPair y (translate t n)) =
-      binarySign (ambientPair y t) * binarySign (restrictedPair (compress y) n) := by
-  rw [traceCompatibility, binarySign_xor]
-
-/-- Raw coefficient form of frequency merging in (A.1).
-
-When `f` is synthesized as `sum_y coeff(y) * ambient(y, t+n)`, the raw
-restricted coefficient at `z` is the cardinality of the restricted domain
-times the sum of translated coefficients with `compress y = z`. Normalized
-coefficients divide the displayed equation by that cardinality.
--/
-theorem coefficient_merging {M N Y Z : Type} [DecidableEq Z]
-    (ys : List Y) (ns : List N) (translate : M → N → M) (compress : Y → Z)
-    (ambient : Y → M → Int) (restricted : Z → N → Int) (coeff : Y → Int)
-    (compatibility : ∀ y t n,
-      ambient y (translate t n) = ambient y t * restricted (compress y) n)
-    (orthogonality : ∀ y z,
-      isum ns (fun n => restricted (compress y) n * restricted z n) =
-        if compress y = z then (ns.length : Int) else 0)
-    (t : M) (z : Z) :
-    isum ns (fun n =>
-      isum ys (fun y => coeff y * ambient y (translate t n)) * restricted z n) =
-    (ns.length : Int) *
-      isum ys (fun y => if compress y = z then coeff y * ambient y t else 0) := by
-  calc
-    _ = isum ns (fun n => isum ys (fun y =>
-        (coeff y * ambient y t) *
-          (restricted (compress y) n * restricted z n))) := by
-      apply isum_congr
-      intro n
-      rw [← isum_mul_right]
-      apply isum_congr
-      intro y
-      rw [compatibility]
-      simp only [Int.mul_assoc]
-    _ = isum ys (fun y => isum ns (fun n =>
-        (coeff y * ambient y t) *
-          (restricted (compress y) n * restricted z n))) := isum_swap ns ys _
-    _ = isum ys (fun y => (coeff y * ambient y t) *
-        (if compress y = z then (ns.length : Int) else 0)) := by
-      apply isum_congr
-      intro y
-      rw [isum_mul_left, orthogonality]
-    _ = isum ys (fun y => (ns.length : Int) *
-        (if compress y = z then coeff y * ambient y t else 0)) := by
-      apply isum_congr
-      intro y
-      split <;> simp_all only [Int.mul_comm, Int.mul_zero]
-    _ = _ := isum_mul_left ys _ _
-
-/-- The raw finite-sum translation identity behind (A.2).
-
-For every fixed restriction point `n`, translation permutes the ambient list.
-Consequently summing an arbitrary integer observable over all translates and
-restriction points multiplies its ambient sum by the restriction-domain size.
-One may use an integer-valued moment as the observable.
--/
-theorem restriction_average {M N : Type}
-    (ms : List M) (ns : List N) (translate : M → N → M)
-    (translationPermutes : ∀ n, (ms.map (fun t => translate t n)).Perm ms)
-    (observable : M → Int) :
-    isum ms (fun t => isum ns (fun n => observable (translate t n))) =
-      (ns.length : Int) * isum ms observable := by
-  rw [isum_swap]
-  calc
-    _ = isum ns (fun _ => isum ms observable) := by
-      apply isum_congr
-      intro n
-      rw [← isum_map]
-      exact isum_perm (translationPermutes n) observable
-    _ = _ := isum_const ns _
-
-/-- Concrete translation-permutation verification for the one-bit space. -/
-theorem bool_translation_perm (n : Bool) :
-    ([false, true].map (fun t => t.xor n)).Perm [false, true] := by
-  cases n
-  · exact List.Perm.refl _
-  · exact List.Perm.swap false true []
-
-/-- Fully instantiated one-bit averaging, with any list of restriction points. -/
-theorem bool_restriction_average (ns : List Bool) (observable : Bool → Int) :
-    isum [false, true] (fun t => isum ns (fun n => observable (t.xor n))) =
-      (ns.length : Int) * isum [false, true] observable :=
-  restriction_average [false, true] ns Bool.xor bool_translation_perm observable
-
-/-- Character compatibility instantiated on the binary one-dimensional space. -/
-theorem bool_character_compatibility (y t n : Bool) :
-    binarySign (y && (t.xor n)) = binarySign (y && t) * binarySign (y && n) := by
-  cases y <;> cases t <;> cases n <;> decide
-
-/-- Fourier orthogonality instantiated on the binary one-dimensional space. -/
-theorem bool_character_orthogonality (y z : Bool) :
-    isum [false, true] (fun n => binarySign (y && n) * binarySign (z && n)) =
-      if y = z then (2 : Int) else 0 := by
-  cases y <;> cases z <;> decide
-
-/-- A complete instance of the coefficient theorem with no character hypotheses. -/
-theorem bool_coefficient_merging (coeff : Bool → Int) (t z : Bool) :
-    isum [false, true] (fun n =>
-      isum [false, true] (fun y => coeff y * binarySign (y && (t.xor n))) *
-        binarySign (z && n)) =
-      2 * (coeff z * binarySign (z && t)) := by
-  have h := coefficient_merging [false, true] [false, true] Bool.xor id
-    (fun y t => binarySign (y && t)) (fun y n => binarySign (y && n))
-    coeff bool_character_compatibility bool_character_orthogonality t z
-  cases z <;> simpa [isum] using h
 
 end UniqueGamesTheorem.Appendix.Restriction
 
@@ -270,21 +87,6 @@ theorem real_character_restriction (A : Submodule F2 E) (B : Submodule F2 F)
 
 variable [Finite E] [Finite F] [Fintype (E →ₗ[F2] F)]
 
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-theorem linear_restriction_average (A : Submodule F2 E) (B : Submodule F2 F)
-    (h : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 T, 𝔼 N, UniqueGamesTheorem.Fourier.MatrixRestrictions.restrict h A B T N) = 𝔼 T, h T :=
-  real_translation_average (UniqueGamesTheorem.Fourier.MatrixRestrictions.embed A B) h
-
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-/-- The `p`th-moment form of (A.2). In fact the averaging identity holds for
-every real exponent, whenever the observable is interpreted by real powers. -/
-theorem linear_restriction_moment_average (A : Submodule F2 E) (B : Submodule F2 F)
-    (h : (E →ₗ[F2] F) → ℝ) (p : ℝ) :
-    (𝔼 T, 𝔼 N, |UniqueGamesTheorem.Fourier.MatrixRestrictions.restrict h A B T N| ^ p) =
-      𝔼 T, |h T| ^ p :=
-  real_translation_average (UniqueGamesTheorem.Fourier.MatrixRestrictions.embed A B)
-    (fun T => |h T| ^ p)
 
 variable [Fintype (F →ₗ[F2] E)]
 
@@ -361,13 +163,6 @@ theorem spectralProjector_energy (P : (F →ₗ[F2] E) → Prop)
   rw [linearCoeff_spectralProjector]
   split_ifs <;> simp
 
-theorem spectralProjector_energy_le (P : (F →ₗ[F2] E) → Prop)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 X, spectralProjector P f X ^ 2) ≤ 𝔼 X, f X ^ 2 := by
-  classical
-  rw [spectralProjector_energy, ← linear_parseval]
-  exact Finset.sum_le_sum_of_subset_of_nonneg (Finset.filter_subset _ _)
-    (fun Y _ _ => sq_nonneg _)
 
 theorem function_eq_of_linearCoeff_eq {f g : (E →ₗ[F2] F) → ℝ}
     (h : ∀ Y, linearCoeff f Y = linearCoeff g Y) : f = g := by
@@ -404,12 +199,6 @@ def mapDerivative (X : F →ₗ[F2] E) (f : (E →ₗ[F2] F) → ℝ) :
     UniqueGamesTheorem.Fourier.MatrixRestrictions.Parameter X.range X.ker → ℝ :=
   UniqueGamesTheorem.Fourier.MatrixRestrictions.restrict (rankProjector X f) X.range X.ker 0
 
-theorem rankProjector_energy (X : F →ₗ[F2] E) (f : (E →ₗ[F2] F) → ℝ) :
-    (𝔼 M, rankProjector X f M ^ 2) =
-      ∑ Y, if RankAdditivity.RankBelow X Y then linearCoeff f Y ^ 2 else 0 := by
-  classical
-  unfold rankProjector
-  rw [spectralProjector_energy, Finset.sum_filter]
 
 def selectorMultiplicity {I : Type*} [Fintype I]
     (P : I → (F →ₗ[F2] E) → Prop) (Y : F →ₗ[F2] E) : ℕ :=
@@ -472,20 +261,6 @@ theorem mapDerivative_energy_eq_coefficients (X : F →ₗ[F2] E)
   rw [← linear_parseval]
   simp_rw [linearCoeff_mapDerivative]
 
-/-- A.10 on actual normalized derivative norms. -/
-theorem mapDerivative_energy_le (X : F →ₗ[F2] E)
-    [Fintype (X.ker →ₗ[F2] (E ⧸ X.range))]
-    (f : (E →ₗ[F2] F) → ℝ) (d : ℕ)
-    (hdegree : ∀ Y : F →ₗ[F2] E,
-      d < Module.finrank F2 Y.range → linearCoeff f Y = 0) :
-    (𝔼 N, mapDerivative X f N ^ 2) ≤
-      (2 : ℝ) ^ (2 * Module.finrank F2 X.range * (d - Module.finrank F2 X.range)) *
-        (𝔼 M, rankProjector X f M ^ 2) := by
-  rw [mapDerivative_energy_eq_coefficients, rankProjector_energy]
-  have hh := DerivativeEnergy.coefficient_energy X (linearCoeff f) d hdegree
-  simp only [Restriction.compressFrequency, FullCompression.compression] at hh ⊢
-  convert hh using 1
-  congr 1
 
 /-- The coefficient-energy definition from the weighted estimate is exactly
 the normalized squared norm of the actual map derivative. -/
@@ -774,12 +549,6 @@ theorem degree_rankLevel (d : ℕ) (f : (E →ₗ[F2] F) → ℝ) :
     DegreeAtMost d (LevelInequality.rankLevel d f) :=
   LevelInequality.rankLevel_degree_le d f
 
-theorem degree_spectralProjector (P : (F →ₗ[F2] E) → Prop)
-    {d : ℕ} {f : (E →ₗ[F2] F) → ℝ} (hf : DegreeAtMost d f) :
-    DegreeAtMost d (spectralProjector P f) := by
-  intro Y hY
-  rw [linearCoeff_spectralProjector, hf Y hY]
-  split_ifs <;> rfl
 
 theorem eq_zero_of_linearCoeff_zero {f : (E →ₗ[F2] F) → ℝ}
     (hf : ∀ Y, linearCoeff f Y = 0) : f = 0 := by

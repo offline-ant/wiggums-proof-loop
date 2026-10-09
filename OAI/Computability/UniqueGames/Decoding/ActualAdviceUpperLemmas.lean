@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.ActualAdviceStochasticBridgeLemmas
 import OAI.Computability.UniqueGames.Decoding.ActualSpectralLemmas
 import OAI.Computability.UniqueGames.Decoding.AdviceImageLaw
@@ -191,24 +192,6 @@ theorem public_map_average_bound
       rw [FiniteDistribution.expectation, ← Finset.sum_mul,
         (FiniteDistribution.uniform (Alphabet s →ₗ[F2] Vector rs)).normalized, one_mul]
 
-/-- The actual policies selected from the two separate observations obey the
-bound under uniform occurrence IDs and every independent private response. -/
-theorem actual_source_average_bound (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (distinct : ∀ o i j, (sourceIncidence S).name o i =
-      (sourceIncidence S).name o j → i = j)
-    (hopt : Clean.IncidenceGap.parityValue (sourceIncidence S)
-      (FiniteDistribution.uniform (Fin S.occurrences)) ≤ (4 : ℝ) / 5) :
-    (FiniteDistribution.uniform (Alphabet s →ₗ[F2] Vector rs)).expectation
-        (fun A => AdviceLaw.actualSuccess
-          (Clean.IncidenceGap.slotLaw (FiniteDistribution.uniform (Fin S.occurrences)))
-          (sourceIncidence S) A (policies S labeling good A) β hβ₀ hβ₁) ≤
-      (1 - (β / (2 : ℝ) ^ (d + rs)) / 3600) ^ k :=
-  public_map_average_bound (sourceIncidence S) (FiniteDistribution.uniform (Fin S.occurrences))
-    (policies S labeling good) β hβ₀ hβ₁ distinct hopt
 
 end
 
@@ -237,35 +220,6 @@ attribute [local instance] Fintype.ofFinite
 
 variable {k s d rs : Nat}
 
-theorem product_probability {X Y : Type*} [Fintype X] [Fintype Y]
-    (μ : FiniteDistribution X) (ν : FiniteDistribution Y) (p : X → Y → Prop) :
-    (μ.product ν).probability (fun xy => decide (p xy.1 xy.2)) =
-      μ.expectation (fun x => ν.expectation (fun y => if p x y then 1 else 0)) := by
-  have hp : (μ.product ν).probability (fun xy => decide (p xy.1 xy.2)) =
-      (μ.product ν).expectation (fun xy => if p xy.1 xy.2 then 1 else 0) := by
-    simp [FiniteDistribution.probability, FiniteDistribution.expectation, mul_ite]
-  rw [hp, FiniteDistribution.expectation_product]
-
-theorem fixedMapSuccess_eq_product {O N D : Type}
-    [Fintype O] [DecidableEq O] [Fintype N] [DecidableEq N]
-    [AddCommGroup D] [Module F2 D] [Fintype D]
-    (μ : FiniteDistribution (O × Fin 3))
-    (g : IncidenceExtraction.Incidence O N)
-    (policy : Clean.ActualAdviceStochasticBridge.Policies k g D)
-    (J : Finset (Fin k)) (Y : RawPartnerTarget.RawPoint J →ₗ[F2] D) :
-    Clean.ActualAdviceStochasticBridge.fixedMapSuccess μ g policy J Y =
-      (FiniteDistribution.table (fun _ : Fin k => μ)).expectation (fun draw =>
-        ((policy.first J (fun j => (draw j).1)
-          (Y.comp (Clean.ActualAdviceBridge.projection g J draw))).product
-          (policy.second J (Clean.ActualAdviceBridge.displayedQuestion g J draw) Y)).probability
-          (fun answers => decide
-            (Clean.ActualAdviceBridge.projection g J draw answers.1.val = answers.2.val))) := by
-  unfold Clean.ActualAdviceStochasticBridge.fixedMapSuccess
-  apply FiniteDistribution.expectation_congr
-  intro draw
-  simp only [FiniteDistribution.probability, FiniteDistribution.expectation,
-    FiniteDistribution.product, Fintype.sum_prod_type, Finset.mul_sum,
-    mul_ite, decide_eq_true_eq, mul_one, mul_zero]
 
 theorem fixedMapSuccess_eq_observed (S : Source)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
@@ -281,66 +235,13 @@ theorem fixedMapSuccess_eq_observed (S : Source)
         VisiblePolicies.observedAgreement S labeling good
           (actualDraw S A J (fun j => (draw j).1)
             (fun j => Clean.ActualAdviceBridge.indexSlot (draw j).2) T M)) := by
-  rw [fixedMapSuccess_eq_product]
+  unfold Clean.ActualAdviceStochasticBridge.fixedMapSuccess
   apply FiniteDistribution.expectation_congr
   intro draw
   rw [source_projection_eq]
   exact policyAgreement_actual S labeling good A J (fun j => (draw j).1)
     (fun j => Clean.ActualAdviceBridge.indexSlot (draw j).2) T M
 
-/-- The actual experiment, before identifying its visible-map marginal with
-the clean-coordinate law. The two private answer draws are already averaged
-inside `observedAgreement`. -/
-def sampledAgreement (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (μ : FiniteDistribution (Fin S.occurrences × Fin 3))
-    (A : Alphabet s →ₗ[F2] Vector rs)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1) : ℝ :=
-  ((Clean.bernoulli β hβ₀ hβ₁).iid k).expectation fun mask =>
-    (FiniteDistribution.uniform
-      ((RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Vector d) ×
-        (RawPartnerTarget.RawPoint (Clean.NativeExperiment.maskSet mask) →ₗ[F2] Alphabet s))).expectation
-      fun TM => (FiniteDistribution.table (fun _ : Fin k => μ)).expectation fun draw =>
-        VisiblePolicies.observedAgreement S labeling good
-          (actualDraw S A (Clean.NativeExperiment.maskSet mask) (fun j => (draw j).1)
-            (fun j => Clean.ActualAdviceBridge.indexSlot (draw j).2) TM.1 TM.2)
-
-theorem actualSuccess_eq_sampledAgreement (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (μ : FiniteDistribution (Fin S.occurrences × Fin 3))
-    (A : Alphabet s →ₗ[F2] Vector rs)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1) :
-    AdviceLaw.actualSuccess μ (sourceIncidence S) A (policies S labeling good A)
-        β hβ₀ hβ₁ = sampledAgreement S labeling good μ A β hβ₀ hβ₁ := by
-  unfold AdviceLaw.actualSuccess sampledAgreement
-  apply FiniteDistribution.expectation_congr
-  intro mask
-  apply FiniteDistribution.expectation_congr
-  intro TM
-  exact fixedMapSuccess_eq_observed S labeling good μ A _ TM.1 TM.2
-
-/-- The dimension bound for the true average of the actual observation-local
-decoders, including all ranks of the uniformly sampled public row map. -/
-theorem sampledAgreement_average_bound (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (good : VisiblePolicies.LeftInput S k s d (Vector rs) →
-      VisiblePolicies.ResponseWitness k → Prop)
-    (β : ℝ) (hβ₀ : 0 ≤ β) (hβ₁ : β ≤ 1)
-    (distinct : ∀ o i j, (sourceIncidence S).name o i =
-      (sourceIncidence S).name o j → i = j)
-    (hopt : Clean.IncidenceGap.parityValue (sourceIncidence S)
-      (FiniteDistribution.uniform (Fin S.occurrences)) ≤ (4 : ℝ) / 5) :
-    (FiniteDistribution.uniform (Alphabet s →ₗ[F2] Vector rs)).expectation
-      (fun A => sampledAgreement S labeling good
-        (Clean.IncidenceGap.slotLaw (FiniteDistribution.uniform (Fin S.occurrences)))
-        A β hβ₀ hβ₁) ≤
-      (1 - (β / (2 : ℝ) ^ (d + rs)) / 3600) ^ k := by
-  simp_rw [← actualSuccess_eq_sampledAgreement]
-  exact actual_source_average_bound S labeling good β hβ₀ hβ₁ distinct hopt
 
 end
 
@@ -498,13 +399,6 @@ def targetHit (S : Source) (k s d r : ℕ)
     Seed S k s d r → Bool :=
   fun x => ActualEvents.targetHit S k s d r labeling α (pad S k s d r x)
 
-/-- The padded comparison contains both complete affine component maps. -/
-theorem pad_eq (S : Source) (k s d r : ℕ) (x : Seed S k s d r) :
-    pad S k s d r x =
-      (((draw x).occurrences, AdviceExperiment.paddedComplement (ActualGame.rhs S) (draw x)),
-        (LinearMap.toMatrix' (draw x).rowMap,
-          MatrixCoordinates.mapEquiv k s (AdviceExperiment.paddedMatrix (ActualGame.rhs S) (draw x)))) :=
-  rfl
 
 theorem slice_eq_selectedEvent (S : Source) (k s d r : ℕ)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s)) (α : ℝ)

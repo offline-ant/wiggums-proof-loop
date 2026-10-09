@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineClone100TableLemmas
 
 namespace OAI
@@ -171,7 +172,6 @@ def headersInTime (triples : List (Nat × Nat × Nat)) (hne : triples ≠ [])
   evals_in_steps := headersTrace triples hne base n m suffix hinput hheader hcounter hscratch hreversed
   steps_le_m := Nat.le_refl _
 
-theorem headersTime_linear (n m : Nat) : 5 * n + 4 * m + 18 ≤ 5 * (n + m) + 18 := by omega
 
 end UniqueGamesTheorem.Explicit.MachineClone100Headers
 

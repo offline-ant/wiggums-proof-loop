@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Games.FinishBoundsLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryParsingLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryRenameMachine
@@ -47,8 +48,6 @@ noncomputable def reduction : CookLevin.PolynomialThreeSATReduction BinaryLangua
   computation := computation
   correct input := (BinaryLanguage.totalRename_satisfiable_iff input).symm
 
-theorem reduction_finiteAlphabet : MachineFiniteAlphabet.FiniteAlphabet reduction.computation.tm :=
-  computation_finiteAlphabet
 
 end UniqueGamesTheorem.BinaryInputReduction
 
@@ -81,26 +80,6 @@ theorem no_loops (i : Fin game.constraints.length) :
   rw [presentation.sourceSide, presentation.targetSide] at sides
   cases sides
 
-include presentation in
-theorem no_reverse (i j : Fin game.constraints.length) :
-    game.constraints[i].source ≠ game.constraints[j].target := by
-  intro same
-  have sides := congrArg presentation.side same
-  rw [presentation.sourceSide, presentation.targetSide] at sides
-  cases sides
-
-include presentation in
-/-- Simplicity concerns unordered endpoint pairs, independently of how an edge
-could have been presented before the canonical bipartite orientation. -/
-theorem undirected_unique (i j : Fin game.constraints.length)
-    (same :
-      (game.constraints[i].source = game.constraints[j].source ∧
-        game.constraints[i].target = game.constraints[j].target) ∨
-      (game.constraints[i].source = game.constraints[j].target ∧
-        game.constraints[i].target = game.constraints[j].source)) : i = j := by
-  rcases same with same | reversed
-  · exact presentation.endpoints_injective (Prod.ext same.1 same.2)
-  · exact False.elim (presentation.no_reverse i j reversed.1)
 
 /-- The list presentation yields exactly the bipartite occurrence abstraction
 used by the subdivision proof, without quotienting or discarding occurrences. -/
@@ -118,15 +97,6 @@ def toBipartiteGame : BipartiteGame
     · exact congrArg Subtype.val (congrArg Prod.fst same)
     · exact congrArg Subtype.val (congrArg Prod.snd same)
 
-/-- Restricting one vertex labeling to the two sides preserves every individual
-constraint's satisfaction predicate, hence its original occurrence identity. -/
-theorem toBipartiteGame_satisfied_iff (labeling : Fin game.vertices → Fin q)
-    (i : Fin game.constraints.length) :
-    presentation.toBipartiteGame.Satisfied
-      (fun v => labeling v.val) (fun v => labeling v.val) i ↔
-      game.constraints[i].satisfied labeling = true := by
-  simp [BipartiteGame.Satisfied, toBipartiteGame, permutationEquiv,
-    Constraint.satisfied, eq_comm]
 
 /-- Two independently chosen side labelings give one total labeling because
 every vertex has exactly one Boolean side. Isolated vertices cause no exception. -/
@@ -207,32 +177,6 @@ namespace BinaryGapReduction
 
 variable {ε δ : ℝ} (reduction : BinaryGapReduction ε δ)
 
-theorem nonempty (input : List Bool) : (reduction.construct input).constraints ≠ [] :=
-  (reduction.construct input).nonempty
-
-theorem occurrence_count_positive (input : List Bool) :
-    0 < (reduction.construct input).constraints.length :=
-  (reduction.construct input).constraintCount_positive
-
-theorem completeness_value (input : List Bool) (yes : BinaryLanguage.language input) :
-    1 - ε ≤ Integration.InstanceValue.value (reduction.construct input) := by
-  have positive : 0 < reduction.alphabet :=
-    lt_of_lt_of_le (by decide : 0 < 2) reduction.alphabetAtLeastTwo
-  exact (Integration.InstanceValue.exists_rate_ge_iff _ positive _).mp
-    (reduction.completeness input yes)
-
-theorem soundness_value (input : List Bool) (no : ¬BinaryLanguage.language input) :
-    Integration.InstanceValue.value (reduction.construct input) ≤ δ := by
-  have positive : 0 < reduction.alphabet :=
-    lt_of_lt_of_le (by decide : 0 < 2) reduction.alphabetAtLeastTwo
-  exact (Integration.InstanceValue.forall_rate_le_iff _ positive _).mp
-    (reduction.soundness input no)
-
-/-- The fixed coordinate equivalence forces the explicit table alphabet to
-have exactly the requested binary-vector cardinality. -/
-theorem alphabet_eq_two_pow : reduction.alphabet = 2 ^ reduction.dimension := by
-  have cardinal := Fintype.card_congr reduction.coordinates
-  simpa [Integration.BinaryLinear.Vector] using cardinal
 
 theorem no_loops (input : List Bool)
     (i : Fin (reduction.construct input).constraints.length) :
@@ -240,59 +184,6 @@ theorem no_loops (input : List Bool)
       (reduction.construct input).constraints[i].target :=
   (reduction.simpleBipartite input).no_loops i
 
-theorem undirected_unique (input : List Bool)
-    (i j : Fin (reduction.construct input).constraints.length)
-    (same :
-      ((reduction.construct input).constraints[i].source =
-          (reduction.construct input).constraints[j].source ∧
-        (reduction.construct input).constraints[i].target =
-          (reduction.construct input).constraints[j].target) ∨
-      ((reduction.construct input).constraints[i].source =
-          (reduction.construct input).constraints[j].target ∧
-        (reduction.construct input).constraints[i].target =
-          (reduction.construct input).constraints[j].source)) : i = j :=
-  (reduction.simpleBipartite input).undirected_unique i j same
-
-/-- Every occurrence serializes all forward-table entries, not an oracle or
-an intensional description of the constraint. -/
-theorem full_table_length (input : List Bool)
-    (i : Fin (reduction.construct input).constraints.length) :
-    (Complexity.tableWords
-      (reduction.construct input).constraints[i].permutation).length = reduction.alphabet :=
-  Complexity.tableWords_length _
-
-theorem translation_equation (input : List Bool)
-    (i : Fin (reduction.construct input).constraints.length) :
-    ∃ shift : Integration.BinaryLinear.Vector reduction.dimension,
-      ∀ label : Fin reduction.alphabet,
-        reduction.coordinates
-            ((reduction.construct input).constraints[i].permutation.images[label]) =
-          reduction.coordinates label + shift :=
-  reduction.translations input _ (List.getElem_mem i.isLt)
-
-/-- The machine's exact output bits decode to the same ordered occurrence list,
-with the same endpoints and all the same permutation tables. -/
-theorem decode_output (input : List Bool) :
-    Complexity.decodeGameBits reduction.alphabet
-      (Complexity.gameBits (reduction.construct input)) =
-        some (reduction.construct input) :=
-  Complexity.decodeGameBits_encoded _
-
-theorem output_word_count (input : List Bool) :
-    (Complexity.gameWords (reduction.construct input)).length =
-      3 + (reduction.construct input).constraints.length * (reduction.alphabet + 2) :=
-  Complexity.gameWords_length _
-
-/-- Malformed words are in the NO language and are processed by the same fixed
-machine; they do not need an extra promised-input condition. -/
-theorem malformed_soundness (input : List Bool)
-    (malformed : BinaryEncoding.decodeFormula input = none) :
-    ∀ labeling, (countSatisfied labeling (reduction.construct input).constraints : ℝ) /
-      (reduction.construct input).constraints.length ≤ δ := by
-  apply reduction.soundness input
-  rintro ⟨formula, decoded, _⟩
-  rw [malformed] at decoded
-  cases decoded
 
 end BinaryGapReduction
 end UniqueGamesTheorem.Explicit.MachineOutputContract

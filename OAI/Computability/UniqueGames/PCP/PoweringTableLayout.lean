@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.PCP.PoweringTablesLemmas
 
@@ -62,18 +63,6 @@ def vertexRowBits {vertices d : Nat} (input : PortTables.Table vertices d) (n : 
     (v : Fin vertices) : List Bool :=
   encodeWords (vertexRowWords input n v)
 
-@[simp] theorem vertexRows_length {vertices d : Nat}
-    (input : PortTables.Table vertices d) (n : Nat) (v : Fin vertices) :
-    (vertexRows input n v).length = blockSize d n := by
-  simp only [vertexRows]
-  exact List.length_ofFn
-
-private theorem vector_toList_ofFn {α : Type*} {m : Nat} (rows : Vector α m) :
-    rows.toList = List.ofFn (fun i : Fin m => rows[i]) := by
-  apply List.ext_getElem
-  · simp
-  · intro i hi₁ hi₂
-    simp
 
 /-- Regroup a stored vector without changing, omitting, or permuting a row. -/
 private theorem vector_blocks {α : Type*} {m vertices width : Nat}
@@ -81,16 +70,11 @@ private theorem vector_blocks {α : Type*} {m vertices width : Nat}
     rows.toList = (List.finRange vertices).flatMap (fun v =>
       List.ofFn (fun j : Fin width =>
         rows[Fin.cast sameCount.symm (finProdFinEquiv (v, j))])) := by
-  have atIndex (v : Fin vertices) (j : Fin width)
-      (h : v.val * width + j.val < vertices * width) :
-      (⟨v.val * width + j.val, h⟩ : Fin (vertices * width)) =
-        finProdFinEquiv (v, j) := by
-    apply Fin.ext
-    simp [finProdFinEquiv, Nat.add_comm, Nat.mul_comm]
-  rw [vector_toList_ofFn rows,
-    List.ofFn_congr sameCount (fun i : Fin m => rows[i]), List.ofFn_mul]
-  simp only [atIndex, List.finRange, List.flatMap_def, List.map_ofFn]
-  rfl
+  subst m
+  conv_lhs => rw [← Vector.ofFn_getElem (xs := rows), Vector.toList_ofFn]
+  rw [List.ofFn_mul]
+  simp [List.finRange, List.flatMap_def, List.map_ofFn, finProdFinEquiv,
+    Function.comp_def, Nat.add_comm, Nat.mul_comm]
 
 /-- Every actual stored row occurs once in its vertex's consecutive block. -/
 theorem rowList_eq_vertexRows {vertices d : Nat} (input : PortTables.Table vertices d)
@@ -111,55 +95,14 @@ theorem outputWords_vertexRows {vertices d : Nat} (input : PortTables.Table vert
   erw [List.flatMap_assoc]
   rfl
 
-private theorem encodeWords_flatMap {α : Type*} (items : List α)
-    (words : α → List Nat) :
-    encodeWords (items.flatMap words) =
-      items.flatMap (fun item => encodeWords (words item)) := by
-  induction items with
-  | nil => rfl
-  | cons item rest ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 theorem outputBits_vertexRows {vertices d : Nat} (input : PortTables.Table vertices d)
     (n : Nat) :
     outputBits input n = encodeWords [vertices, dartCount vertices d n] ++
       (List.finRange vertices).flatMap (vertexRowBits input n) := by
   unfold outputBits GenericGraphTables.tableBits
-  rw [outputWords_vertexRows, encodeWords_append, encodeWords_flatMap]
+  rw [outputWords_vertexRows, encodeWords_append, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   rfl
 
-/-- Each stored row has its tail, reversal, and every ordered predicate bit. -/
-theorem vertexRowWords_length {vertices d : Nat} (input : PortTables.Table vertices d)
-    (n : Nat) (v : Fin vertices) :
-    (vertexRowWords input n v).length =
-      (labelCount d n * labelCount d n + 2) * blockSize d n := by
-  unfold vertexRowWords
-  rw [GenericGraphTables.rowsWords_length, vertexRows_length]
-
-/-- Every natural field contributes at least its unary delimiter. -/
-theorem vertexRowBits_length_ge {vertices d : Nat} (input : PortTables.Table vertices d)
-    (n : Nat) (v : Fin vertices) :
-    (labelCount d n * labelCount d n + 2) * blockSize d n ≤
-      (vertexRowBits input n v).length := by
-  unfold vertexRowBits
-  rw [encodeWords_length, vertexRowWords_length]
-  omega
-
-/-- Actual unary row blocks have a uniform bound from the two index bounds. -/
-theorem vertexRowBits_length_le {vertices d : Nat} (input : PortTables.Table vertices d)
-    (n : Nat) (v : Fin vertices) :
-    (vertexRowBits input n v).length ≤
-      blockSize d n *
-        (vertices + dartCount vertices d n + 2 * (labelCount d n * labelCount d n)) := by
-  have h := GenericGraphTables.rowsBits_length_le (vertexRows input n v)
-  rw [vertexRows_length] at h
-  exact h
-
-/-- The actual unary header contains the two declared counts. -/
-theorem outputHeader_length (vertices d n : Nat) :
-    (encodeWords [vertices, dartCount vertices d n]).length =
-      vertices + dartCount vertices d n + 2 := by
-  simp only [encodeWords, List.length_append, encodeWord_length, List.length_nil]
-  omega
 
 end UniqueGamesTheorem.Foundations.PCP.PoweringTableLayout
 

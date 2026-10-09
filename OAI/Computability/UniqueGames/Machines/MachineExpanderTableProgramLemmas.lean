@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
 import OAI.Computability.UniqueGames.Machines.MachineDrain
@@ -16,17 +17,9 @@ inductive ExtraTape
   | vertexCount | result
   deriving DecidableEq
 
-protected abbrev ExtraTape.enumList : List ExtraTape := [.vertexCount, .result]
-
-protected theorem ExtraTape.enumList_getElem?_ctorIdx_eq (x : ExtraTape) :
-    ExtraTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem ExtraTape.enumList_nodup : ExtraTape.enumList.Nodup := by decide
-
 instance : Fintype ExtraTape where
-  elems := ⟨ExtraTape.enumList, ExtraTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.vertexCount, .result}
+  complete x := by cases x <;> simp
 
 abbrev Tape := MachineExpanderRow.Tape ⊕ ExtraTape
 
@@ -41,18 +34,10 @@ inductive OuterLabel
   | initialize | vertexGuard | prepareRow | afterRow | reverseOutput | done
   deriving DecidableEq
 
-protected abbrev OuterLabel.enumList : List OuterLabel := [.initialize, .vertexGuard, .prepareRow,
-  .afterRow, .reverseOutput, .done]
-
-protected theorem OuterLabel.enumList_getElem?_ctorIdx_eq (x : OuterLabel) :
-    OuterLabel.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem OuterLabel.enumList_nodup : OuterLabel.enumList.Nodup := by decide
-
 instance : Fintype OuterLabel where
-  elems := ⟨OuterLabel.enumList, OuterLabel.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.initialize, .vertexGuard, .prepareRow,
+  .afterRow, .reverseOutput, .done}
+  complete x := by cases x <;> simp
 
 abbrev Label (d : Nat) := MachineExpanderRow.Label d ⊕ OuterLabel
 abbrev Position (d : Nat) := Fin (rowFactor d)
@@ -230,18 +215,10 @@ inductive ExtraTape
   | remainingLevel | currentSize | unaryScratch | tableReverse
   deriving DecidableEq
 
-protected abbrev ExtraTape.enumList : List ExtraTape := [.remainingLevel, .currentSize,
-  .unaryScratch, .tableReverse]
-
-protected theorem ExtraTape.enumList_getElem?_ctorIdx_eq (x : ExtraTape) :
-    ExtraTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem ExtraTape.enumList_nodup : ExtraTape.enumList.Nodup := by decide
-
 instance : Fintype ExtraTape where
-  elems := ⟨ExtraTape.enumList, ExtraTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.remainingLevel, .currentSize,
+  .unaryScratch, .tableReverse}
+  complete x := by cases x <;> simp
 
 abbrev Tape := MachineExpanderTable.Tape ⊕ ExtraTape
 abbrev Alphabet : Tape → Type :=
@@ -264,33 +241,17 @@ inductive AffinePhase
   | copyCount | multiplySize
   deriving DecidableEq
 
-protected abbrev AffinePhase.enumList : List AffinePhase := [.copyCount, .multiplySize]
-
-protected theorem AffinePhase.enumList_getElem?_ctorIdx_eq (x : AffinePhase) :
-    AffinePhase.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem AffinePhase.enumList_nodup : AffinePhase.enumList.Nodup := by decide
-
 instance : Fintype AffinePhase where
-  elems := ⟨AffinePhase.enumList, AffinePhase.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.copyCount, .multiplySize}
+  complete x := by cases x <;> simp
 
 inductive AffineLabel
   | seed | scan | restore
   deriving DecidableEq
 
-protected abbrev AffineLabel.enumList : List AffineLabel := [.seed, .scan, .restore]
-
-protected theorem AffineLabel.enumList_getElem?_ctorIdx_eq (x : AffineLabel) :
-    AffineLabel.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem AffineLabel.enumList_nodup : AffineLabel.enumList.Nodup := by decide
-
 instance : Fintype AffineLabel where
-  elems := ⟨AffineLabel.enumList, AffineLabel.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.seed, .scan, .restore}
+  complete x := by cases x <;> simp
 
 inductive OuterLabel
   | initialize
@@ -332,9 +293,6 @@ def normalizeState {ρ : Type} {d : Nat} (positive : 0 < d)
 
 def initialEncoding (d : Nat) : List Bool := encodeWords (rotationWords (initial d))
 
-/-- The literal used by initialization is exactly the actual family's base. -/
-theorem initialEncoding_eq_family {d : Nat} (H : Table (cloudSize d) d) :
-    initialEncoding d = encodeWords (rotationWords (family H 0)) := rfl
 
 def tableTape : Tape := .inl (.inl .table)
 def inputVertexTape : Tape := .inl (.inl .inputVertex)

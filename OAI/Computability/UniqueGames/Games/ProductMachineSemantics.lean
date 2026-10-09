@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Games.ProductLemmas
 import OAI.Computability.UniqueGames.Machines.MachineProductFieldLemmas
 
@@ -139,16 +140,6 @@ theorem selected (H : Instance q) (edges : Fin t → Fin H.constraints.length)
   rw [image_fields]
   exact inputTable_image H (edges i) (finFunctionFinEquiv.symm a i)
 
-theorem command_offset_lt (c : MachineProductRow.Command t)
-    (hc : c ∈ commands q t) (i : Fin t) : c.2 i < q + 2 := by
-  rcases List.mem_cons.mp hc with rfl | hc
-  · simp [sourceCommand]
-  rcases List.mem_cons.mp hc with rfl | hc
-  · simp [targetCommand]
-  obtain ⟨a, _, rfl⟩ := List.mem_map.mp hc
-  have h := (finFunctionFinEquiv.symm a i).isLt
-  simp only [imageCommand]
-  omega
 
 theorem fields_lt (H : Instance q) (edges : Fin t → Fin H.constraints.length)
     (c : MachineProductRow.Command t) (hc : c ∈ commands q t) (i : Fin t) :
@@ -221,12 +212,6 @@ theorem rowBits_eq (H : Instance q) (presentation : SimpleBipartite H)
       simp [tableWords, Fin.getElem_fin]
   rw [htable, encodeWords_map]
 
-private theorem encodeWords_flatMap {X : Type*} (xs : List X) (f : X → List ℕ) :
-    encodeWords (xs.flatMap f) = xs.flatMap (fun x => encodeWords (f x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp [encodeWords_append, ih]
-
 /-- Product rows are emitted in ascending radix address, exactly the literal
 order of the output constraint list. -/
 def allRowsBits (H : Instance q) (t : ℕ) : List Bool :=
@@ -245,7 +230,7 @@ theorem allRowsBits_eq (H : Instance q) (presentation : SimpleBipartite H)
         (ProductPaddedOutput.outputRow H presentation t ht) := by
     simp [List.finRange, List.map_ofFn, Function.comp_def]
   rw [hrows]
-  erw [List.flatMap_map, encodeWords_flatMap]
+  erw [List.flatMap_map, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   rfl
 
 /-- Concatenating the three computed headers and all physical row fields yields

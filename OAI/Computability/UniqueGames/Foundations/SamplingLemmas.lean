@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Analysis.SpecialFunctions.Log.Basic
 import Mathlib.Data.Fintype.BigOperators
@@ -123,29 +124,6 @@ theorem table_const_reindex {ι κ Ω : Type*}
   change (∏ i : ι, μ.weight (g (e.symm i))) = ∏ k : κ, μ.weight (g k)
   exact e.symm.prod_comp (fun k => μ.weight (g k))
 
-theorem iid_reindex {Ω : Type*} [Fintype Ω]
-    (μ : FiniteDistribution Ω) {n m : Nat} (e : Fin m ≃ Fin n) :
-    (μ.iid n).pushforward (fun f => f ∘ e) = μ.iid m := by
-  classical
-  change (μ.iid n).pushforward (reindexEquiv e) = _
-  rw [pushforward_equiv]
-  apply eq_of_weight_eq
-  intro g
-  change (∏ i : Fin n, μ.weight (g (e.symm i))) = ∏ k : Fin m, μ.weight (g k)
-  exact e.symm.prod_comp (fun k => μ.weight (g k))
-
-/-- Weighted finite change of variables; no independence hypothesis. -/
-theorem probability_reindex_of_weight {Ω Γ : Type*} [Fintype Ω] [Fintype Γ]
-    (μ : FiniteDistribution Ω) (ν : FiniteDistribution Γ) (e : Ω ≃ Γ)
-    (hweight : ∀ x, ν.weight (e x) = μ.weight x) (event : Γ → Bool) :
-    ν.probability event = μ.probability (fun x => event (e x)) := by
-  classical
-  change (∑ y, if event y then ν.weight y else 0) =
-    ∑ x, if event (e x) then μ.weight x else 0
-  rw [← e.sum_comp (fun y => if event y then ν.weight y else 0)]
-  apply Finset.sum_congr rfl
-  intro x _
-  rw [hweight]
 
 end FiniteDistribution
 
@@ -154,10 +132,6 @@ namespace Game
 variable {Q₁ Q₂ A₁ A₂ : Type*}
 variable [Fintype Q₁] [Fintype Q₂] [Fintype A₁] [Fintype A₂]
 
-def questionReindexEquiv {n m : Nat} (e : Fin m ≃ Fin n) :
-    ((Fin n → Q₁) × (Fin n → Q₂)) ≃ ((Fin m → Q₁) × (Fin m → Q₂)) :=
-  Equiv.prodCongr (FiniteDistribution.reindexEquiv e)
-    (FiniteDistribution.reindexEquiv e)
 
 /-- Each player only permutes that player's own questions and answers. -/
 def reindexStrategy {n m : Nat} (e : Fin m ≃ Fin n)
@@ -166,103 +140,6 @@ def reindexStrategy {n m : Nat} (e : Fin m ≃ Fin n)
   (fun x i => s.1 (x ∘ e.symm) (e i),
    fun y i => s.2 (y ∘ e.symm) (e i))
 
-/-- Simultaneous coordinate permutation preserves the actual joint question weight. -/
-theorem repetition_question_weight_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n)
-    (q : (Fin n → Q₁) × (Fin n → Q₂)) :
-    (G.repetition m).questions.weight (questionReindexEquiv e q) =
-      (G.repetition n).questions.weight q := by
-  classical
-  rw [repetition_question_weight, repetition_question_weight]
-  change (∏ i : Fin m, G.questions.weight (q.1 (e i), q.2 (e i))) =
-    ∏ j : Fin n, G.questions.weight (q.1 j, q.2 j)
-  exact e.prod_comp (fun j => G.questions.weight (q.1 j, q.2 j))
-
-theorem repetition_questions_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n) :
-    (G.repetition n).questions.pushforward (questionReindexEquiv e) =
-      (G.repetition m).questions := by
-  classical
-  rw [FiniteDistribution.pushforward_equiv]
-  apply FiniteDistribution.eq_of_weight_eq
-  intro q
-  change (G.repetition n).questions.weight ((questionReindexEquiv e).symm q) =
-    (G.repetition m).questions.weight q
-  have h := repetition_question_weight_reindex G e ((questionReindexEquiv e).symm q)
-  simpa only [Equiv.apply_symm_apply] using h.symm
-
-/-- Coordinate successes transform pointwise; they are not assumed independent. -/
-theorem coordinateWin_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n)
-    (s : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂))
-    (i : Fin m) (q : (Fin n → Q₁) × (Fin n → Q₂)) :
-    G.coordinateWin (reindexStrategy e s) i (questionReindexEquiv e q) =
-      G.coordinateWin s (e i) q := by
-  have h₁ : (fun j : Fin n => q.1 (e (e.symm j))) = q.1 := by
-    funext j
-    rw [e.apply_symm_apply]
-  have h₂ : (fun j : Fin n => q.2 (e (e.symm j))) = q.2 := by
-    funext j
-    rw [e.apply_symm_apply]
-  change G.accepts (q.1 (e i)) (q.2 (e i))
-      (s.1 (fun j => q.1 (e (e.symm j))) (e i))
-      (s.2 (fun j => q.2 (e (e.symm j))) (e i)) =
-    G.accepts (q.1 (e i)) (q.2 (e i)) (s.1 q.1 (e i)) (s.2 q.2 (e i))
-  rw [h₁, h₂]
-
-theorem selectedWins_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n)
-    (s : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂))
-    (S : Finset (Fin m)) (q : (Fin n → Q₁) × (Fin n → Q₂)) :
-    G.selectedWins (reindexStrategy e s) S (questionReindexEquiv e q) =
-      G.selectedWins s (S.map e.toEmbedding) q := by
-  classical
-  unfold selectedWins
-  congr 1
-  apply propext
-  constructor
-  · intro h j hj
-    obtain ⟨i, hi, rfl⟩ := Finset.mem_map.mp hj
-    have hw := h i hi
-    rw [coordinateWin_reindex] at hw
-    exact hw
-  · intro h i hi
-    rw [coordinateWin_reindex]
-    exact h (e i) (Finset.mem_map.mpr ⟨i, hi, rfl⟩)
-
-/-- The actual selected-success probability is invariant under the same relabeling. -/
-theorem selectedSuccess_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n)
-    (s : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂))
-    (S : Finset (Fin m)) :
-    G.selectedSuccess (reindexStrategy e s) S =
-      G.selectedSuccess s (S.map e.toEmbedding) := by
-  classical
-  unfold selectedSuccess
-  rw [FiniteDistribution.probability_reindex_of_weight
-    (G.repetition n).questions (G.repetition m).questions (questionReindexEquiv e)
-    (repetition_question_weight_reindex G e)]
-  congr 1
-  funext q
-  exact selectedWins_reindex G e s S q
-
-/-- Full repetition success is a special case, including zero repetitions. -/
-theorem repetition_success_reindex (G : Game Q₁ Q₂ A₁ A₂)
-    {n m : Nat} (e : Fin m ≃ Fin n)
-    (s : Strategy (Fin n → Q₁) (Fin n → Q₂) (Fin n → A₁) (Fin n → A₂)) :
-    (G.repetition m).success (reindexStrategy e s) =
-      (G.repetition n).success s := by
-  classical
-  have huniv : (Finset.univ : Finset (Fin m)).map e.toEmbedding = Finset.univ := by
-    ext j
-    constructor
-    · intro _
-      exact Finset.mem_univ j
-    · intro _
-      exact Finset.mem_map.mpr ⟨e.symm j, Finset.mem_univ _, e.apply_symm_apply j⟩
-  have h := selectedSuccess_reindex G e s Finset.univ
-  rw [huniv, selectedSuccess_univ, selectedSuccess_univ] at h
-  exact h
 
 end Game
 end UniqueGamesTheorem.Foundations.Games
@@ -366,40 +243,16 @@ theorem totalVariation_nonneg (p q : α → ℝ) : 0 ≤ totalVariation p q := b
 theorem totalVariation_symm (p q : α → ℝ) : totalVariation p q = totalVariation q p := by
   simp only [totalVariation, abs_sub_comm]
 
-theorem totalVariation_le_one (p q : α → ℝ) (hp : IsProbability p)
-    (hq : IsProbability q) : totalVariation p q ≤ 1 := by
-  have hpoint : ∀ a, |p a - q a| ≤ p a + q a := by
-    intro a
-    rw [abs_le]
-    constructor <;> linarith [hp.1 a, hq.1 a]
-  have hsum := Finset.sum_le_sum (fun a (_ : a ∈ (Finset.univ : Finset α)) => hpoint a)
-  simp only [Finset.sum_add_distrib, hp.2, hq.2] at hsum
-  dsimp [totalVariation]
-  linarith
-
-theorem le_binaryLog_of_le_log {r x : ℝ} (hr : 0 ≤ r) (h : r ≤ Real.log x) :
-    r ≤ Real.log x / Real.log 2 := by
-  have htwo : 0 < Real.log 2 := Real.log_pos (by norm_num)
-  have htwo_one : Real.log 2 ≤ 1 := by
-    have ht := Real.log_le_sub_one_of_pos (show (0 : ℝ) < 2 by norm_num)
-    norm_num at ht ⊢
-    exact ht
-  apply (le_div_iff₀ htwo).2
-  exact (mul_le_mul_of_nonneg_left htwo_one hr).trans (by simpa using h)
 
 /-- Finite weighted Cauchy–Schwarz for probability weights. The summands
 need not be nonnegative. -/
 theorem weighted_sum_sq_le (w x : α → ℝ) (hw : IsProbability w) :
     (∑ a, w a * x a)^2 ≤ ∑ a, w a * (x a)^2 := by
-  have hcs := Finset.sum_mul_sq_le_sq_mul_sq (Finset.univ : Finset α)
-    (fun a => Real.sqrt (w a)) (fun a => Real.sqrt (w a) * x a)
-  have hfirst : ∀ a, Real.sqrt (w a) * (Real.sqrt (w a) * x a) = w a * x a := by
-    intro a
-    rw [← mul_assoc, Real.mul_self_sqrt (hw.1 a)]
-  have hsecond : ∀ a, (Real.sqrt (w a) * x a)^2 = w a * (x a)^2 := by
-    intro a
-    rw [mul_pow, Real.sq_sqrt (hw.1 a)]
-  simpa only [hfirst, hsecond, Real.sq_sqrt (hw.1 _), hw.2, one_mul] using hcs
+  simpa only [hw.2, one_mul] using
+    Finset.sum_sq_le_sum_mul_sum_of_sq_le_mul (Finset.univ : Finset α)
+      (r := fun a => w a * x a) (fun a _ => hw.1 a)
+      (fun a _ => mul_nonneg (hw.1 a) (sq_nonneg (x a)))
+      (fun a _ => le_of_eq (by ring))
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -428,84 +281,12 @@ theorem firstMarginal_isProbability (p : α × β → ℝ) (hp : IsProbability p
     exact Finset.sum_nonneg (fun b _ => hp.1 (a, b))
   · simpa only [firstMarginal, Fintype.sum_prod_type] using hp.2
 
-theorem secondMarginal_isProbability (p : α × β → ℝ) (hp : IsProbability p) :
-    IsProbability (secondMarginal p) := by
-  constructor
-  · intro b
-    exact Finset.sum_nonneg (fun a _ => hp.1 (a, b))
-  · change (∑ b, ∑ a, p (a, b)) = 1
-    rw [Finset.sum_comm]
-    exact (firstMarginal_isProbability p hp).2
-
-theorem product_isProbability (p : α → ℝ) (q : β → ℝ)
-    (hp : IsProbability p) (hq : IsProbability q) : IsProbability (product p q) := by
-  constructor
-  · intro ab
-    exact mul_nonneg (hp.1 ab.1) (hq.1 ab.2)
-  · simp only [product, Fintype.sum_prod_type, ← Finset.mul_sum, hq.2, mul_one, hp.2]
 
 theorem point_le_firstMarginal (p : α × β → ℝ) (hp : IsProbability p) (a : α) (b : β) :
     p (a, b) ≤ firstMarginal p a := by
   classical
   exact Finset.single_le_sum (fun b _ => hp.1 (a, b)) (Finset.mem_univ b)
 
-theorem point_le_secondMarginal (p : α × β → ℝ) (hp : IsProbability p) (a : α) (b : β) :
-    p (a, b) ≤ secondMarginal p b := by
-  classical
-  exact Finset.single_le_sum (fun a _ => hp.1 (a, b)) (Finset.mem_univ a)
-
-theorem joint_supportedBy_product_marginals (p : α × β → ℝ) (hp : IsProbability p) :
-    SupportedBy p (product (firstMarginal p) (secondMarginal p)) := by
-  intro ab hpne
-  have hpos : 0 < p ab := lt_of_le_of_ne (hp.1 ab) (Ne.symm hpne)
-  exact mul_ne_zero
-    (ne_of_gt (hpos.trans_le (point_le_firstMarginal p hp ab.1 ab.2)))
-    (ne_of_gt (hpos.trans_le (point_le_secondMarginal p hp ab.1 ab.2)))
-
-theorem relativeEntropy_product_reference (p : α × β → ℝ) (u : α → ℝ) (v : β → ℝ)
-    (hp : IsProbability p) (_hu : IsProbability u) (_hv : IsProbability v)
-    (hsu : SupportedBy (firstMarginal p) u) (hsv : SupportedBy (secondMarginal p) v) :
-    relativeEntropy p (product u v) =
-      relativeEntropy p (product (firstMarginal p) (secondMarginal p)) +
-        relativeEntropy (firstMarginal p) u + relativeEntropy (secondMarginal p) v := by
-  have hpoint : ∀ ab : α × β, p ab * Real.log (p ab / product u v ab) =
-      p ab * Real.log (p ab / product (firstMarginal p) (secondMarginal p) ab) +
-      p ab * Real.log (firstMarginal p ab.1 / u ab.1) +
-      p ab * Real.log (secondMarginal p ab.2 / v ab.2) := by
-    intro ab
-    by_cases hzero : p ab = 0
-    · simp [hzero]
-    have hpos : 0 < p ab := lt_of_le_of_ne (hp.1 ab) (Ne.symm hzero)
-    have hleft := ne_of_gt (hpos.trans_le (point_le_firstMarginal p hp ab.1 ab.2))
-    have hright := ne_of_gt (hpos.trans_le (point_le_secondMarginal p hp ab.1 ab.2))
-    have hune := hsu ab.1 hleft
-    have hvne := hsv ab.2 hright
-    simp only [product, Real.log_div hzero (mul_ne_zero hune hvne),
-      Real.log_div hzero (mul_ne_zero hleft hright), Real.log_mul hune hvne,
-      Real.log_mul hleft hright, Real.log_div hleft hune, Real.log_div hright hvne]
-    ring
-  have hleftSum : (∑ ab : α × β, p ab * Real.log (firstMarginal p ab.1 / u ab.1)) =
-      relativeEntropy (firstMarginal p) u := by
-    simp only [Fintype.sum_prod_type, ← Finset.sum_mul, relativeEntropy, firstMarginal]
-  have hrightSum : (∑ ab : α × β, p ab * Real.log (secondMarginal p ab.2 / v ab.2)) =
-      relativeEntropy (secondMarginal p) v := by
-    rw [Fintype.sum_prod_type, Finset.sum_comm]
-    simp only [← Finset.sum_mul, relativeEntropy, secondMarginal]
-  unfold relativeEntropy
-  simp_rw [hpoint]
-  rw [Finset.sum_add_distrib, Finset.sum_add_distrib, hleftSum, hrightSum]
-  rfl
-
-theorem marginal_relativeEntropy_sum_le (p : α × β → ℝ) (u : α → ℝ) (v : β → ℝ)
-    (hp : IsProbability p) (hu : IsProbability u) (hv : IsProbability v)
-    (hsu : SupportedBy (firstMarginal p) u) (hsv : SupportedBy (secondMarginal p) v) :
-    relativeEntropy (firstMarginal p) u + relativeEntropy (secondMarginal p) v ≤
-      relativeEntropy p (product u v) := by
-  rw [relativeEntropy_product_reference p u v hp hu hv hsu hsv]
-  have hn := relativeEntropy_nonneg p (product (firstMarginal p) (secondMarginal p)) hp
-    (product_isProbability _ _ (firstMarginal_isProbability p hp)
-      (secondMarginal_isProbability p hp)) (joint_supportedBy_product_marginals p hp)
-  linarith
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -564,12 +345,6 @@ theorem marginal_mul_conditionalKernel
               (firstMarginal p a / firstMarginal p a) := by ring
       _ = p (a, b) := by rw [div_self hm, mul_one]
 
-theorem law_of_total_probability
-    (p : α × β → ℝ) (fallback : β → ℝ)
-    (hp : IsProbability p) (b : β) :
-    (∑ a, firstMarginal p a * conditionalKernel p fallback a b) =
-      secondMarginal p b := by
-  simp only [marginal_mul_conditionalKernel p fallback hp, secondMarginal]
 
 theorem kernelProduct_isProbability
     (r : α → ℝ) (k : α → β → ℝ)
@@ -581,14 +356,6 @@ theorem kernelProduct_isProbability
   · simp only [Fintype.sum_prod_type, ← Finset.mul_sum,
       (hk _).2, mul_one, hr.2]
 
-theorem alternativeInput_conditionalProduct_isProbability
-    (p : α × β → ℝ) (fallback : β → ℝ) (r : α → ℝ)
-    (hp : IsProbability p) (hf : IsProbability fallback)
-    (hr : IsProbability r) :
-    IsProbability
-      (fun ab : α × β => r ab.1 * conditionalKernel p fallback ab.1 ab.2) :=
-  kernelProduct_isProbability r (conditionalKernel p fallback) hr
-    (conditionalKernel_isProbability p fallback hp hf)
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -612,14 +379,6 @@ def toGameLaw (p : α → ℝ) (hp : IsProbability p) : Games.FiniteDistribution
   nonnegative := hp.1
   normalized := hp.2
 
-def gameLawEquiv : Games.FiniteDistribution α ≃ {p : α → ℝ // IsProbability p} where
-  toFun μ := ⟨μ.weight, gameLaw_isProbability μ⟩
-  invFun p := toGameLaw p.1 p.2
-  left_inv μ := by cases μ; rfl
-  right_inv p := by cases p; rfl
-
-theorem totalVariation_gameLaw (μ ν : Games.FiniteDistribution α) :
-    totalVariation μ.weight ν.weight = μ.totalVariation ν := rfl
 
 noncomputable def gameConditionalKernel (μ : Games.FiniteDistribution (α × β))
     (fallback : Games.FiniteDistribution β) (a : α) : Games.FiniteDistribution β :=
@@ -633,42 +392,6 @@ theorem gameConditionalKernel_recombine (μ : Games.FiniteDistribution (α × β
       μ.weight (a, b) :=
   marginal_mul_conditionalKernel μ.weight fallback.weight (gameLaw_isProbability μ) a b
 
-noncomputable def gameConditionalProduct (μ : Games.FiniteDistribution (α × β))
-    (fallback : Games.FiniteDistribution β) (newInput : Games.FiniteDistribution α) :
-    Games.FiniteDistribution (α × β) :=
-  toGameLaw (fun ab => newInput.weight ab.1 * conditionalKernel μ.weight fallback.weight ab.1 ab.2)
-    (alternativeInput_conditionalProduct_isProbability μ.weight fallback.weight newInput.weight
-      (gameLaw_isProbability μ) (gameLaw_isProbability fallback) (gameLaw_isProbability newInput))
-
-theorem gameConditionalProduct_weight (μ : Games.FiniteDistribution (α × β))
-    (fallback : Games.FiniteDistribution β) (newInput : Games.FiniteDistribution α)
-    (a : α) (b : β) :
-    (gameConditionalProduct μ fallback newInput).weight (a, b) =
-      newInput.weight a * (gameConditionalKernel μ fallback a).weight b := rfl
-
-theorem gameCondition_weight (μ : Games.FiniteDistribution α) (event : α → Bool)
-    (positive : 0 < μ.probability event) :
-    (μ.condition event positive).weight =
-      posterior μ.weight (fun a => if event a then 1 else 0) (μ.probability event) := by
-  funext a
-  cases he : event a <;> simp [Games.FiniteDistribution.condition, posterior, he]
-
-theorem gameCondition_relativeEntropy_le (μ : Games.FiniteDistribution α) (event : α → Bool)
-    (positive : 0 < μ.probability event) :
-    relativeEntropy (μ.condition event positive).weight μ.weight ≤
-      Real.log (1 / μ.probability event) := by
-  rw [gameCondition_weight]
-  apply posterior_relativeEntropy_le μ.weight (fun a => if event a then 1 else 0)
-    (gameLaw_isProbability μ)
-  · intro a
-    cases event a <;> norm_num
-  · intro a
-    cases event a <;> norm_num
-  · exact positive
-  · unfold Games.FiniteDistribution.probability
-    apply Finset.sum_congr rfl
-    intro a _
-    cases event a <;> simp
 
 end UniqueGamesTheorem.Foundations.Information
 
@@ -705,24 +428,6 @@ theorem totalVariation_joint_common_kernel (p q : α → ℝ) (k : α → β →
   simp only [totalVariation, Fintype.sum_prod_type, hpoint, ← Finset.mul_sum,
     (hk _).2, mul_one]
 
-theorem totalVariation_condition_le (p q : α → ℝ) (event : α → Prop)
-    [DecidablePred event] {c : ℝ} (hc : 0 < c) :
-    totalVariation (fun a => if event a then p a / c else 0)
-      (fun a => if event a then q a / c else 0) ≤ totalVariation p q / c := by
-  have hpoint : ∀ a, |(if event a then p a / c else 0) -
-      (if event a then q a / c else 0)| ≤ |p a - q a| / c := by
-    intro a
-    by_cases he : event a
-    · simp only [ite_eq_left he, ← sub_div, abs_div, abs_of_pos hc, le_refl]
-    · simp only [ite_eq_right he, sub_self, abs_zero]
-      exact div_nonneg (abs_nonneg _) hc.le
-  have hsum := Finset.sum_le_sum (fun a (_ : a ∈ (Finset.univ : Finset α)) => hpoint a)
-  simp only [div_eq_mul_inv, ← Finset.sum_mul] at hsum
-  have hd := div_le_div_of_nonneg_right hsum (show (0 : ℝ) ≤ 2 by norm_num)
-  have hreorder : ((∑ a, |p a - q a|) * c⁻¹) / 2 =
-      ((∑ a, |p a - q a|) / 2) / c := by ring
-  rw [hreorder] at hd
-  simpa only [totalVariation, div_eq_mul_inv] using hd
 
 theorem weighted_coordinate_sum_sq_le
     (w : α → ℝ) (d : α → β → ℝ) (C : α → ℝ)

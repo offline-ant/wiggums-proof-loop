@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
@@ -139,8 +140,6 @@ def program (d e : Nat) (hd : 0 < d) (he : 0 < e) :
       (MachineTableSplit.program l)
   | .inr l => mainInstruction d e hd he l
 
-theorem program_main (d e : Nat) (hd : 0 < d) (he : 0 < e) (l : MainLabel d e) :
-    program (AmbientState := AmbientState) d e hd he (.inr l) = mainInstruction d e hd he l := rfl
 
 def extraTapes (rawH : List Bool) : Fin 12 → List Bool :=
   fun i => if i = 0 then rawH else []
@@ -232,10 +231,6 @@ def memory (g h gs hs n m f v t out : List Bool) : Tape → List Bool
     Function.update (memory g h gs hs n m f v t out) expanderStream x =
       memory g h gs x n m f v t out := by
   funext k; rcases k with i | i <;> fin_cases i <;> rfl
-@[simp] theorem update_graphStream (g h gs hs n m f v t out x : List Bool) :
-    Function.update (memory g h gs hs n m f v t out) graphStream x =
-      memory g h x hs n m f v t out := by
-  funext k; rcases k with i | i <;> fin_cases i <;> rfl
 @[simp] theorem update_fuel (g h gs hs n m f v t out x : List Bool) :
     Function.update (memory g h gs hs n m f v t out) fuel x = memory g h gs hs n m x v t out := by
   funext k; rcases k with i | i <;> fin_cases i <;> rfl
@@ -251,10 +246,6 @@ def memory (g h gs hs n m f v t out : List Bool) : Tape → List Bool
 @[simp] theorem update_dartCount (g h gs hs n m f v t out x : List Bool) :
     Function.update (memory g h gs hs n m f v t out) dartCount x = memory g h gs hs n x f v t out := by
   funext k; rcases k with i | i <;> fin_cases i <;> rfl
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 theorem initialTapes_memory (g h : List Bool) :
     initialTapes g h = memory g h [] [] [] [] [] [] [] [] := by
@@ -336,18 +327,12 @@ theorem preparationTrace (d e : Nat) (hd : 0 < d) (he : 0 < e)
     change some (TM2.stepAux (program d e hd he (.inr .vertexSeed)) _ _) = _
     simp only [program, mainInstruction, TM2.stepAux, b4, memory_vertex,
       update_vertex, next, encodeWord, List.replicate_zero, List.nil_append]
-  have all := joinTrace (joinTrace (joinTrace (joinTrace copyRun countRun) headerRun) fuelRun) seedRun
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans copyRun countRun) headerRun) fuelRun) seedRun
   have count : preparationSteps n h =
       (((2 * (h.length + 1) + (2 * (n + 1) + 1)) + (2 * (n + 1) + 1)) +
         (2 * (n + 1) + 1)) + 1 := by unfold preparationSteps; omega
   rw [count]
   exact all
-
-private theorem encodeWords_flatMap {α : Type*} (items : List α) (words : α → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
-  induction items with
-  | nil => rfl
-  | cons item items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
 
 private theorem encodeWords_flatten (items : List (List Nat)) :
     encodeWords items.flatten = (items.map encodeWords).flatten := by
@@ -382,7 +367,7 @@ def outputBlock {n d e : Nat} (G : PortTables.Table n d) (H : ExpanderTables.Tab
 
 theorem oldOutput_eq {n d : Nat} (G : PortTables.Table n d) (e : Nat) (v : Fin n) :
     oldOutput G e v = encodeWords ((List.ofFn (oldRow G e v)).flatMap rowWords) := by
-  rw [encodeWords_flatMap]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [oldOutput, oldRows, MachineLazyRows.recordsOutput, List.flatMap_def, List.map_ofFn]
   apply congrArg List.flatten
   apply congrArg List.ofFn
@@ -575,7 +560,7 @@ theorem tailFinishTrace (d e : Nat) (hd : 0 < d) (he : 0 < e)
     change some (TM2.stepAux (program d e hd he (.inr .increment)) _ _) = _
     simp only [program, mainInstruction, TM2.stepAux, memory_vertex, next,
       update_vertex, encodeWord, List.replicate_succ, List.cons_append]
-  have all := joinTrace drain increment
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans drain increment
   simpa only [Nat.add_assoc] using all
 
 def pairSteps {n d e : Nat} (G : PortTables.Table n d) (H : ExpanderTables.Table n e)
@@ -604,7 +589,7 @@ theorem pairTrace {n : Nat} (d e : Nat) (hd : 0 < d) (he : 0 < e)
   have h₄ := tailFinishTrace d e hd he g h gs hs nv mv f
     ((out ++ oldOutput G e v) ++ expanderOutput d H v) v.val a
   simpa only [pairSteps, outputBlock, List.append_assoc] using
-    joinTrace (joinTrace (joinTrace h₁ h₂) h₃) h₄
+    UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂) h₃) h₄
 
 def cleanupSteps (n m : Nat) : Nat := 2 * n + m + 8
 
@@ -630,7 +615,7 @@ theorem cleanupTrace (d e : Nat) (hd : 0 < d) (he : 0 < e)
     (program d e hd he) rfl (memory g h [] [] [] [] [] [] [] out)
     (encodeWord m) ambient none
   simp only [encodeWord_length, update_fuel, update_vertex, update_vertexCount, update_dartCount] at h₁ h₂ h₃ h₄
-  have all := joinTrace (joinTrace (joinTrace h₁ h₂) h₃) h₄
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂) h₃) h₄
   have hsteps : cleanupSteps n m = ((0 + 1 + 1 + (n + 1 + 1)) + (n + 1 + 1)) + (m + 1 + 1) := by
     unfold cleanupSteps
     omega
@@ -763,7 +748,7 @@ theorem tableTrace {n : Nat} (d e : Nat) (hd : 0 < d) (he : 0 < e)
   have h₃ := loopTrace d e hd he G H a
   have h₄ := cleanupTrace d e hd he (PortTables.tableBits G) (rawExpander H)
     (PortTables.tableBits (PreprocessingOverlayTables.overlay G H)) n (n * d) a
-  exact joinTrace (joinTrace (joinTrace h₁ h₂) h₃) h₄
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂) h₃) h₄
 
 private theorem flatMap_length_le {α : Type*} (items : List α) (f : α → List Bool)
     (B : Nat) (bounded : ∀ x ∈ items, (f x).length ≤ B) :
@@ -953,8 +938,6 @@ def machine (d e : Nat) (hd : 0 < d) (he : 0 < e) : FinTM2 where
   initialState := clean d e hd he ()
   m := program d e hd he
 
-theorem machine_alphabet_finite (d e : Nat) (hd : 0 < d) (he : 0 < e) :
-    ∀ k, Finite ((machine d e hd he).Γ k) := fun _ => inferInstanceAs (Finite Bool)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineOverlayTable
 

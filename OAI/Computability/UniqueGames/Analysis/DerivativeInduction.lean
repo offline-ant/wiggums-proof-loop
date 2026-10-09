@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.Isomorphisms
 import Mathlib.LinearAlgebra.Projection
@@ -166,51 +167,6 @@ noncomputable def antecedentEquiv (Z : B →ₗ[F2] C) :
   right_inv p := Prod.ext (graphParameter_lift Z p.1 p.2)
     (complementParameter_lift Z p.1 p.2)
 
-/-- The graph of the reconstruction parameter as an injective linear map. -/
-def graphEmbedding (Z : B →ₗ[F2] C) (F : Z.range →ₗ[F2] A) :
-    Z.range →ₗ[F2] (A × C) := F.prod Z.range.subtype
-
-theorem graphEmbedding_injective (Z : B →ₗ[F2] C) (F : Z.range →ₗ[F2] A) :
-    Function.Injective (graphEmbedding Z F) := by
-  intro c d h
-  exact Subtype.ext (congrArg Prod.snd h)
-
-theorem range_lift (Z : B →ₗ[F2] C)
-    (F : Z.range →ₗ[F2] A) (H : U →ₗ[F2] Z.range) :
-    (lift Z F H).range = (graphEmbedding Z F).range := by
-  ext v
-  constructor
-  · rintro ⟨p, rfl⟩
-    exact ⟨Z.rangeRestrict p.1 + H p.2, rfl⟩
-  · rintro ⟨c, rfl⟩
-    obtain ⟨b, hb⟩ := Z.surjective_rangeRestrict c
-    refine ⟨(b, 0), ?_⟩
-    simp [graphEmbedding, hb]
-
-/-- The reconstructed map has exactly the rank of the fixed compression. -/
-theorem finrank_range_lift (Z : B →ₗ[F2] C)
-    (F : Z.range →ₗ[F2] A) (H : U →ₗ[F2] Z.range) :
-    Module.finrank F2 (lift Z F H).range = Module.finrank F2 Z.range := by
-  rw [range_lift]
-  exact LinearMap.finrank_range_of_inj (graphEmbedding_injective Z F)
-
-/-- The map rank is preserved for every antecedent, without a rank hypothesis. -/
-theorem finrank_range_antecedent (Z : B →ₗ[F2] C)
-    (X : Antecedent (U := U) (A := A) Z) :
-    Module.finrank F2 X.val.range = Module.finrank F2 Z.range := by
-  rw [← lift_parameters Z X]
-  exact finrank_range_lift Z (graphParameter Z X) (complementParameter Z X)
-
-/-- The sharp cardinality of the antecedents after the outer subspaces are fixed. -/
-theorem card_antecedent (Z : B →ₗ[F2] C)
-    [Module.Finite F2 A] [Module.Finite F2 U] [Module.Finite F2 C] :
-    Nat.card (Antecedent (U := U) (A := A) Z) =
-      2 ^ (Module.finrank F2 Z.range *
-        (Module.finrank F2 A + Module.finrank F2 U)) := by
-  rw [Nat.card_congr (antecedentEquiv (U := U) (A := A) Z), Nat.card_prod,
-    CompressionCount.natCard_linearMap, CompressionCount.natCard_linearMap, ← pow_add]
-  congr 1
-  ring
 
 theorem isAntecedent_iff_pointwise (Z : B →ₗ[F2] C)
     (X : (B × U) →ₗ[F2] (A × C)) :

@@ -1,4 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrain
+import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.PCP.SourceFieldArrayLemmas
 import OAI.Computability.UniqueGames.Reduction.CanonicalBodyTemplateLemmas
@@ -227,11 +229,30 @@ theorem readFour_output_frame (base : Tape → List Bool) (values : List Nat)
   intro r hr
   exact hfield _
 
+/-- Exact lookup frame, independent of the scanner's recursive tape updates. -/
 def outputTapes {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
-    (indexSuffix suffix : List Bool) : Tape → List Bool :=
-  SourceFieldArray.sequenceTapes .work fieldDestination
-    (scanTapes base 0 indexSuffix (encodeWords (equationWords equation) ++ suffix))
-    0 (equationWords equation) suffix
+    (indexSuffix suffix : List Bool) : Tape → List Bool
+  | .index => encodeWord 0 ++ indexSuffix
+  | .work => suffix
+  | .field j => encodeWord ((equationWords equation)[j.val]'(by simp)) ++ base (.field j)
+  | p => base p
+
+private theorem readTapes_eq_output {n : Nat} (base : Tape → List Bool)
+    (equation : CloneGap.Equation (Fin n)) (indexSuffix suffix : List Bool) :
+    SourceFieldArray.sequenceTapes .work fieldDestination
+      (scanTapes base 0 indexSuffix (encodeWords (equationWords equation) ++ suffix))
+      0 (equationWords equation) suffix = outputTapes base equation indexSuffix suffix := by
+  funext p
+  cases p with
+  | work => exact readFour_output_work _ _ (equationWords_length equation) _ (by simp)
+  | field j => simp [readFour_output_field _ _ (equationWords_length equation), outputTapes,
+      scanTapes_other _ _ _ _ (.field j) (by simp) (by simp)]
+  | index => rw [readFour_output_frame _ _ _ .index (by decide) (by intro j; simp)]
+             exact scanTapes_index _ _ _ _
+  | source => rw [readFour_output_frame _ _ _ .source (by decide) (by intro j; simp)]
+              exact scanTapes_other _ _ _ _ _ (by decide) (by decide)
+  | scratch => rw [readFour_output_frame _ _ _ .scratch (by decide) (by intro j; simp)]
+               exact scanTapes_other _ _ _ _ _ (by decide) (by decide)
 
 def scanSteps {n : Nat} (variableCount declaredEquations : Nat)
     (prior : List (CloneGap.Equation (Fin n))) (equation : CloneGap.Equation (Fin n)) : Nat :=
@@ -265,7 +286,7 @@ theorem scanReadTrace {n : Nat} (base : Tape → List Bool) (variableCount decla
         (variableCount + declaredEquations + 2) by unfold scanSteps; omega]
   rw [Function.iterate_add_apply, hh, update_scanTapes_work,
     Function.iterate_add_apply, hs]
-  exact hr
+  simpa only [readTapes_eq_output] using hr
 
 def lookupSteps {n : Nat} (F : SourceEncoding.Input) (prior : List (CloneGap.Equation (Fin n)))
     (equation : CloneGap.Equation (Fin n)) : Nat :=
@@ -303,46 +324,21 @@ theorem lookupWithSplitTrace (F : SourceEncoding.Input) (prior : List (CloneGap.
 
 theorem output_source {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
     (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix .source = base .source := by
-  rw [outputTapes, readFour_output_frame _ _ _ .source (by decide) (by intro j; simp)]
-  exact scanTapes_other _ _ _ _ _ (by decide) (by decide)
+    outputTapes base equation indexSuffix suffix .source = base .source := rfl
 
 theorem output_index {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
     (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix .index = encodeWord 0 ++ indexSuffix := by
-  rw [outputTapes, readFour_output_frame _ _ _ .index (by decide) (by intro j; simp),
-    scanTapes_index]
+    outputTapes base equation indexSuffix suffix .index = encodeWord 0 ++ indexSuffix := rfl
 
 theorem output_work {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
     (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix .work = suffix := by
-  apply readFour_output_work _ _ (equationWords_length equation) _
-  simp
+    outputTapes base equation indexSuffix suffix .work = suffix := rfl
 
 theorem output_field {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
     (indexSuffix suffix : List Bool) (j : Fin 4) :
     outputTapes base equation indexSuffix suffix (.field j) =
-      encodeWord ((equationWords equation)[j.val]'(by simp)) ++ base (.field j) := by
-  rw [outputTapes, readFour_output_field _ _ (equationWords_length equation)]
-  rw [scanTapes_other _ _ _ _ (.field j) (by simp) (by simp)]
+      encodeWord ((equationWords equation)[j.val]'(by simp)) ++ base (.field j) := rfl
 
-theorem output_first {n : Nat} (base : Tape → List Bool)
-    (equation : CloneGap.Equation (Fin n)) (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix (.field 0) =
-      encodeWord equation.first.val ++ base (.field 0) := by
-  simpa [equationWords] using output_field base equation indexSuffix suffix (0 : Fin 4)
-
-theorem output_second {n : Nat} (base : Tape → List Bool)
-    (equation : CloneGap.Equation (Fin n)) (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix (.field 1) =
-      encodeWord equation.second.val ++ base (.field 1) := by
-  simpa [equationWords] using output_field base equation indexSuffix suffix (1 : Fin 4)
-
-theorem output_third {n : Nat} (base : Tape → List Bool)
-    (equation : CloneGap.Equation (Fin n)) (indexSuffix suffix : List Bool) :
-    outputTapes base equation indexSuffix suffix (.field 2) =
-      encodeWord equation.third.val ++ base (.field 2) := by
-  simpa [equationWords] using output_field base equation indexSuffix suffix (2 : Fin 4)
 
 theorem output_rhs {n : Nat} (base : Tape → List Bool)
     (equation : CloneGap.Equation (Fin n)) (indexSuffix suffix : List Bool) :
@@ -354,22 +350,8 @@ theorem output_frame {n : Nat} (base : Tape → List Bool) (equation : CloneGap.
     (indexSuffix suffix : List Bool) (p : Tape) (hindex : p ≠ .index) (hwork : p ≠ .work)
     (hfield : ∀ j : Fin 4, p ≠ .field j) :
     outputTapes base equation indexSuffix suffix p = base p := by
-  rw [outputTapes, readFour_output_frame _ _ _ p hwork hfield]
-  exact scanTapes_other _ _ _ _ p hindex hwork
+  cases p <;> simp_all [outputTapes]
 
-theorem equationWords_four {n : Nat} (equation : CloneGap.Equation (Fin n)) :
-    equationWords equation =
-      [equation.first.val, equation.second.val, equation.third.val,
-       if equation.rhs then 1 else 0] := rfl
-
-def fieldWords (tapes : Tape → List Bool) : List (List Bool) :=
-  [tapes (.field 0), tapes (.field 1), tapes (.field 2), tapes (.field 3)]
-
-theorem output_fieldWords {n : Nat} (base : Tape → List Bool) (equation : CloneGap.Equation (Fin n))
-    (indexSuffix suffix : List Bool) (hempty : ∀ j : Fin 4, base (.field j) = []) :
-    fieldWords (outputTapes base equation indexSuffix suffix) =
-      (equationWords equation).map encodeWord := by
-  simp [fieldWords, output_field, hempty, equationWords_four]
 
 theorem lookupSteps_le_input (F : SourceEncoding.Input) (prior : List (CloneGap.Equation (Fin F.variables)))
     (equation : CloneGap.Equation (Fin F.variables)) (after : List (CloneGap.Equation (Fin F.variables)))
@@ -435,77 +417,6 @@ def lookupInTime (F : SourceEncoding.Input) (i : Fin F.equations.length)
     (F.equations.drop (i.val + 1)) hs base indexSuffix hsource
     (by simpa only [hp] using hindex) hwork hscratch ambient register
 
-def machine : FinTM2 where
-  K := Tape
-  k₀ := .source
-  k₁ := .field 0
-  Γ _ := Bool
-  Λ := Label
-  main := .copyOut
-  σ := Unit × Option Bool
-  initialState := ((), none)
-  m := program (σ := Unit)
-
-/-- The same proved run stated directly for the concrete finite machine. -/
-def machineInTime (F : SourceEncoding.Input) (i : Fin F.equations.length)
-    (base : Tape → List Bool) (indexSuffix : List Bool)
-    (hsource : base .source = inputBits F)
-    (hindex : base .index = encodeWord i.val ++ indexSuffix)
-    (hwork : base .work = []) (hscratch : base .scratch = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime machine.step
-      ⟨some .copyOut, ((), register), base⟩
-      (some ⟨none, ((), none), outputTapes base F.equations[i.val] indexSuffix
-        (encodeWords ((F.equations.drop (i.val + 1)).flatMap equationWords))⟩)
-      (timePolynomial.eval (inputBits F).length) := by
-  exact lookupInTime F i base indexSuffix hsource hindex hwork hscratch () register
-
-/-- Same-tape placement into the caller's finite control. Choosing the ambient
-type to be `τ × Unit` gives the shared state `(τ × Unit) × Option Bool` used by
-the field-template machinery. The lookup's final transition enters `exit`. -/
-noncomputable def placedLookupInTime {Λ' : Type}
-    (labels : Label → Λ') (exit : Option Λ')
-    (target : Λ' → TM2.Stmt (fun _ : Tape => Bool) Λ' (σ × Option Bool))
-    (atLabels : ∀ l, target (labels l) =
-      MachineSubroutine.statement labels exit (program (σ := σ) l))
-    (input : SourceEncoding.Input) (i : Fin input.equations.length)
-    (base : Tape → List Bool) (indexSuffix : List Bool)
-    (hsource : base .source = inputBits input)
-    (hindex : base .index = encodeWord i.val ++ indexSuffix)
-    (hwork : base .work = []) (hscratch : base .scratch = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels .copyOut), (ambient, register), base⟩
-      (some ⟨exit, (ambient, none), outputTapes base input.equations[i.val] indexSuffix
-        (encodeWords ((input.equations.drop (i.val + 1)).flatMap equationWords))⟩)
-      (timePolynomial.eval (inputBits input).length) :=
-  MachineSubroutine.execution labels exit program target atLabels
-    (lookupInTime input i base indexSuffix hsource hindex hwork hscratch ambient register)
-
-/-- An optional disjoint-stack placement preserves arbitrary extra tapes and
-state. It reuses the same generic lookup and introduces no extra transitions. -/
-noncomputable def embeddedLookupInTime {E Λextra τ : Type} [DecidableEq E]
-    (continuation : Option (Label ⊕ Λextra)) (extraState : τ)
-    (extraTapes : E → List Bool)
-    (extra : Λextra → TM2.Stmt
-      (MachineEmbedding.Alphabet (fun _ : Tape => Bool) (fun _ : E => Bool))
-      (Label ⊕ Λextra) ((σ × Option Bool) × τ))
-    (input : SourceEncoding.Input) (i : Fin input.equations.length)
-    (base : Tape → List Bool) (indexSuffix : List Bool)
-    (hsource : base .source = inputBits input)
-    (hindex : base .index = encodeWord i.val ++ indexSuffix)
-    (hwork : base .work = []) (hscratch : base .scratch = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime
-      (TM2.step (MachineEmbedding.program continuation program extra))
-      (MachineEmbedding.configuration continuation extraState extraTapes
-        ⟨some .copyOut, (ambient, register), base⟩)
-      (some (MachineEmbedding.configuration continuation extraState extraTapes
-        ⟨none, (ambient, none), outputTapes base input.equations[i.val] indexSuffix
-          (encodeWords ((input.equations.drop (i.val + 1)).flatMap equationWords))⟩))
-      (timePolynomial.eval (inputBits input).length) :=
-  MachineComposition.embeddedExecution continuation extraState extraTapes program extra
-    (lookupInTime input i base indexSuffix hsource hindex hwork hscratch ambient register)
 
 end UniqueGamesTheorem.Reduction.SourceEquationLookup
 
@@ -539,87 +450,43 @@ def place (j : Fin width) : SourceEquationLookup.Tape → Tape width Extra
   | .source => .source | .index => .index | .work => .work | .scratch => .scratch
   | .field s => .field j s
 
-theorem place_injective (j : Fin width) : Function.Injective (place (Extra := Extra) j) := by
-  intro a b h
-  cases a <;> cases b <;> simp_all [place]
+
+/-- Explicit inverse for the shared lookup block; other coordinate fields
+and caller tapes lie outside this placement. -/
+def view (j : Fin width) : Tape width Extra → Option SourceEquationLookup.Tape
+  | .source => some .source | .index => some .index
+  | .work => some .work | .scratch => some .scratch
+  | .field i s => if i = j then some (.field s) else none
+  | _ => none
 
 def fill (j : Fin width) (base : Tape width Extra → List Bool)
-    (localTapes : SourceEquationLookup.Tape → List Bool) : Tape width Extra → List Bool
-  | .source => localTapes .source | .index => localTapes .index
-  | .work => localTapes .work | .scratch => localTapes .scratch
-  | .field i s => if i = j then localTapes (.field s) else base (.field i s)
-  | p => base p
-
-@[simp] theorem fill_place (j : Fin width) (base : Tape width Extra → List Bool)
-    (localTapes : SourceEquationLookup.Tape → List Bool) (p : SourceEquationLookup.Tape) :
-    fill j base localTapes (place j p) = localTapes p := by
-  cases p <;> simp [fill, place]
+    (localTapes : SourceEquationLookup.Tape → List Bool) : Tape width Extra → List Bool :=
+  MachineCloudPadding.Placement.tapes (view j) localTapes base
 
 @[simp] theorem fill_self (j : Fin width) (base : Tape width Extra → List Bool) :
     fill j base (base ∘ place j) = base := by
   funext p
-  cases p <;> simp [fill, place]
-  intro h
-  subst h
-  rfl
+  cases p <;> simp [fill, view, place, MachineCloudPadding.Placement.tapes]
+  rename_i i s
+  by_cases h : i = j <;> simp [h]
 
 variable [DecidableEq Extra]
 
-theorem fill_update (j : Fin width) (base : Tape width Extra → List Bool)
-    (localTapes : SourceEquationLookup.Tape → List Bool) (p : SourceEquationLookup.Tape)
-    (value : List Bool) :
-    fill j base (Function.update localTapes p value) =
-      Function.update (fill j base localTapes) (place j p) value := by
-  funext k
-  cases k <;> cases p <;> simp [fill, place, Function.update_apply]
-  all_goals split <;> simp_all
+omit [DecidableEq Extra] in
+@[simp] theorem view_place (j : Fin width) (p : SourceEquationLookup.Tape) :
+    view j (place j p : Tape width Extra) = some p := by
+  cases p <;> simp [view, place]
 
-def placedLabel (j : Fin width) : Option SourceEquationLookup.Label → Option (Label width)
-  | none => some (.clearWork j)
-  | some l => some (.lookup j l)
+omit [DecidableEq Extra] in
+theorem place_view (j : Fin width) (p : Tape width Extra) (localTape : SourceEquationLookup.Tape)
+    (h : view j p = some localTape) : place j localTape = p := by
+  cases p <;> cases localTape <;> simp_all [view, place]
 
-def placedConfiguration (j : Fin width) (base : Tape width Extra → List Bool)
-    (c : TM2.Cfg (fun _ : SourceEquationLookup.Tape => Bool)
-      SourceEquationLookup.Label ((σ × Unit) × Option Bool)) :
-    TM2.Cfg (fun _ : Tape width Extra => Bool) (Label width) ((σ × Unit) × Option Bool) :=
-  ⟨placedLabel j c.l, c.var, fill j base c.stk⟩
-
-def placedStatement (j : Fin width) :
-    TM2.Stmt (fun _ : SourceEquationLookup.Tape => Bool)
-      SourceEquationLookup.Label ((σ × Unit) × Option Bool) →
-    TM2.Stmt (fun _ : Tape width Extra => Bool) (Label width) ((σ × Unit) × Option Bool)
-  | .push k f next => .push (place j k) f (placedStatement j next)
-  | .peek k f next => .peek (place j k) f (placedStatement j next)
-  | .pop k f next => .pop (place j k) f (placedStatement j next)
-  | .load f next => .load f (placedStatement j next)
-  | .branch f yes no => .branch f (placedStatement j yes) (placedStatement j no)
-  | .goto f => .goto (fun state => .lookup j (f state))
-  | .halt => .goto (fun _ => .clearWork j)
-
-theorem placed_stepAux (j : Fin width) (base : Tape width Extra → List Bool)
+def placedStatement (j : Fin width)
     (q : TM2.Stmt (fun _ : SourceEquationLookup.Tape => Bool)
-      SourceEquationLookup.Label ((σ × Unit) × Option Bool))
-    (state : (σ × Unit) × Option Bool) (localTapes : SourceEquationLookup.Tape → List Bool) :
-    TM2.stepAux (placedStatement j q) state (fill j base localTapes) =
-      placedConfiguration j base (TM2.stepAux q state localTapes) := by
-  induction q generalizing state localTapes with
-  | push k f next ih =>
-    simp only [placedStatement, TM2.stepAux, fill_place]
-    rw [← fill_update]
-    exact ih state _
-  | peek k f next ih =>
-    simpa only [placedStatement, TM2.stepAux, fill_place] using ih (f state _) localTapes
-  | pop k f next ih =>
-    simp only [placedStatement, TM2.stepAux, fill_place]
-    rw [← fill_update]
-    exact ih (f state _) _
-  | load f next ih => simpa only [placedStatement, TM2.stepAux] using ih (f state) localTapes
-  | branch f yes no ihYes ihNo =>
-    cases h : f state
-    · simpa only [placedStatement, TM2.stepAux, h, Bool.cond_false] using ihNo state localTapes
-    · simpa only [placedStatement, TM2.stepAux, h, Bool.cond_true] using ihYes state localTapes
-  | goto f => rfl
-  | halt => rfl
+      SourceEquationLookup.Label ((σ × Unit) × Option Bool)) :
+    TM2.Stmt (fun _ : Tape width Extra => Bool) (Label width) ((σ × Unit) × Option Bool) :=
+  MachineCloudPadding.Placement.statement (place j) (.lookup j) (some (.clearWork j)) q
 
 def nextLabel (j : Fin width) : Label width :=
   if h : j.val + 1 < width then .copyOut ⟨j.val + 1, h⟩ else .done
@@ -634,23 +501,6 @@ def program : Label width → TM2.Stmt (fun _ : Tape width Extra => Bool)
   | .clearWork j => MachineDrain.drain .work (.clearWork j) (some (.clearIndex j))
   | .clearIndex j => MachineDrain.drain .index (.clearIndex j) (some (nextLabel j))
   | .done => .halt
-
-theorem placed_step (j : Fin width) (base : Tape width Extra → List Bool)
-    (a b : TM2.Cfg (fun _ : SourceEquationLookup.Tape => Bool)
-      SourceEquationLookup.Label ((σ × Unit) × Option Bool))
-    (h : TM2.step SourceEquationLookup.program a = some b) :
-    TM2.step program (placedConfiguration j base a) =
-      some (placedConfiguration j base b) := by
-  cases a with
-  | mk l state localTapes =>
-    cases l with
-    | none => contradiction
-    | some l =>
-      change some (TM2.stepAux (SourceEquationLookup.program l) state localTapes) = some b at h
-      cases Option.some.inj h
-      change some (TM2.stepAux (placedStatement j (SourceEquationLookup.program l))
-        state (fill j base localTapes)) = _
-      rw [placed_stepAux]
 
 def lookupOutput (j : Fin width) (F : SourceEncoding.Input) (i : Fin F.equations.length)
     (base : Tape width Extra → List Bool) (suffix : List Bool) : Tape width Extra → List Bool :=
@@ -669,9 +519,14 @@ noncomputable def placedLookupInTime (j : Fin width) (F : SourceEncoding.Input) 
   have h := SourceEquationLookup.lookupInTime F i (base ∘ place j) suffix
     hsource hindex hwork hscratch (ambient, ()) register
   have lifted := liftExecutionInTime (TM2.step SourceEquationLookup.program) (TM2.step program)
-    (placedConfiguration j base) (placed_step j base) h
-  simpa only [placedConfiguration, placedLabel, fill_self,
-    SourceEquationLookup.timePolynomial_eval, lookupOutput] using lifted
+    (MachineCloudPadding.Placement.configuration (view j) (.lookup j) (some (.clearWork j)) base)
+    (MachineCloudPadding.Placement.step_simulation (place j) (view j) (view_place j)
+      (place_view j) (.lookup j) (some (.clearWork j)) base SourceEquationLookup.program
+      program (fun _ => rfl)) h
+  simpa only [MachineCloudPadding.Placement.configuration, MachineCloudPadding.Placement.label,
+    lookupOutput, fill, SourceEquationLookup.timePolynomial_eval,
+    show MachineCloudPadding.Placement.tapes (view j) (base ∘ place j) base = base
+      from fill_self j base] using lifted
 
 def copiedTapes (j : Fin width) (base : Tape width Extra → List Bool) : Tape width Extra → List Bool :=
   Function.update base .index (base (.savedIndex j))
@@ -690,26 +545,10 @@ theorem cleanup_lookupOutput (j : Fin width) (F : SourceEncoding.Input) (i : Fin
       (lookupOutput j F i (copiedTapes j base) suffix) .work []) .index [] =
       coordinateOutput j F.equations[i.val] base := by
   funext p
-  cases p with
-  | source => simp [lookupOutput, fill, coordinateOutput, SourceEquationLookup.output_source,
-      copiedTapes, place]
-  | index => simp [coordinateOutput]
-  | work => simp [coordinateOutput]
-  | scratch =>
-    simp only [Function.update_of_ne (by simp : (Tape.scratch : Tape width Extra) ≠ .index),
-      Function.update_of_ne (by simp : (Tape.scratch : Tape width Extra) ≠ .work), lookupOutput, fill,
-      coordinateOutput]
-    rw [SourceEquationLookup.output_frame _ _ _ _ .scratch (by simp) (by simp) (by intro s; simp)]
-    simp [copiedTapes, place]
-  | field k s =>
-    by_cases hk : k = j
-    · subst k
-      simp [lookupOutput, fill, coordinateOutput, SourceEquationLookup.output_field,
-        copiedTapes, place]
-    · simp [lookupOutput, fill, coordinateOutput, hk, copiedTapes]
-  | copyScratch => simp [lookupOutput, fill, coordinateOutput, copiedTapes]
-  | savedIndex k => simp [lookupOutput, fill, coordinateOutput, copiedTapes]
-  | extra k => simp [lookupOutput, fill, coordinateOutput, copiedTapes]
+  cases p <;> try simp [lookupOutput, fill, view, MachineCloudPadding.Placement.tapes,
+    coordinateOutput, copiedTapes, place, SourceEquationLookup.outputTapes]
+  rename_i coordinate slot
+  by_cases h : coordinate = j <;> simp [h]
 
 omit [DecidableEq Extra] in
 @[simp] theorem coordinateOutput_savedIndex {n : Nat} (j k : Fin width) (equation : CloneGap.Equation (Fin n))
@@ -773,9 +612,11 @@ noncomputable def coordinateInTime (j : Fin width) (F : SourceEncoding.Input) (i
       (StateTransition.EvalsToInTime.trans (TM2.step program) _ _ _ _ _ copyRun lookupRun)
       workRun) indexRun
   have hw : loaded .work = encodeWords ((F.equations.drop (i.val + 1)).flatMap equationWords) := by
-    simp [loaded, lookupOutput, fill, SourceEquationLookup.output_work]
+    simp [loaded, lookupOutput, fill, view, MachineCloudPadding.Placement.tapes,
+      SourceEquationLookup.output_work]
   have hi : (Function.update loaded .work []) .index = encodeWord 0 ++ suffix := by
-    simp [loaded, lookupOutput, fill, SourceEquationLookup.output_index]
+    simp [loaded, lookupOutput, fill, view, MachineCloudPadding.Placement.tapes,
+      SourceEquationLookup.output_index]
   have hc : suffix.length ≤ (base (.savedIndex j)).length := by
     rw [hsavedIndex, List.length_append]
     omega
@@ -791,37 +632,50 @@ def labelAt (r : Nat) : Label width :=
 
 theorem nextLabel_eq (j : Fin width) : nextLabel j = labelAt (j.val + 1) := rfl
 
+/-- Exact prefix frame: each visited coordinate is assigned once, and only
+index/work are cleared. This proof-side endpoint does not replay the loader. -/
 def stageTapes (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
-    (base : Tape width Extra → List Bool) : Nat → Tape width Extra → List Bool
-  | 0 => base
-  | r + 1 => if h : r < width then
-      coordinateOutput ⟨r, h⟩ F.equations[(tuple ⟨r, h⟩).val] (stageTapes F tuple base r)
-    else stageTapes F tuple base r
+    (base : Tape width Extra → List Bool) (r : Nat) : Tape width Extra → List Bool
+  | .index => if 0 < r ∧ 0 < width then [] else base .index
+  | .work => if 0 < r ∧ 0 < width then [] else base .work
+  | .field j s => if j.val < r then
+      encodeWord ((equationWords F.equations[(tuple j).val])[s.val]'(by simp)) ++ base (.field j s)
+    else base (.field j s)
+  | p => base p
+
+omit [DecidableEq Extra] in
+@[simp] theorem stageTapes_zero (F : SourceEncoding.Input)
+    (tuple : Fin width → Fin F.equations.length) (base : Tape width Extra → List Bool) :
+    stageTapes F tuple base 0 = base := by
+  funext p
+  cases p <;> simp [stageTapes]
+
+omit [DecidableEq Extra] in
+theorem stageTapes_succ (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
+    (base : Tape width Extra → List Bool) (r : Nat) (hr : r < width) :
+    stageTapes F tuple base (r + 1) =
+      coordinateOutput ⟨r, hr⟩ F.equations[(tuple ⟨r, hr⟩).val] (stageTapes F tuple base r) := by
+  funext p
+  cases p <;> simp [stageTapes, coordinateOutput, show 0 < width by omega]
+  rename_i j s
+  by_cases hj : j = (⟨r, hr⟩ : Fin width)
+  · subst j; simp
+  · have hv : j.val ≠ r := fun h => hj (Fin.ext h)
+    have he : j.val ≤ r ↔ j.val < r := by omega
+    simp [hj, he]
 
 omit [DecidableEq Extra] in
 theorem stageTapes_frame (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
     (base : Tape width Extra → List Bool) (r : Nat) (p : Tape width Extra)
     (hi : p ≠ .index) (hw : p ≠ .work) (hf : ∀ j s, p ≠ .field j s) :
     stageTapes F tuple base r p = base p := by
-  induction r with
-  | zero => rfl
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    · cases p <;> simp_all [coordinateOutput]
-    · exact ih
+  cases p <;> simp_all [stageTapes]
 
 omit [DecidableEq Extra] in
 theorem stageTapes_clean (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
     (base : Tape width Extra → List Bool) (r : Nat) (hi : base .index = []) (hw : base .work = []) :
     stageTapes F tuple base r .index = [] ∧ stageTapes F tuple base r .work = [] := by
-  induction r with
-  | zero => exact ⟨hi, hw⟩
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    · exact ⟨rfl, rfl⟩
-    · exact ih
+  simp [stageTapes, hi, hw]
 
 omit [DecidableEq Extra] in
 theorem stageTapes_field (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
@@ -829,25 +683,7 @@ theorem stageTapes_field (F : SourceEncoding.Input) (tuple : Fin width → Fin F
     stageTapes F tuple base r (.field j s) = if j.val < r then
       encodeWord ((equationWords F.equations[(tuple j).val])[s.val]'(by simp)) ++ base (.field j s)
       else base (.field j s) := by
-  induction r with
-  | zero => simp [stageTapes]
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    next hr =>
-      by_cases hj : j = (⟨r, hr⟩ : Fin width)
-      · subst j
-        simp only [coordinateOutput_field, ih]
-        simp
-      · rw [coordinateOutput_other_field _ _ _ _ _ hj, ih]
-        have hval : j.val ≠ r := by intro h; apply hj; exact Fin.ext h
-        have he : j.val < r + 1 ↔ j.val < r := by omega
-        simp only [he]
-    next hr =>
-      rw [ih]
-      have hjr : j.val < r := by omega
-      have hjr' : j.val < r + 1 := by omega
-      simp only [hjr, hjr', ite_true]
+  rfl
 
 noncomputable def prefixInTime (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
     (base : Tape width Extra → List Bool) (suffix : Fin width → List Bool) (C : Nat)
@@ -862,7 +698,7 @@ noncomputable def prefixInTime (F : SourceEncoding.Input) (tuple : Fin width →
       (some ⟨some (labelAt r), ((ambient, ()), none), stageTapes F tuple base r⟩)
       (r * (6 * (inputBits F).length + 4 * C + 20)) := by
   induction r with
-  | zero => exact { steps := 0, evals_in_steps := rfl, steps_le_m := by omega }
+  | zero => exact { steps := 0, evals_in_steps := by simp, steps_le_m := by omega }
   | succ r ih =>
     have hru : r < width := by omega
     let j : Fin width := ⟨r, hru⟩
@@ -882,8 +718,8 @@ noncomputable def prefixInTime (F : SourceEncoding.Input) (tuple : Fin width →
         (some ⟨some (labelAt (r + 1)), ((ambient, ()), none), stageTapes F tuple base (r + 1)⟩)
         (6 * (inputBits F).length + 4 * C + 20) := by
       refine { steps := one.steps, evals_in_steps := ?_, steps_le_m := ?_ }
-      · simpa only [labelAt, dite_eq_left hru, nextLabel_eq, j, stageTapes, before] using
-          one.evals_in_steps
+      · simpa only [labelAt, dite_eq_left hru, nextLabel_eq, j,
+          stageTapes_succ F tuple base r hru, before] using one.evals_in_steps
       · apply Nat.le_trans one.steps_le_m
         rw [hc]
         have hs := hsize j
@@ -954,81 +790,15 @@ theorem timePolynomial_eval (width L : Nat) :
     Polynomial.eval_C, Polynomial.eval_X]
   simp [Nat.mul_add, Nat.mul_comm, Nat.mul_left_comm, Nat.add_assoc]
 
-/-- Total physical length of the saved occurrence-ID tapes. -/
-def tupleBitLength (base : Tape width Extra → List Bool) : Nat :=
-  ∑ j : Fin width, (base (.savedIndex j)).length
 
-omit [DecidableEq Extra] in
-theorem savedIndex_length_le_tupleBitLength (base : Tape width Extra → List Bool)
-    (j : Fin width) : (base (.savedIndex j)).length ≤ tupleBitLength base := by
-  exact Finset.single_le_sum (fun i _ => Nat.zero_le (base (.savedIndex i)).length)
-    (Finset.mem_univ j)
-
-noncomputable def loadTupleInTime (F : SourceEncoding.Input)
-    (tuple : Fin width → Fin F.equations.length) (base : Tape width Extra → List Bool)
-    (hsource : base .source = inputBits F)
-    (hsaved : ∀ j, base (.savedIndex j) = encodeWord (tuple j).val)
-    (hindex : base .index = []) (hwork : base .work = [])
-    (hscratch : base .scratch = []) (hcopy : base .copyScratch = []) (ambient : σ) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labelAt 0), ((ambient, ()), none), base⟩
-      (some ⟨none, ((ambient, ()), none), stageTapes F tuple base width⟩)
-      (width * (6 * (inputBits F).length + 4 * tupleBitLength base + 20) + 1) :=
-  loadInTime F tuple base (fun _ => []) (tupleBitLength base) hsource
-    (by simpa only [List.append_nil] using hsaved)
-    (savedIndex_length_le_tupleBitLength base) hindex hwork hscratch hcopy ambient
-
-/-- The same concrete run with a univariate polynomial in the combined size. -/
-noncomputable def loadTuplePolynomialInTime (F : SourceEncoding.Input)
-    (tuple : Fin width → Fin F.equations.length) (base : Tape width Extra → List Bool)
-    (hsource : base .source = inputBits F)
-    (hsaved : ∀ j, base (.savedIndex j) = encodeWord (tuple j).val)
-    (hindex : base .index = []) (hwork : base .work = [])
-    (hscratch : base .scratch = []) (hcopy : base .copyScratch = []) (ambient : σ) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labelAt 0), ((ambient, ()), none), base⟩
-      (some ⟨none, ((ambient, ()), none), stageTapes F tuple base width⟩)
-      ((timePolynomial width).eval ((inputBits F).length + tupleBitLength base)) := by
-  let run := loadTupleInTime F tuple base hsource hsaved hindex hwork hscratch hcopy ambient
-  refine {
-    steps := run.steps
-    evals_in_steps := run.evals_in_steps
-    steps_le_m := run.steps_le_m.trans ?_ }
-  rw [timePolynomial_eval]
-  exact Nat.add_le_add_right (Nat.mul_le_mul_left width (by omega)) 1
-
-def nameSlot (s : Fin 3) : Fin 4 := ⟨s.val, by omega⟩
-def nameField (j : Fin width) (s : Fin 3) : Tape width Extra := .field j (nameSlot s)
 def rhsField (j : Fin width) : Tape width Extra := .field j 3
 
-omit [DecidableEq Extra] in
-theorem nameField_ne_rhsField (j k : Fin width) (s : Fin 3) :
-    nameField (Extra := Extra) j s ≠ rhsField k := by
-  intro h
-  have hv := congrArg (fun t : Tape width Extra =>
-    match t with | .field _ slot => slot.val | _ => 4) h
-  simp only [nameField, rhsField, nameSlot] at hv
-  have hs := s.isLt
-  omega
 
 def equationName {n : Nat} (e : CloneGap.Equation (Fin n)) (s : Fin 3) : Nat :=
   match s.val with
   | 0 => e.first.val
   | 1 => e.second.val
   | _ => e.third.val
-
-theorem equationWords_name {n : Nat} (e : CloneGap.Equation (Fin n)) (s : Fin 3) :
-    (equationWords e)[(nameSlot s).val]'(by simp) = equationName e s := by
-  obtain ⟨s, hs⟩ := s
-  have h : s = 0 ∨ s = 1 ∨ s = 2 := by omega
-  rcases h with rfl | rfl | rfl <;> rfl
-
-omit [DecidableEq Extra] in
-theorem output_name (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
-    (base : Tape width Extra → List Bool) (j : Fin width) (s : Fin 3) :
-    stageTapes F tuple base width (nameField j s) =
-      encodeWord (equationName F.equations[(tuple j).val] s) ++ base (nameField j s) := by
-  rw [nameField, stageTapes_field, ite_eq_left j.isLt, equationWords_name]
 
 omit [DecidableEq Extra] in
 theorem output_rhs (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
@@ -1045,40 +815,11 @@ theorem output_savedIndex (F : SourceEncoding.Input) (tuple : Fin width → Fin 
   stageTapes_frame F tuple base width (.savedIndex j) (by simp) (by simp) (by simp)
 
 omit [DecidableEq Extra] in
-theorem output_savedIndex_unary (F : SourceEncoding.Input)
-    (tuple : Fin width → Fin F.equations.length) (base : Tape width Extra → List Bool)
-    (hsaved : ∀ j, base (.savedIndex j) = encodeWord (tuple j).val) (j : Fin width) :
-    stageTapes F tuple base width (.savedIndex j) = encodeWord (tuple j).val :=
-  (output_savedIndex F tuple base j).trans (hsaved j)
-
-omit [DecidableEq Extra] in
 theorem output_source (F : SourceEncoding.Input) (tuple : Fin width → Fin F.equations.length)
     (base : Tape width Extra → List Bool) :
     stageTapes F tuple base width .source = base .source :=
   stageTapes_frame F tuple base width .source (by simp) (by simp) (by simp)
 
-/-- The fourth canonical record field is the saved occurrence ID. The equation
-RHS remains separately available on `rhsField j`. -/
-def canonicalFields (tapes : Tape width Extra → List Bool) (j : Fin width) : List (List Bool) :=
-  [tapes (nameField j 0), tapes (nameField j 1), tapes (nameField j 2), tapes (.savedIndex j)]
-
-def canonicalWords {n : Nat} (e : CloneGap.Equation (Fin n)) (occurrence : Nat) : List Nat :=
-  [e.first.val, e.second.val, e.third.val, occurrence]
-
-omit [DecidableEq Extra] in
-theorem output_canonicalFields (F : SourceEncoding.Input)
-    (tuple : Fin width → Fin F.equations.length) (base : Tape width Extra → List Bool)
-    (hsaved : ∀ j, base (.savedIndex j) = encodeWord (tuple j).val)
-    (hempty : ∀ j s, base (nameField j s) = []) (j : Fin width) :
-    canonicalFields (stageTapes F tuple base width) j =
-      (canonicalWords F.equations[(tuple j).val] (tuple j).val).map encodeWord := by
-  simp [canonicalFields, output_name, output_savedIndex, hsaved, hempty,
-    canonicalWords, equationName]
-
-/-- Width zero executes its actual done statement in one transition. -/
-theorem zeroWidthStep (base : Tape 0 Extra → List Bool) (ambient : σ) :
-    TM2.step program ⟨some (labelAt 0), ((ambient, ()), none), base⟩ =
-      some ⟨none, ((ambient, ()), none), base⟩ := rfl
 
 /-- A caller shares this complete tape arena and state, mapping only labels and
 the final continuation. All saved occurrence IDs remain available to its body. -/
@@ -1099,16 +840,6 @@ noncomputable def placedLoadUnaryInTime {Λ : Type}
   MachineSubroutine.execution labels exit program target atLabels
     (loadUnaryInTime F tuple base hsource hsaved hindex hwork hscratch hcopy ambient)
 
-def machine (width : Nat) (Extra : Type) [DecidableEq Extra] [Fintype Extra] : FinTM2 where
-  K := Tape width Extra
-  k₀ := .source
-  k₁ := .source
-  Γ _ := Bool
-  Λ := Label width
-  main := labelAt 0
-  σ := (Unit × Unit) × Option Bool
-  initialState := (((), ()), none)
-  m := program (σ := Unit)
 
 end UniqueGamesTheorem.Reduction.MachineSourceTuple
 

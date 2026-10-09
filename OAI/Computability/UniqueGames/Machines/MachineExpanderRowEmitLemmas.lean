@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.FinalCNFLoopLemmas
 
 namespace OAI
@@ -35,16 +36,6 @@ def emittedWord {K : Type} [DecidableEq K]
     (target : K) (base : K → List Bool) (value : Nat) : K → List Bool :=
   Function.update base target ((encodeWord value).reverse ++ base target)
 
-@[simp] theorem emittedWord_target {K : Type} [DecidableEq K]
-    (target : K) (base : K → List Bool) (value : Nat) :
-    emittedWord target base value target = (encodeWord value).reverse ++ base target := by
-  simp [emittedWord]
-
-theorem emittedWord_other {K : Type} [DecidableEq K]
-    (target : K) (base : K → List Bool) (value : Nat)
-    (tape : K) (different : tape ≠ target) :
-    emittedWord target base value tape = base tape := by
-  simp [emittedWord, different]
 
 variable {ρ : Type} [Fintype ρ] {d : Nat}
 
@@ -165,133 +156,9 @@ theorem outputEmitTraceAt (positive : 0 < d) (H : Table (cloudSize d) d)
   simpa only [outputPlan, affinePlan_steps, affinePlan_bits, Emitter.resultTapes,
     emittedWord, outputAddress] using run
 
-def firstEmitInTimeAt (positive : 0 < d) (H : Table (cloudSize d) d)
-    (ports : Tape → K) (portsInjective : Function.Injective ports)
-    (labels : Label d → Λ) (exit : Option Λ)
-    (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State ρ d))
-    (atLabels : ∀ l, target (labels l) = statement positive H ports labels exit l)
-    (n : Nat) (base : K → List Bool)
-    (source : base (ports .inputVertex) = encodeWord n)
-    (scratch : base (ports .emitScratch) = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels (.firstEmit (Emitter.labelAt 3 _ 0 .entry))), ((ambient, ()), none), base⟩
-      (some ⟨some (labels .firstReverse), ((ambient, ()), none),
-        emittedWord (ports .queryReverse) base (firstAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := firstEmitTraceAt positive H ports portsInjective labels exit target atLabels
-    n base source scratch ambient
-  steps_le_m := Nat.le_refl _
-
-def secondEmitInTimeAt (positive : 0 < d) (H : Table (cloudSize d) d)
-    (ports : Tape → K) (portsInjective : Function.Injective ports)
-    (labels : Label d → Λ) (exit : Option Λ)
-    (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State ρ d))
-    (atLabels : ∀ l, target (labels l) = statement positive H ports labels exit l)
-    (n : Nat) (base : K → List Bool)
-    (source : base (ports .quotientFirst) = encodeWord n)
-    (scratch : base (ports .emitScratch) = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels (.secondEmit (Emitter.labelAt 3 _ 0 .entry))), ((ambient, ()), none), base⟩
-      (some ⟨some (labels .secondReverse), ((ambient, ()), none),
-        emittedWord (ports .queryReverse) base (secondAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := secondEmitTraceAt positive H ports portsInjective labels exit target atLabels
-    n base source scratch ambient
-  steps_le_m := Nat.le_refl _
-
-def outputEmitInTimeAt (positive : 0 < d) (H : Table (cloudSize d) d)
-    (ports : Tape → K) (portsInjective : Function.Injective ports)
-    (labels : Label d → Λ) (exit : Option Λ)
-    (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State ρ d))
-    (atLabels : ∀ l, target (labels l) = statement positive H ports labels exit l)
-    (n : Nat) (base : K → List Bool)
-    (source : base (ports .quotientSecond) = encodeWord n)
-    (scratch : base (ports .emitScratch) = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels (.outputEmit (Emitter.labelAt 3 _ 0 .entry))), ((ambient, ()), none), base⟩
-      (some ⟨some (labels (.cleanup 0)), ((ambient, ()), none),
-        emittedWord (ports .output) base (outputAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := outputEmitTraceAt positive H ports portsInjective labels exit target atLabels
-    n base source scratch ambient
-  steps_le_m := Nat.le_refl _
 
 end Embedded
 
-theorem firstEmitTrace (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .inputVertex = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    (MachineComposition.advance (TM2.step (program positive H)))^[emitSteps n]
-      (some ⟨some (.firstEmit (Emitter.labelAt 3 _ 0 .entry)),
-        ((ambient, ()), none), base⟩) =
-      some ⟨some .firstReverse, ((ambient, ()), none),
-        emittedWord .queryReverse base (firstAddress n ambient.1.2)⟩ := by
-  exact firstEmitTraceAt positive H id Function.injective_id id none (program positive H)
-    (fun _ => rfl) n base source scratch ambient
-
-theorem secondEmitTrace (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .quotientFirst = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    (MachineComposition.advance (TM2.step (program positive H)))^[emitSteps n]
-      (some ⟨some (.secondEmit (Emitter.labelAt 3 _ 0 .entry)),
-        ((ambient, ()), none), base⟩) =
-      some ⟨some .secondReverse, ((ambient, ()), none),
-        emittedWord .queryReverse base (secondAddress n ambient.1.2)⟩ := by
-  exact secondEmitTraceAt positive H id Function.injective_id id none (program positive H)
-    (fun _ => rfl) n base source scratch ambient
-
-theorem outputEmitTrace (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .quotientSecond = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    (MachineComposition.advance (TM2.step (program positive H)))^[emitSteps n]
-      (some ⟨some (.outputEmit (Emitter.labelAt 3 _ 0 .entry)),
-        ((ambient, ()), none), base⟩) =
-      some ⟨some (.cleanup 0), ((ambient, ()), none),
-        emittedWord .output base (outputAddress n ambient.1.2)⟩ := by
-  exact outputEmitTraceAt positive H id Function.injective_id id none (program positive H)
-    (fun _ => rfl) n base source scratch ambient
-
-def firstEmitInTime (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .inputVertex = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step (program positive H))
-      ⟨some (.firstEmit (Emitter.labelAt 3 _ 0 .entry)), ((ambient, ()), none), base⟩
-      (some ⟨some .firstReverse, ((ambient, ()), none),
-        emittedWord .queryReverse base (firstAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := firstEmitTrace positive H n base source scratch ambient
-  steps_le_m := Nat.le_refl _
-
-def secondEmitInTime (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .quotientFirst = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step (program positive H))
-      ⟨some (.secondEmit (Emitter.labelAt 3 _ 0 .entry)), ((ambient, ()), none), base⟩
-      (some ⟨some .secondReverse, ((ambient, ()), none),
-        emittedWord .queryReverse base (secondAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := secondEmitTrace positive H n base source scratch ambient
-  steps_le_m := Nat.le_refl _
-
-def outputEmitInTime (positive : 0 < d) (H : Table (cloudSize d) d)
-    (n : Nat) (base : Tape → List Bool)
-    (source : base .quotientSecond = encodeWord n) (scratch : base .emitScratch = [])
-    (ambient : Ambient ρ d × Fin (degree d)) :
-    StateTransition.EvalsToInTime (TM2.step (program positive H))
-      ⟨some (.outputEmit (Emitter.labelAt 3 _ 0 .entry)), ((ambient, ()), none), base⟩
-      (some ⟨some (.cleanup 0), ((ambient, ()), none),
-        emittedWord .output base (outputAddress n ambient.1.2)⟩) (emitSteps n) where
-  steps := emitSteps n
-  evals_in_steps := outputEmitTrace positive H n base source scratch ambient
-  steps_le_m := Nat.le_refl _
 
 end
 
@@ -318,19 +185,6 @@ def scanPhaseLabel {d : Nat} (second : Bool) : Label d :=
 def reversePhaseLabel {d : Nat} (second : Bool) : Label d :=
   if second then .secondReverse else .firstReverse
 
-def lookupPhasePort {d : Nat} (second : Bool) (control : Control d) : Fin (degree d) :=
-  if second then secondOffset control else firstOffset control
-
-def lookupPhaseAddress {d : Nat} (second : Bool) (vertex : Nat) (control : Control d) : Nat :=
-  if second then secondAddress vertex control else firstAddress vertex control
-
-theorem lookupPhaseAddress_eq_rowIndex {v d : Nat} (second : Bool)
-    (vertex : Fin v) (control : Control d) :
-    lookupPhaseAddress second vertex.val control =
-      (rowIndex v (degree d) (vertex, lookupPhasePort second control)).val := by
-  cases second
-  · exact firstAddress_eq_rowIndex vertex control
-  · exact secondAddress_eq_rowIndex vertex control
 
 theorem lookupTape_injective : Function.Injective lookupTape := by decide
 
@@ -339,49 +193,11 @@ variable {K Λ ρ : Type} [DecidableEq K] [Fintype ρ]
 /-- The exact cleaned tape state produced by either lookup. -/
 def lookupResultTapes (ports : Tape → K) (base : K → List Bool)
     (value : Nat) (indexSuffix : List Bool) : K → List Bool :=
-  MachinePreservingLookup.initialTapes (ports ∘ lookupTape) base 0 indexSuffix []
-    (encodeWord value ++ base (ports .lookupOutput))
+  Function.update
+    (Function.update (Function.update base (ports .queryIndex) (encodeWord 0 ++ indexSuffix))
+      (ports .lookupWork) [])
+    (ports .lookupOutput) (encodeWord value ++ base (ports .lookupOutput))
 
-theorem lookupResultTapes_index (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) (value : Nat) (indexSuffix : List Bool) :
-    lookupResultTapes ports base value indexSuffix (ports .queryIndex) =
-      encodeWord 0 ++ indexSuffix := by
-  apply MachineLookup.tapes_index
-  · exact fun h => (by decide : Tape.queryIndex ≠ .lookupWork) (distinct h)
-  · exact fun h => (by decide : Tape.queryIndex ≠ .lookupOutput) (distinct h)
-
-theorem lookupResultTapes_work (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) (value : Nat) (indexSuffix : List Bool) :
-    lookupResultTapes ports base value indexSuffix (ports .lookupWork) = [] := by
-  apply MachineLookup.tapes_source
-  exact fun h => (by decide : Tape.lookupWork ≠ .lookupOutput) (distinct h)
-
-theorem lookupResultTapes_output (ports : Tape → K)
-    (base : K → List Bool) (value : Nat) (indexSuffix : List Bool) :
-    lookupResultTapes ports base value indexSuffix (ports .lookupOutput) =
-      encodeWord value ++ base (ports .lookupOutput) := by
-  apply MachineLookup.tapes_destination
-
-/-- Every tape outside the query, work, and lookup-output roles is retained. -/
-theorem lookupResultTapes_other (ports : Tape → K) (base : K → List Bool)
-    (value : Nat) (indexSuffix : List Bool) (p : K)
-    (hi : p ≠ ports .queryIndex) (hw : p ≠ ports .lookupWork)
-    (ho : p ≠ ports .lookupOutput) :
-    lookupResultTapes ports base value indexSuffix p = base p := by
-  exact MachineLookup.tapes_other _ _ _ p hi hw ho _ _ _ _
-
-theorem lookupResultTapes_table (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) (value : Nat) (indexSuffix : List Bool) :
-    lookupResultTapes ports base value indexSuffix (ports .table) = base (ports .table) := by
-  apply lookupResultTapes_other
-  all_goals intro h; have := distinct h; cases this
-
-theorem lookupResultTapes_restore (ports : Tape → K) (distinct : Function.Injective ports)
-    (base : K → List Bool) (value : Nat) (indexSuffix : List Bool) :
-    lookupResultTapes ports base value indexSuffix (ports .lookupRestore) =
-      base (ports .lookupRestore) := by
-  apply lookupResultTapes_other
-  all_goals intro h; have := distinct h; cases this
 
 section Lookup
 
@@ -425,21 +241,6 @@ theorem lookupPhaseTrace :
   · exact counterWord
   · exact workEmpty
 
-/-- A linear bound in the original encoded table length for the same actual
-phase. This includes the copy, restore, lookup, and residual cleanup. -/
-def lookupPhaseInTime :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels (lookupPhaseLabel second (.run .copyFirst))),
-        (ambient, register), base⟩
-      (some ⟨some (labels (scanPhaseLabel second)), (ambient, none),
-        lookupResultTapes ports base (reverseIndex G (rowIndex v (degree d) x)).val
-          indexSuffix⟩)
-      (6 * (encodeWords (rotationWords G)).length + 4) where
-  steps := MachinePreservingLookupClean.steps (rotationWords G) (rowIndex v (degree d) x).val
-  evals_in_steps := lookupPhaseTrace second positive H ports distinct labels exit target code
-    base G tableWord scratchEmpty x indexSuffix counterWord workEmpty ambient register
-  steps_le_m := MachinePreservingLookupClean.steps_le (rotationWords G) _ _
-    (rotationWords_getElem? G (rowIndex v (degree d) x))
 
 end Lookup
 
@@ -471,17 +272,6 @@ theorem reversePhaseTrace :
   unfold advance
   simpa only [List.map_id] using h
 
-def reversePhaseInTime :
-    StateTransition.EvalsToInTime (TM2.step target)
-      ⟨some (labels (reversePhaseLabel second)), (ambient, register), base⟩
-      (some ⟨some (labels (lookupPhaseLabel second (.run .copyFirst))), (ambient, none),
-        Reduction.MachineTransfer.tapesAt (ports .queryReverse) (ports .queryIndex) base []
-          ((base (ports .queryReverse)).reverse ++ base (ports .queryIndex))⟩)
-      ((base (ports .queryReverse)).length + 1) where
-  steps := (base (ports .queryReverse)).length + 1
-  evals_in_steps := reversePhaseTrace second positive H ports distinct labels exit target code
-    base ambient register
-  steps_le_m := Nat.le_refl _
 
 /-- Reversing an actual emitted unary field takes exactly `index + 2` steps.
 This includes consuming the field's delimiter and leaving the reversal loop. -/

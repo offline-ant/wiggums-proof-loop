@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMachineRowBody
 import OAI.Computability.UniqueGames.PCP.PoweringTableLayout
@@ -229,12 +230,6 @@ theorem rowBits_eq (graph : PortTables.Table vertices d) (n : Nat) (vertex : Fin
   rw [blockIndex_eq_encodeDart]
   rfl
 
-private theorem encodeWords_flatMap {X : Type*} (xs : List X) (f : X → List Nat) :
-    encodeWords (xs.flatMap f) = xs.flatMap (fun x => encodeWords (f x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 theorem rows_eq_vertexRowBits (graph : PortTables.Table vertices d) (n : Nat)
     (vertex : Fin vertices) :
     (List.ofFn id : List (Command d n)).flatMap (rowBits graph n vertex) =
@@ -254,7 +249,7 @@ theorem rows_eq_vertexRowBits (graph : PortTables.Table vertices d) (n : Nat)
     _ = PoweringTableLayout.vertexRowBits graph n vertex := by
       unfold PoweringTableLayout.vertexRowBits PoweringTableLayout.vertexRowWords
         PoweringTableLayout.vertexRows
-      rw [encodeWords_flatMap]
+      rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
       erw [← hrows, List.flatMap_map]
       rfl
 
@@ -289,23 +284,6 @@ theorem finalTapes_output (graph : PortTables.Table vertices d) (n : Nat)
     (commands d n) base suffix ready]
   simp only [commands, List.reverse_reverse, rows_eq_vertexRowBits]
 
-def vertexInTime (graph : PortTables.Table vertices d) (n : Nat)
-    (placement : PoweringMachineTapes.Tape (PoweringMachineRowBody.capacity n) → K)
-    (distinct : Function.Injective placement) (output : K) (outside : ∀ i, output ≠ placement i)
-    (vertex : Fin vertices) (labels : Label d n → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State d n))
-    (atLabels : ∀ l, program (labels l) = instruction n placement output labels exit l)
-    (base : K → List Bool) (suffix : List Bool)
-    (ready : PoweringMachineRowBody.Ready graph n placement vertex suffix base) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨entry d n labels exit, PoweringMasterState.clean (PoweringMachineRowBody.bufferSize d n), base⟩
-      (some ⟨exit, PoweringMasterState.clean (PoweringMachineRowBody.bufferSize d n),
-        finalTapes graph n placement output vertex base⟩)
-      (budget d n (PortTables.tableBits graph).length) where
-  steps := steps graph vertex n
-  evals_in_steps := vertexTrace graph n placement distinct output outside vertex labels exit
-    program atLabels base suffix ready
-  steps_le_m := steps_le graph vertex n
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineVertex
 

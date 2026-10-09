@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLazyRows
 import OAI.Computability.UniqueGames.PCP.PreprocessingOverlayWords
 import OAI.Computability.UniqueGames.PCP.SourceMachine
@@ -55,10 +56,6 @@ def resultTapes (d e v j : Nat) (tape : Fin 10 → K) (base : K → List Bool)
     (suffix : List Bool) : K → List Bool :=
   Function.update (Function.update base (tape 9) suffix) (tape 7)
     (base (tape 7) ++ rowBits d e v j)
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Load the actual next expander index, execute the arithmetic and complete
 4096-bit row emitter, then clear the three isolated temporary fields. -/
@@ -201,7 +198,7 @@ theorem rowTrace (d e : Nat) (positive : 0 < e) (tape : Fin 10 → K)
               MachineLazyRows.reindexMappedTapes, Function.comp_apply, bodyIndex,
               seeded, loaded, resultTapes, h2, h6, h1, h7]
   rw [finalFrame] at drainRelation
-  exact joinTrace (joinTrace (joinTrace (joinTrace (joinTrace loadRun seedRun) bodyRun)
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans loadRun seedRun) bodyRun)
     drainOld) drainNew) drainRelation
 
 theorem rowBits_eq_expanderRow {n portDegree : Nat} (d : Nat)
@@ -416,7 +413,7 @@ theorem vertexSuffixTrace (d e : Nat) (positive : 0 < e) (tape : Fin 10 → K)
         some ⟨exit, MachinePortReindex.clean e positive ambient,
           streamFrame tape base [] ((output ++ rowBits d e v (values port)) ++ streamOutput d e v rest)⟩ at tail
       rw [split]
-      have all := joinTrace (joinTrace boundary body) tail
+      have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans boundary body) tail
       simpa only [vertexSteps, initial, streamOutput, List.flatMap_cons, List.append_assoc] using all
 
 theorem vertexTrace (d e : Nat) (positive : 0 < e) (tape : Fin 10 → K)
@@ -435,33 +432,6 @@ theorem vertexTrace (d e : Nat) (positive : 0 < e) (tape : Fin 10 → K)
   simpa only [Fin.val_zero, List.drop_zero] using vertexSuffixTrace d e positive tape distinct
     labels exit program atLabels base v values tailWord empty ambient e 0 (by simp) output
 
-def vertexInTime (d e : Nat) (positive : 0 < e) (tape : Fin 10 → K)
-    (distinct : Function.Injective tape) (labels : VertexLabel e → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State A e))
-    (atLabels : ∀ l, program (labels l) = vertexInstruction d e positive tape labels exit l)
-    (base : K → List Bool) (v B : Nat) (values : Fin e → Nat)
-    (bounded : ∀ p, values p ≤ B)
-    (tailWord : base (tape 0) = encodeWord v)
-    (empty : ∀ i : Fin 10, i ≠ 0 → i ≠ 7 → i ≠ 9 → base (tape i) = [])
-    (ambient : A) (output : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (0, none)), MachinePortReindex.clean e positive ambient,
-        streamFrame tape base (List.ofFn values) output⟩
-      (some ⟨exit, MachinePortReindex.clean e positive ambient,
-        streamFrame tape base [] (output ++ streamOutput d e v (List.ofFn values))⟩)
-      (e * (rowCostBound d e v B + 2 * (output.length + e * rowSizeBound d e v B) + 1) + 1) where
-  steps := vertexSteps d e v (List.ofFn values) output
-  evals_in_steps := vertexTrace d e positive tape distinct labels exit program atLabels
-    base v values tailWord empty ambient output
-  steps_le_m := by
-    simpa only [List.length_ofFn] using vertexSteps_le d e v B (List.ofFn values)
-      (by intro j hj; obtain ⟨p, rfl⟩ := List.mem_ofFn.mp hj; exact bounded p) output
-
-private theorem encodeWords_flatMap {α : Type*} (items : List α) (words : α → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
-  induction items with
-  | nil => rfl
-  | cons item items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
 
 theorem streamOutput_expanderRows {n portDegree : Nat} (d : Nat)
     (H : PCP.ExpanderTables.Table n portDegree) (v : Fin n) :
@@ -469,7 +439,7 @@ theorem streamOutput_expanderRows {n portDegree : Nat} (d : Nat)
       (PCP.ExpanderTables.reverseIndex H
         (PCP.ExpanderTables.rowIndex n portDegree (v, p))).val) =
       encodeWords ((List.ofFn (expanderRow d H v)).flatMap rowWords) := by
-  rw [encodeWords_flatMap]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [streamOutput, List.flatMap_def, List.map_ofFn]
   apply congrArg List.flatten
   apply congrArg List.ofFn
@@ -483,16 +453,6 @@ theorem expanderValues_bounded {n portDegree : Nat}
   (PCP.ExpanderTables.reverseIndex H
     (PCP.ExpanderTables.rowIndex n portDegree (v, p))).isLt.le
 
-def vertexMachine (d e : Nat) (positive : 0 < e) : FinTM2 where
-  K := Fin 10
-  k₀ := 9
-  k₁ := 7
-  Γ _ := Bool
-  Λ := VertexLabel e
-  main := (0, none)
-  σ := State Unit e
-  initialState := MachinePortReindex.clean e positive ()
-  m := vertexInstruction d e positive id id none
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineOverlayRows
 

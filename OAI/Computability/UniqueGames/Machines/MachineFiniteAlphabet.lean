@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Basic.Finite.Sigma
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRepeat
@@ -37,16 +38,6 @@ theorem of_homogeneous (M : FinTM2) {α : Type} [Finite α]
 theorem of_bool (M : FinTM2) (alphabet : ∀ k, M.Γ k = Bool) : FiniteAlphabet M :=
   of_homogeneous M alphabet
 
-theorem of_equiv (M : FinTM2) {α : Type} [Finite α]
-    (alphabet : ∀ k, M.Γ k ≃ α) : FiniteAlphabet M := by
-  intro k
-  exact Finite.of_equiv α (alphabet k).symm
-
-theorem symbols_finite (M : FinTM2) (finiteAlphabet : FiniteAlphabet M) :
-    Finite (Σ k, M.Γ k) := by
-  let := M.kFin
-  let : ∀ k, Finite (M.Γ k) := finiteAlphabet
-  infer_instance
 
 /-- The first two tape groups retain their original alphabets. The sole new
 bridge tape uses the second machine's already finite input alphabet. -/

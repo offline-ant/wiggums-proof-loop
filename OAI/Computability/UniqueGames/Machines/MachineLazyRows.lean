@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachinePortReindex
@@ -62,13 +63,6 @@ def reindexSteps (d c b v j : Nat) (relation : RelationTable) (output : List Boo
 def rowBits (d v j : Nat) (relation : RelationTable) : List Bool :=
   encodeWord v ++ encodeWord (reverseMap d j) ++ encodeWords (relationWords relation)
 
-def mappedTapes (d j : Nat) (tape : Fin 9 → K) (base : K → List Bool) : K → List Bool :=
-  Function.update base (tape 6) (encodeWord (reverseMap d j))
-
-def resultTapes (d v j : Nat) (relation : RelationTable)
-    (tape : Fin 9 → K) (base : K → List Bool) : K → List Bool :=
-  Function.update (mappedTapes d j tape base) (tape 7)
-    (base (tape 7) ++ rowBits d v j relation)
 
 def steps (d v j : Nat) (relation : RelationTable) (output : List Bool) : Nat :=
   MachinePortReindex.steps d j + 4 * (rowBits d v j relation).length + 2 * output.length + 9
@@ -136,27 +130,6 @@ theorem reindexRowTrace (d : Nat) (positive : 0 < d) (c b : Nat) (tape : Fin 9 �
         MachinePortReindex.steps d j by unfold reindexSteps; omega,
     Function.iterate_add_apply, mapRun, appendRun]
 
-/-- Lazy specialization of the shared physical mapper/emitter execution. -/
-theorem rowTrace (d : Nat) (positive : 0 < d) (tape : Fin 9 → K)
-    (distinct : Function.Injective tape) (labels : Label d → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State A d))
-    (atLabels : ∀ l, program (labels l) = instruction d positive tape labels exit l)
-    (base : K → List Bool) (v j : Nat) (relation : RelationTable)
-    (tailWord : base (tape 0) = encodeWord v)
-    (reverseWord : base (tape 1) = encodeWord j)
-    (relationWord : base (tape 2) = encodeWords (relationWords relation))
-    (scratchEmpty : base (tape 3) = []) (workEmpty : base (tape 4) = [])
-    (quotientEmpty : base (tape 5) = []) (newReverseEmpty : base (tape 6) = [])
-    (rowEmpty : base (tape 8) = []) (ambient : A) :
-    (advance (TM2.step program))^[steps d v j relation (base (tape 7))]
-      (some ⟨some (labels (.inl .copySeed)), MachinePortReindex.clean d positive ambient, base⟩) =
-      some ⟨exit, MachinePortReindex.clean d positive ambient,
-        resultTapes d v j relation tape base⟩ := by
-  simpa only [reindexSteps, reindexResultTapes, reindexMappedTapes, reindexRowBits,
-    MachinePortReindex.lazy_value, reverseMap, steps, resultTapes, mappedTapes, rowBits] using
-    reindexRowTrace d positive (2 * d) d tape distinct labels exit program atLabels
-      base v j relation tailWord reverseWord relationWord scratchEmpty workEmpty
-      quotientEmpty newReverseEmpty rowEmpty ambient
 
 /-- The body emits exactly the moving row of the actual lazy table. -/
 theorem rowBits_eq_moveRow {n d : Nat} (table : PCP.PortTables.Table n d)
@@ -267,10 +240,6 @@ def streamResultTapes (d c b v j : Nat) (relation : RelationTable)
     (tape : Fin 10 → K) (base : K → List Bool) (suffix : List Bool) : K → List Bool :=
   Function.update (Function.update base (tape 9) suffix) (tape 7)
     (base (tape 7) ++ reindexRowBits d c b v j relation)
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 theorem streamRowTrace (d : Nat) (positive : 0 < d) (c b : Nat) (tape : Fin 10 → K)
     (distinct : Function.Injective tape) (labels : StreamLabel d → Λ) (exit : Option Λ)
@@ -457,8 +426,8 @@ theorem streamRowTrace (d : Nat) (positive : 0 < d) (c b : Nat) (tape : Fin 10 �
                   reindexMappedTapes, Function.comp_apply, bodyIndex, loaded, reverseLoaded,
                   tailLoaded, streamResultTapes, h6, h2, h1, h0, h7, h9]
   rw [finalFrame] at clearNew
-  exact joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace
-    (joinTrace tailRun reverseRun) copyRun) bodyRun) clearTail) clearOld) clearRelation) clearNew
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
+    (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans tailRun reverseRun) copyRun) bodyRun) clearTail) clearOld) clearRelation) clearNew
 
 abbrev VertexLabel (d : Nat) := Fin (d + 1) × Option (StreamLabel d)
 
@@ -598,7 +567,7 @@ theorem vertexSuffixTrace {n m : Nat} (d : Nat) (positive : 0 < d) (c b : Nat)
           streamFrame (n := n) (m := m) tape base [] ((output ++ reindexRowBits d c b (rows port).tail.val
             (rows port).reverseIndex.val (rows port).relation) ++ recordsOutput d c b rest)⟩ at tail
       rw [split]
-      have all := joinTrace (joinTrace boundary body) tail
+      have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans boundary body) tail
       simpa only [vertexSteps, initial, recordsOutput, List.flatMap_cons, List.append_assoc] using all
 
 theorem vertexTrace {n m : Nat} (d : Nat) (positive : 0 < d) (c b : Nat)
@@ -617,17 +586,11 @@ theorem vertexTrace {n m : Nat} (d : Nat) (positive : 0 < d) (c b : Nat)
   simpa only [Fin.val_zero, List.drop_zero] using vertexSuffixTrace d positive c b tape distinct
     labels exit program atLabels base rows empty ambient d 0 (by simp) output
 
-private theorem encodeWords_flatMap {α : Type*} (items : List α) (words : α → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
-  induction items with
-  | nil => rfl
-  | cons item items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 /-- The computed moving-row block is exactly the actual lazy table's codec. -/
 theorem recordsOutput_lazy {n d : Nat} (table : PCP.PortTables.Table n d) (v : Fin n) :
     recordsOutput d (2 * d) d (List.ofFn (PCP.PreprocessingLazyWords.row table v)) =
       encodeWords ((List.ofFn (moveRow table v)).flatMap rowWords) := by
-  rw [encodeWords_flatMap]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [recordsOutput, List.flatMap_def, List.map_ofFn]
   apply congrArg List.flatten
   apply congrArg List.ofFn
@@ -707,39 +670,6 @@ theorem vertexSteps_le {n m : Nat} (d c b : Nat) (rows : List (DartRow n m))
       2 * (output.length + rows.length * rowSizeBound c b n m) + 1) + 1 :=
   vertexSteps_le_capacity d c b _ rows output (Nat.le_refl _)
 
-/-- Timed execution for the concrete fixed-degree old-row loop. The natural
-bound is polynomial in vertex count, dart count, and accumulated output size. -/
-def vertexInTime {n m : Nat} (d : Nat) (positive : 0 < d) (c b : Nat)
-    (tape : Fin 10 → K) (distinct : Function.Injective tape)
-    (labels : VertexLabel d → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (StreamState A d))
-    (atLabels : ∀ l, program (labels l) = vertexInstruction d positive c b tape labels exit l)
-    (base : K → List Bool) (rows : Fin d → DartRow n m)
-    (empty : ∀ i : Fin 10, i ≠ 7 → i ≠ 9 → base (tape i) = [])
-    (ambient : A) (output : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (0, none)), streamClean d positive ambient,
-        streamFrame tape base (List.ofFn rows) output⟩
-      (some ⟨exit, streamClean d positive ambient,
-        streamFrame (n := n) (m := m) tape base []
-          (output ++ recordsOutput d c b (List.ofFn rows))⟩)
-      (d * (rowCostBound c b n m + 2 * (output.length + d * rowSizeBound c b n m) + 1) + 1) where
-  steps := vertexSteps d c b (List.ofFn rows) output
-  evals_in_steps := vertexTrace d positive c b tape distinct labels exit program atLabels
-    base rows empty ambient output
-  steps_le_m := by
-    simpa only [List.length_ofFn] using vertexSteps_le d c b (List.ofFn rows) output
-
-def vertexMachine (d : Nat) (positive : 0 < d) (c b : Nat) : FinTM2 where
-  K := Fin 10
-  k₀ := 9
-  k₁ := 7
-  Γ _ := Bool
-  Λ := VertexLabel d
-  main := (0, none)
-  σ := StreamState Unit d
-  initialState := streamClean d positive ()
-  m := vertexInstruction d positive c b id id none
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineLazyRows
 

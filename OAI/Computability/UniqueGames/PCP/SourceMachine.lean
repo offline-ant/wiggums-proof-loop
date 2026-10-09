@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineTransfer
@@ -194,22 +195,6 @@ def fourTapes (source : K) (destination : Fin 4 → K) (base : K → List Bool)
   let t₂ := afterField source (destination 2) t₁ c (encodeWords [d] ++ suffix)
   afterField source (destination 3) t₂ d suffix
 
-theorem fourTapes_source (source : K) (destination : Fin 4 → K)
-    (hsep : ∀ j, source ≠ destination j) (base : K → List Bool)
-    (a b c d : Nat) (suffix : List Bool) :
-    fourTapes source destination base a b c d suffix source = suffix := by
-  simp [fourTapes, afterField, hsep]
-
-theorem fourTapes_other (source : K) (destination : Fin 4 → K)
-    (p : K) (hpS : p ≠ source) (hpD : ∀ j, p ≠ destination j)
-    (base : K → List Bool) (a b c d : Nat) (suffix : List Bool) :
-    fourTapes source destination base a b c d suffix p = base p := by
-  simp [fourTapes, afterField, fieldTapes_other, hpS, hpD]
-
-theorem fourField_time_eq_length (a b c d : Nat) :
-    a + b + c + d + 8 = (encodeWords [a, b, c, d]).length + 4 := by
-  simp [encodeWords, encodeWord]
-  omega
 
 /-- Four fields are separated by actual finite-stack transitions. The stated
 bound is exactly their serialized length plus four delimiter-seeding steps. -/
@@ -257,56 +242,6 @@ def fourFieldsInTime (source : K) (destination : Fin 4 → K)
     steps_le_m := by have h := p.steps_le_m; omega
   }
 
-def fieldDestination (j : Fin 4) : Fin 5 := ⟨j.val + 1, by omega⟩
-
-theorem fourTapes_concrete (base : Fin 5 → List Bool) (a b c d : Nat) (suffix : List Bool) :
-    fourTapes 0 fieldDestination base a b c d suffix =
-      fun p : Fin 5 => if p = 0 then suffix
-        else if p = 1 then encodeWord a ++ base 1
-        else if p = 2 then encodeWord b ++ base 2
-        else if p = 3 then encodeWord c ++ base 3
-        else encodeWord d ++ base 4 := by
-  funext p
-  have hp : p = 0 ∨ p = 1 ∨ p = 2 ∨ p = 3 ∨ p = 4 := by omega
-  rcases hp with rfl | rfl | rfl | rfl | rfl <;>
-    simp [fourTapes, afterField, fieldTapes, fieldDestination]
-
-def groupingProgram (label : Fin 4 × Bool) :
-    TM2.Stmt (fun _ : Fin 5 => Bool) (Fin 4 × Bool) (Unit × Option Bool) :=
-  if label.2 then
-    fieldLoop 0 (fieldDestination label.1) (label.1, true)
-      (fieldNext (fun j => (j, false)) none label.1)
-  else fieldStart (fieldDestination label.1) (label.1, true)
-
-/-- One concrete finite machine: five Boolean stacks, eight labels, and three
-internal states. Four destination stacks hold the four separated fields. -/
-def groupingMachine : FinTM2 where
-  K := Fin 5
-  k₀ := 0
-  k₁ := 1
-  Γ _ := Bool
-  Λ := Fin 4 × Bool
-  main := (0, false)
-  σ := Unit × Option Bool
-  initialState := ((), none)
-  m := groupingProgram
-
-/-- The concrete machine's verified trace includes arbitrary unread input and
-arbitrary prior destination contents. No assumed algorithm remains here. -/
-def groupingMachineInTime (base : Fin 5 → List Bool) (a b c d : Nat) (suffix : List Bool)
-    (hinput : base 0 = encodeWords [a, b, c, d] ++ suffix) (register : Option Bool) :
-    StateTransition.EvalsToInTime groupingMachine.step
-      ⟨some (0, false), ((), register), base⟩
-      (some ⟨none, ((), none), fourTapes (0 : Fin 5) fieldDestination base a b c d suffix⟩)
-      (a + b + c + d + 8) :=
-  fourFieldsInTime (0 : Fin 5) fieldDestination (by
-    intro j h
-    have hh := congrArg Fin.val h
-    change 0 = j.val + 1 at hh
-    omega)
-    (fun j => (j, false)) (fun j => (j, true)) none groupingProgram
-    (by intro j; simp [groupingProgram]) (by intro j; simp [groupingProgram])
-    base a b c d suffix hinput () register
 
 end UniqueGamesTheorem.Foundations.Hastad.SourceMachine
 

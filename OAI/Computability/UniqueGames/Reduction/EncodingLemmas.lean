@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.CharP.Two
 import Mathlib.Algebra.Polynomial.Eval.Defs
 import Mathlib.Data.Fintype.EquivFin
@@ -29,13 +30,6 @@ open Foundations.Target
 def sideEquiv (n : Nat) : Bool × Fin n ≃ Fin (2*n) :=
   (finTwoEquiv.symm.prodCongr (Equiv.refl (Fin n))).trans finProdFinEquiv
 
-@[simp] theorem sideEquiv_false_val {count : Nat} (i : Fin count) :
-    (sideEquiv count (false, i)).val = i.val := by
-  simp [sideEquiv, finProdFinEquiv, finTwoEquiv]
-
-@[simp] theorem sideEquiv_true_val {count : Nat} (i : Fin count) :
-    (sideEquiv count (true, i)).val = count + i.val := by
-  simp [sideEquiv, finProdFinEquiv, finTwoEquiv, Nat.add_comm]
 
 /-- The integer label is the packed, least-significant-bit-first coordinate word. -/
 def alphabetEquiv (s : Nat) : Integration.BinaryLinear.Vector s ≃ Fin (2^s) :=
@@ -61,14 +55,9 @@ def translate {s : Nat} (a b : Integration.BinaryLinear.Vector s)
 theorem translate_involutive {s : Nat} (a b : Integration.BinaryLinear.Vector s) :
     Function.Involutive (translate a b) := by
   intro c
-  simp only [translate, alphabetEquiv_symm_apply_apply]
-  have h : (alphabetEquiv s).symm c + a + b + a + b = (alphabetEquiv s).symm c := by
-    ext i
-    simp only [Pi.add_apply]
-    rw [show (alphabetEquiv s).symm c i + a i + b i + a i + b i =
-      (alphabetEquiv s).symm c i + (a i + a i) + (b i + b i) by abel]
-    simp [CharTwo.add_self_eq_zero]
-  rw [h, alphabetEquiv_apply_symm_apply]
+  simpa only [translate, alphabetEquiv_symm_apply_apply, add_assoc, zero_add,
+    add_zero, alphabetEquiv_apply_symm_apply] using congrArg (alphabetEquiv s)
+      (ActualCanonical.add_both ((alphabetEquiv s).symm c) 0 (a + b))
 
 /-- Both forward and inverse tables are explicitly generated from every alphabet
 index. Characteristic two makes these two tables equal. -/
@@ -84,11 +73,6 @@ def translationTable {s : Nat} (a b : Integration.BinaryLinear.Vector s) :
     (translationTable a b).images[alphabetEquiv s c] = alphabetEquiv s (c + a + b) := by
   simp [translationTable, translate]
 
-@[simp] theorem translationTable_inverseImages {s : Nat}
-    (a b c : Integration.BinaryLinear.Vector s) :
-    (translationTable a b).inverseImages[alphabetEquiv s c] =
-      alphabetEquiv s (c + a + b) := by
-  simp [translationTable, translate]
 
 theorem translationTable_satisfied_iff {s : Nat}
     (a b cLeft cRight : Integration.BinaryLinear.Vector s) :
@@ -113,10 +97,6 @@ theorem mem_imageVertices {queries : List Q} {body : Q → V} {v : V} :
 theorem imageVertices_nodup (queries : List Q) (body : Q → V) :
     (imageVertices queries body).Nodup := List.nodup_dedup _
 
-theorem imageVertices_length_le (queries : List Q) (body : Q → V) :
-    (imageVertices queries body).length ≤ queries.length := by
-  simpa only [imageVertices, List.length_map] using
-    (List.dedup_sublist (queries.map body)).length_le
 
 abbrev ImageVertex (queries : List Q) (body : Q → V) :=
   {v : V // v ∈ imageVertices queries body}
@@ -127,17 +107,6 @@ def imageEquiv (queries : List Q) (body : Q → V) :
     ImageVertex queries body ≃ Fin (imageVertices queries body).length :=
   (List.Nodup.getEquiv _ (imageVertices_nodup queries body)).symm
 
-def imageVertex (queries : List Q) (body : Q → V) (q : Q) (hq : q ∈ queries) :
-    ImageVertex queries body := ⟨body q, mem_imageVertices.mpr ⟨q, hq, rfl⟩⟩
-
-def imageIndex (queries : List Q) (body : Q → V) (q : Q) (hq : q ∈ queries) :
-    Fin (imageVertices queries body).length := imageEquiv queries body (imageVertex queries body q hq)
-
-theorem imageIndex_eq_iff (queries : List Q) (body : Q → V)
-    (q r : Q) (hq : q ∈ queries) (hr : r ∈ queries) :
-    imageIndex queries body q hq = imageIndex queries body r hr ↔ body q = body r := by
-  simp only [imageIndex, (imageEquiv queries body).injective.eq_iff, Subtype.mk.injEq,
-    imageVertex]
 
 theorem imageVertices_range (queries : List Q) (body : Q → V)
     (full : ∀ q, q ∈ queries) (v : V) :
@@ -221,34 +190,15 @@ def explicitVertexEquiv [DecidableEq (Vector d × T)]
 def unfold (can : Q → Ambient s d × T) (label : Vertex can → Vector s) (q : Q) :
     Vector s := label (vertex can q) + offset can q
 
-theorem add_self_vector (c : Vector s) : c + c = 0 := by
-  funext i
-  exact CharTwo.add_self_eq_zero (c i)
-
-theorem add_cancel_vector (a b : Vector s) : (a + b) + b = a := by
-  rw [add_assoc, add_self_vector, add_zero]
-
 /-- The precise orientation used by the generated edge. -/
 theorem constraint_iff_unfolded (can : Q → Ambient s d × T)
     (labelL labelR : Vertex can → Vector s) (q r : Q) :
     (labelL (vertex can q) + offset can q) + offset can r = labelR (vertex can r) ↔
       unfold can labelL q = unfold can labelR r := by
-  constructor
-  · intro h
-    have h' := congrArg (fun c => c + offset can r) h
-    simpa only [add_cancel_vector, unfold] using h'
-  · intro h
-    have h' := congrArg (fun c => c + offset can r) h
-    simpa only [add_cancel_vector, unfold] using h'
+  rw [← eq_sub_iff_add_eq, sub_eq_add_neg,
+    neg_eq_iff_add_eq_zero.mpr (ActualCanonical.add_self _)]
+  rfl
 
-/-- A common full canonical record has one common unfolded value on each side. -/
-theorem unfold_eq_of_canonical_eq (can : Q → Ambient s d × T)
-    (label : Vertex can → Vector s) (q r : Q) (h : can q = can r) :
-    unfold can label q = unfold can label r := by
-  have hv : vertex can q = vertex can r := by
-    apply (vertex_eq_iff can q r).2
-    exact congrArg (fun z : Ambient s d × T => (z.1.2, z.2)) h
-  simp only [unfold, hv, offset, h]
 
 end UniqueGamesTheorem.Reduction.ActualOrbit
 
@@ -304,37 +254,8 @@ def recordWords {n m s d : Nat} : Record n m s d → List Nat
 theorem recordWords_injective {n m s d : Nat} :
     Function.Injective (recordWords (n := n) (m := m) (s := s) (d := d)) := by
   intro r t h
-  cases r with
-  | blank => cases t <;> simp_all [recordWords]
-  | single name coefficient =>
-    cases t with
-    | blank => simp [recordWords] at h
-    | single name' coefficient' =>
-      simp [recordWords] at h
-      rcases h with ⟨hn, hc, hd⟩
-      have hp : coefficient = coefficient' := Prod.ext hc hd
-      have hn' : name = name' := Fin.ext hn
-      cases hn'
-      cases hp
-      rfl
-    | full occurrence coefficients => simp [recordWords] at h
-  | full occurrence coefficients =>
-    cases t with
-    | blank => simp [recordWords] at h
-    | single name coefficient => simp [recordWords] at h
-    | full occurrence' coefficients' =>
-      simp [recordWords] at h
-      rcases h with ⟨hi, h0c, h0d, h1c, h1d, h2c, h2d⟩
-      have hp : coefficients = coefficients' := by
-        funext i
-        fin_cases i
-        · exact Prod.ext h0c h0d
-        · exact Prod.ext h1c h1d
-        · exact Prod.ext h2c h2d
-      have hi' : occurrence = occurrence' := Fin.ext hi
-      cases hi'
-      cases hp
-      rfl
+  cases r <;> cases t <;>
+    simp_all [recordWords, Fin.ext_iff, Prod.ext_iff, funext_iff, Fin.forall_fin_succ]
 
 def recordsWords {n m s d : Nat} (rs : List (Record n m s d)) : List Nat :=
   rs.flatMap recordWords
@@ -352,40 +273,22 @@ def recordsWords {n m s d : Nat} (rs : List (Record n m s d)) : List Nat :=
   | nil => rfl
   | cons r rs ih => simp [ih, Nat.mul_add, Nat.add_comm]
 
-theorem recordsWords_take_head {n m s d : Nat} (r : Record n m s d)
-    (rs : List (Record n m s d)) :
-    (recordsWords (r :: rs)).take 9 = recordWords r := by
-  change (recordWords r ++ recordsWords rs).take 9 = recordWords r
-  simpa only [recordWords_length] using
-    (List.take_append_length (l₁ := recordWords r) (l₂ := recordsWords rs))
-
 theorem recordsWords_injective {n m s d : Nat} :
     Function.Injective (recordsWords (n := n) (m := m) (s := s) (d := d)) := by
-  intro rs
-  induction rs with
+  intro rs ts h
+  induction rs generalizing ts with
   | nil =>
-    intro ts h
-    cases ts with
-    | nil => rfl
-    | cons t ts =>
-      have hl := congrArg List.length h
-      simp only [recordsWords_length, List.length_nil, List.length_cons] at hl
-      omega
+    have := congrArg List.length h
+    simpa using this
   | cons r rs ih =>
-    intro ts h
     cases ts with
     | nil =>
-      have hl := congrArg List.length h
-      simp only [recordsWords_length, List.length_nil, List.length_cons] at hl
-      omega
+      have := congrArg List.length h
+      simp at this
     | cons t ts =>
-      have hh := congrArg (List.take 9) h
-      simp only [recordsWords_take_head] at hh
-      have hr := recordWords_injective hh
-      subst t
-      apply congrArg (List.cons r)
-      apply ih
-      exact List.append_cancel_left (by simpa only [recordsWords_cons] using h)
+      obtain ⟨hh, ht⟩ := List.append_inj h (by simp :
+        (recordWords r).length = (recordWords t).length)
+      exact congrArg₂ List.cons (recordWords_injective hh) (ih ht)
 
 def bodyWords {n m k s d : Nat} (body : Body n m k s d) : List Nat :=
   vectorWord body.1 :: recordsWords (List.ofFn body.2)
@@ -402,8 +305,6 @@ theorem bodyWords_injective {n m k s d : Nat} :
   · exact vectorWord_injective hh.1
   · exact List.ofFn_injective (recordsWords_injective hh.2)
 
-@[simp] theorem bodyWords_eq_iff {n m k s d : Nat} (x y : Body n m k s d) :
-    bodyWords x = bodyWords y ↔ x = y := bodyWords_injective.eq_iff
 
 def wordBound (n m s d : Nat) : Nat := n + m + 2^s + 2^d + 3
 
@@ -443,80 +344,6 @@ theorem bodyWords_bounded {n m k s d : Nat} (body : Body n m k s d)
   · obtain ⟨r, _, hr⟩ := List.mem_flatMap.mp h
     exact recordWords_bounded r w hr
 
-def bodyBits {n m k s d : Nat} (body : Body n m k s d) : List Bool :=
-  encodeWords (bodyWords body)
-
-theorem bodyBits_injective {n m k s d : Nat} :
-    Function.Injective (bodyBits (n := n) (m := m) (k := k) (s := s) (d := d)) := by
-  intro x y h
-  exact bodyWords_injective (encodeWords_injective h)
-
-@[simp] theorem bodyBits_eq_iff {n m k s d : Nat} (x y : Body n m k s d) :
-    bodyBits x = bodyBits y ↔ x = y := bodyBits_injective.eq_iff
-
-theorem bodyBits_length_le {n m k s d : Nat} (body : Body n m k s d) :
-    (bodyBits body).length ≤ (1 + 9*k) * (n + m + 2^s + 2^d + 4) := by
-  simpa only [bodyBits, bodyWords_length, wordBound, Nat.add_assoc] using
-    encodeWords_length_le (bodyWords body) (wordBound n m s d) (bodyWords_bounded body)
-
-/-- Serializing before deduplication preserves the exact retained vertex order. -/
-theorem imageVertices_bodyWords {Q : Type*} {n m k s d : Nat}
-    [DecidableEq (Body n m k s d)] (queries : List Q) (body : Q → Body n m k s d) :
-    Encoding.imageVertices queries (fun q => bodyWords (body q)) =
-      (Encoding.imageVertices queries body).map bodyWords := by
-  unfold Encoding.imageVertices
-  simpa only [List.map_map, Function.comp_def] using
-    List.dedup_map_of_injective bodyWords_injective (queries.map body)
-
-theorem imageVertices_bodyBits {Q : Type*} {n m k s d : Nat}
-    [DecidableEq (Body n m k s d)] (queries : List Q) (body : Q → Body n m k s d) :
-    Encoding.imageVertices queries (fun q => bodyBits (body q)) =
-      (Encoding.imageVertices queries body).map bodyBits := by
-  unfold Encoding.imageVertices
-  simpa only [List.map_map, Function.comp_def] using
-    List.dedup_map_of_injective bodyBits_injective (queries.map body)
-
-theorem idxOf_map_injective {A B : Type*} [DecidableEq A] [DecidableEq B]
-    (f : A → B) (hf : Function.Injective f) (x : A) (xs : List A) :
-    (xs.map f).idxOf (f x) = xs.idxOf x := by
-  induction xs with
-  | nil => rfl
-  | cons y ys ih =>
-    by_cases h : y = x
-    · subst y
-      simp
-    · have h' : f y ≠ f x := fun hxy => h (hf hxy)
-      simp [h, h', ih]
-
-/-- Injective serialization leaves the actual numeric vertex index unchanged,
-not just the vertex set or its cardinality. -/
-theorem imageIndex_map_val {Q A B : Type*} [DecidableEq A] [DecidableEq B]
-    (queries : List Q) (body : Q → A) (f : A → B) (hf : Function.Injective f)
-    (q : Q) (hq : q ∈ queries) :
-    (Encoding.imageIndex queries (fun q => f (body q)) q hq).val =
-      (Encoding.imageIndex queries body q hq).val := by
-  change ((queries.map (fun q => f (body q))).dedup).idxOf (f (body q)) =
-    ((queries.map body).dedup).idxOf (body q)
-  have hmap : (queries.map (fun q => f (body q))).dedup =
-      (queries.map body).dedup.map f := by
-    simpa only [List.map_map, Function.comp_def] using
-      List.dedup_map_of_injective hf (queries.map body)
-  rw [hmap]
-  exact idxOf_map_injective f hf (body q) (queries.map body).dedup
-
-theorem imageIndex_bodyWords_val {Q : Type*} {n m k s d : Nat}
-    [DecidableEq (Body n m k s d)] (queries : List Q) (body : Q → Body n m k s d)
-    (q : Q) (hq : q ∈ queries) :
-    (Encoding.imageIndex queries (fun q => bodyWords (body q)) q hq).val =
-      (Encoding.imageIndex queries body q hq).val :=
-  imageIndex_map_val queries body bodyWords bodyWords_injective q hq
-
-theorem imageIndex_bodyBits_val {Q : Type*} {n m k s d : Nat}
-    [DecidableEq (Body n m k s d)] (queries : List Q) (body : Q → Body n m k s d)
-    (q : Q) (hq : q ∈ queries) :
-    (Encoding.imageIndex queries (fun q => bodyBits (body q)) q hq).val =
-      (Encoding.imageIndex queries body q hq).val :=
-  imageIndex_map_val queries body bodyBits bodyBits_injective q hq
 
 end UniqueGamesTheorem.Reduction.CanonicalEncoding
 
@@ -545,10 +372,6 @@ theorem radix_eq_foldl (B : Nat) (words : List Nat) :
 
 @[simp] theorem radix_nil (B : Nat) : radix B [] = 0 := rfl
 
-/-- This is precisely the arithmetic operation of `MachineRadixStep`. -/
-theorem radix_append_word (B : Nat) (words : List Nat) (digit : Nat) :
-    radix B (words ++ [digit]) = B * radix B words + digit := by
-  simp only [radix_eq_foldl, List.foldl_append, List.foldl_cons, List.foldl_nil]
 
 theorem radix_lt_pow_length {B : Nat} (hB : 1 < B) (words : List Nat)
     (bounded : ∀ w ∈ words, w < B) : radix B words < B ^ words.length := by
@@ -589,8 +412,6 @@ theorem bodyWords_lt_base {n m k s d : Nat} (body : Body n m k s d)
 
 def capacity (n m k s d : Nat) : Nat := (base n m s d) ^ (1 + 9*k)
 
-theorem capacity_pos (n m k s d : Nat) : 0 < capacity n m k s d :=
-  pow_pos (Nat.zero_lt_of_lt (one_lt_base n m s d)) _
 
 def bodyAddress {n m k s d : Nat} (body : Body n m k s d) :
     Fin (capacity n m k s d) :=
@@ -609,16 +430,6 @@ theorem bodyAddress_injective {n m k s d : Nat} :
     (by simp only [bodyWords_length]) (bodyWords_lt_base x) (bodyWords_lt_base y)
     (congrArg Fin.val h)
 
-@[simp] theorem bodyAddress_eq_iff {n m k s d : Nat} (x y : Body n m k s d) :
-    bodyAddress x = bodyAddress y ↔ x = y := bodyAddress_injective.eq_iff
-
-/-- For fixed k,s,d, the entire direct-address space is a polynomial in n+m. -/
-noncomputable def capacityPolynomial (k s d : Nat) : Polynomial Nat :=
-  (Polynomial.X + Polynomial.C (2^s + 2^d + 4)) ^ (1 + 9*k)
-
-theorem capacityPolynomial_eval (n m k s d : Nat) :
-    (capacityPolynomial k s d).eval (n + m) = capacity n m k s d := by
-  simp [capacityPolynomial, capacity, base_eq, Nat.add_assoc]
 
 end UniqueGamesTheorem.Reduction.CanonicalAddress
 
@@ -689,25 +500,6 @@ def template {s d : Nat} (a : Fin 3 → Ambient s d) : List Token :=
   unfold template
   split_ifs <;> rfl
 
-@[simp] theorem evalTemplate_length (names : Fin 3 → Nat) (occurrence : Nat)
-    (tokens : List Token) : (evalTemplate names occurrence tokens).length = tokens.length :=
-  List.length_map _
-
-theorem eval_blankTemplate {n m s d : Nat} (names : Fin 3 → Fin n) (occurrence : Fin m) :
-    evalTemplate (fun j => (names j).val) occurrence.val blankTemplate =
-      recordWords (ActualCanonical.Record.blank : Record n m s d) := rfl
-
-theorem eval_singleTemplate {n m s d : Nat} (names : Fin 3 → Fin n) (occurrence : Fin m)
-    (index : Fin 3) (coefficient : Ambient s d) :
-    evalTemplate (fun j => (names j).val) occurrence.val (singleTemplate index coefficient) =
-      recordWords (ActualCanonical.Record.single (names index) coefficient : Record n m s d) :=
-  rfl
-
-theorem eval_fullTemplate {n m s d : Nat} (names : Fin 3 → Fin n) (occurrence : Fin m)
-    (coefficients : Fin 3 → Ambient s d) :
-    evalTemplate (fun j => (names j).val) occurrence.val (fullTemplate coefficients) =
-      recordWords (ActualCanonical.Record.full occurrence coefficients : Record n m s d) :=
-  rfl
 
 /-- The template evaluates to the exact existing canonical-record encoding. -/
 theorem eval_template {n m s d : Nat} (names : Fin m → Fin 3 → Fin n)
@@ -727,55 +519,6 @@ theorem eval_template {n m s d : Nat} (names : Fin m → Fin 3 → Fin n)
     (coefficients : Fin 3 → Ambient s d) :
     variableTokens (fullTemplate coefficients) = [.occurrence] := rfl
 
-/-- Exact input-field profile: blank has none; single reads one selected name;
-full reads the occurrence identifier. Coefficient values are program constants. -/
-theorem variableTokens_template {s d : Nat} (a : Fin 3 → Ambient s d) :
-    variableTokens (template a) =
-      if a 0 = a 1 then
-        if a 0 = a 2 then [] else [.name 2]
-      else if a 0 = a 2 then [.name 1]
-      else if a 1 = a 2 then [.name 0]
-      else [.occurrence] := by
-  unfold template
-  split_ifs <;> rfl
-
-theorem variableTokens_template_length_le_one {s d : Nat} (a : Fin 3 → Ambient s d) :
-    (variableTokens (template a)).length ≤ 1 := by
-  rw [variableTokens_template]
-  split_ifs <;> simp
-
-theorem name_mem_variableTokens_iff {s d : Nat} (a : Fin 3 → Ambient s d) (index : Fin 3) :
-    Token.name index ∈ variableTokens (template a) ↔
-      (a 0 = a 1 ∧ a 0 ≠ a 2 ∧ index = 2) ∨
-      (a 0 ≠ a 1 ∧ a 0 = a 2 ∧ index = 1) ∨
-      (a 0 ≠ a 1 ∧ a 0 ≠ a 2 ∧ a 1 = a 2 ∧ index = 0) := by
-  by_cases h01 : a 0 = a 1 <;> by_cases h02 : a 0 = a 2 <;>
-    by_cases h12 : a 1 = a 2 <;> simp [variableTokens_template, h01, h02, h12]
-
-theorem occurrence_mem_variableTokens_iff {s d : Nat} (a : Fin 3 → Ambient s d) :
-    Token.occurrence ∈ variableTokens (template a) ↔
-      a 0 ≠ a 1 ∧ a 0 ≠ a 2 ∧ a 1 ≠ a 2 := by
-  by_cases h01 : a 0 = a 1 <;> by_cases h02 : a 0 = a 2 <;>
-    by_cases h12 : a 1 = a 2 <;> simp [variableTokens_template, h01, h02, h12]
-
-/-- Emitting each token's existing unary-delimited word gives exactly the
-existing list-of-words serialization, with no alternative encoding. -/
-theorem flatMap_encodeWord (names : Fin 3 → Nat) (occurrence : Nat) (tokens : List Token) :
-    tokens.flatMap (fun token => encodeWord (evalToken names occurrence token)) =
-      encodeWords (evalTemplate names occurrence tokens) := by
-  induction tokens with
-  | nil => rfl
-  | cons token tokens ih =>
-    simp only [List.flatMap_cons, evalTemplate, List.map_cons, encodeWords]
-    exact congrArg (List.append (encodeWord (evalToken names occurrence token))) ih
-
-theorem template_bits {n m s d : Nat} (names : Fin m → Fin 3 → Fin n)
-    (occurrence : Fin m) (a : Fin 3 → Ambient s d) :
-    (template a).flatMap
-        (fun token => encodeWord (evalToken (fun j => (names occurrence j).val)
-          occurrence.val token)) =
-      encodeWords (recordWords (ActualCanonical.record names occurrence a)) := by
-  rw [flatMap_encodeWord, eval_template]
 
 end UniqueGamesTheorem.Reduction.CanonicalWordTemplate
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Algebra.Polynomial.Eval.Defs
@@ -43,10 +44,6 @@ export GenericGraphTables (Label RelationTable DartRow Rows Valid Table
 
 variable {q n m : Nat}
 
-abbrev rowWidth (q : Nat) : Nat := q * q + 2
-
-/-- Offset measured in natural-word fields, including the two header fields. -/
-def rowOffset (q e : Nat) : Nat := 2 + rowWidth q * e
 
 /-- Exact decomposition before, at, and after a selected stored row. -/
 theorem rowsWords_split (rows : List (DartRow q n m)) (e : Nat)
@@ -79,31 +76,6 @@ theorem rowsBits_append_split (rows : List (DartRow q n m)) (e : Nat)
   rw [rowsBits_split rows e he]
   simp only [List.append_assoc]
 
-def prefixWords (table : Table q) (e : Fin table.darts) : List Nat :=
-  [table.vertices, table.darts] ++ ((rowList table).take e.val).flatMap rowWords
-
-def suffixWords (table : Table q) (e : Fin table.darts) : List Nat :=
-  ((rowList table).drop (e.val + 1)).flatMap rowWords
-
-theorem prefixWords_length (table : Table q) (e : Fin table.darts) :
-    (prefixWords table e).length = rowOffset q e.val := by
-  simp [prefixWords, rowOffset, rowWidth, Nat.mul_comm, Nat.add_comm]
-  omega
-
-theorem tableWords_at_row (table : Table q) (e : Fin table.darts) :
-    tableWords table = prefixWords table e ++
-      (rowWords table.rows[e] ++ suffixWords table e) := by
-  have hs := rowsWords_split (rowList table) e.val (by simpa only [rowList_length] using e.isLt)
-  simp only [rowList, Vector.getElem_toList] at hs
-  unfold tableWords prefixWords suffixWords rowList
-  rw [hs]
-  simp only [List.append_assoc, Fin.getElem_fin]
-
-theorem tableBits_at_row (table : Table q) (e : Fin table.darts) :
-    tableBits table = encodeWords (prefixWords table e) ++
-      (encodeWords (rowWords table.rows[e]) ++ encodeWords (suffixWords table e)) := by
-  rw [tableBits, tableWords_at_row table e]
-  simp only [encodeWords_append]
 
 /-- Removing precisely the two encoded header words exposes the stored rows. -/
 theorem tableBits_header (table : Table q) :
@@ -111,74 +83,6 @@ theorem tableBits_header (table : Table q) :
       (encodeWord table.darts ++ encodeWords ((rowList table).flatMap rowWords)) := by
   simp [tableBits, tableWords, encodeWords]
 
-theorem tableWords_drop_row (table : Table q) (e : Fin table.darts) :
-    (tableWords table).drop (rowOffset q e.val) =
-      rowWords table.rows[e] ++ suffixWords table e := by
-  rw [tableWords_at_row table e]
-  exact List.drop_left' (l₂ := rowWords table.rows[e] ++ suffixWords table e)
-    (prefixWords_length table e)
-
-theorem tableWords_take_row (table : Table q) (e : Fin table.darts) :
-    ((tableWords table).drop (rowOffset q e.val)).take (rowWidth q) =
-      rowWords table.rows[e] := by
-  rw [tableWords_drop_row]
-  exact List.take_left' (l₂ := suffixWords table e) (rowWords_length table.rows[e])
-
-theorem tableWords_get_tail (table : Table q) (e : Fin table.darts) :
-    (tableWords table)[rowOffset q e.val]? = some table.rows[e].tail.val := by
-  have h := congrArg (fun words : List Nat => words[0]?) (tableWords_drop_row table e)
-  simpa [List.getElem?_drop, rowWords] using h
-
-theorem tableWords_get_reverse (table : Table q) (e : Fin table.darts) :
-    (tableWords table)[rowOffset q e.val + 1]? = some table.rows[e].reverseIndex.val := by
-  have h := congrArg (fun words : List Nat => words[1]?) (tableWords_drop_row table e)
-  simpa [List.getElem?_drop, rowWords] using h
-
-theorem tableWords_drop_relation (table : Table q) (e : Fin table.darts) :
-    (tableWords table).drop (rowOffset q e.val + 2) =
-      relationWords table.rows[e].relation ++ suffixWords table e := by
-  rw [← List.drop_drop, tableWords_drop_row]
-  simp [rowWords]
-
-theorem relationWords_get (relation : RelationTable q) (j : Fin (q * q)) :
-    (relationWords relation)[j.val]? = some (bitWord relation[j]) := by
-  rw [List.getElem?_eq_getElem (by simpa only [relationWords_length] using j.isLt)]
-  simp [relationWords]
-
-theorem tableWords_get_relation (table : Table q) (e : Fin table.darts)
-    (j : Fin (q * q)) :
-    (tableWords table)[rowOffset q e.val + 2 + j.val]? =
-      some (bitWord table.rows[e].relation[j]) := by
-  have h := congrArg (fun words : List Nat => words[j.val]?)
-    (tableWords_drop_relation table e)
-  rw [List.getElem?_drop,
-    List.getElem?_append_left (by simpa only [relationWords_length] using j.isLt), relationWords_get] at h
-  exact h
-
-theorem tableWords_get_predicate (table : Table q) (e : Fin table.darts)
-    (a b : Label q) :
-    (tableWords table)[rowOffset q e.val + 2 + (b.val + q * a.val)]? =
-      some (bitWord ((semantics table).accepts e a b)) := by
-  simpa only [relationIndex_val, semantics_accepts, relationAt] using
-    tableWords_get_relation table e ((relationIndex q) (a, b))
-
-theorem rowOffset_lt_length (table : Table q) (e : Fin table.darts) :
-    rowOffset q e.val < (tableWords table).length := by
-  rw [tableWords_length]
-  have h := Nat.mul_le_mul_left (rowWidth q) (Nat.succ_le_of_lt e.isLt)
-  rw [Nat.mul_succ] at h
-  unfold rowOffset rowWidth at *
-  omega
-
-theorem relationOffset_lt_length (table : Table q) (e : Fin table.darts)
-    (j : Fin (q * q)) :
-    rowOffset q e.val + 2 + j.val < (tableWords table).length := by
-  rw [tableWords_length]
-  have h := Nat.mul_le_mul_left (rowWidth q) (Nat.succ_le_of_lt e.isLt)
-  rw [Nat.mul_succ] at h
-  have hj := j.isLt
-  unfold rowOffset rowWidth at *
-  omega
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Input
 
@@ -334,45 +238,11 @@ theorem stepAux_readRelation (source : K) (relation : RelationTable q)
     stepAux_readSlots source (List.finRange (q * q)) relation next
       base suffix ambient initial register
 
-theorem stepAux_readRelation_fromTapes (source : K) (relation : RelationTable q)
-    (next : TM2.Stmt (Alphabet (K := K)) Λ (State σ q))
-    (base : K → List Bool) (suffix : List Bool)
-    (hinput : base source = encodeWords (relationWords relation) ++ suffix)
-    (ambient : σ) (initial : RelationTable q) (register : Option Bool) :
-    TM2.stepAux (readRelation source next) ((ambient, initial), register) base =
-      TM2.stepAux next ((ambient, relation), none) (Function.update base source suffix) := by
-  have h := stepAux_readRelation source relation next base suffix ambient initial register
-  have hbase : Function.update base source (encodeWords (relationWords relation) ++ suffix) =
-      base := by rw [← hinput]; exact Function.update_eq_self source base
-  rw [hbase] at h
-  exact h
-
-omit [DecidableEq K] in
-theorem readSlots_pushBound (source : K) (indices : List (Fin (q * q)))
-    (next : TM2.Stmt (Alphabet (K := K)) Λ (State σ q)) :
-    Runtime.statementPushBound (readSlots source indices next) =
-      Runtime.statementPushBound next := by
-  induction indices with
-  | nil => rfl
-  | cons i indices ih =>
-    simp only [readSlots, readSlot, Runtime.statementPushBound, ih, max_self]
-
-omit [DecidableEq K] in
-theorem readRelation_pushBound (source : K)
-    (next : TM2.Stmt (Alphabet (K := K)) Λ (State σ q)) :
-    Runtime.statementPushBound (readRelation source next) =
-      Runtime.statementPushBound next :=
-  readSlots_pushBound source (List.finRange (q * q)) next
 
 def parser (source : K) (exitLabel : Λ) :
     TM2.Stmt (Alphabet (K := K)) Λ (State σ q) :=
   readRelation source (.goto fun _ => exitLabel)
 
-omit [DecidableEq K] in
-theorem parser_pushBound (source : K) (exitLabel : Λ) :
-    Runtime.statementPushBound (parser (σ := σ) (q := q) source exitLabel) = 0 := by
-  rw [parser, readRelation_pushBound]
-  rfl
 
 theorem parserStep (source : K) (readLabel exitLabel : Λ)
     (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ q))
@@ -401,20 +271,6 @@ theorem parserTrace (source : K) (readLabel exitLabel : Λ)
   simpa only [Function.iterate_one, MachineComposition.advance_some] using
     parserStep source readLabel exitLabel program atRead base relation suffix ambient initial register
 
-def parserInTime (source : K) (readLabel exitLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ q))
-    (atRead : program readLabel = parser source exitLabel)
-    (base : K → List Bool) (relation : RelationTable q) (suffix : List Bool)
-    (ambient : σ) (initial : RelationTable q) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some readLabel, ((ambient, initial), register),
-        Function.update base source (encodeWords (relationWords relation) ++ suffix)⟩
-      (some ⟨some exitLabel, ((ambient, relation), none), Function.update base source suffix⟩) 1 where
-  steps := 1
-  evals_in_steps := by
-    change (MachineComposition.advance (TM2.step program))^[1] _ = _
-    exact parserTrace source readLabel exitLabel program atRead base relation suffix ambient initial register
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.ReadRelation
 
@@ -457,22 +313,6 @@ theorem rowBound_le_polynomial (q vertices darts : Nat) :
       Nat.add_le_add_left (Nat.mul_le_mul_right _ hd) _
     _ = _ := by rw [encodingPolynomial_eval]; ring
 
-theorem generic_size_add_two_le_bits {q : Nat} (table : GenericGraphTables.Table q) :
-    table.vertices + table.darts + 2 ≤ (GenericGraphTables.tableBits table).length := by
-  simp only [GenericGraphTables.tableBits, GenericGraphTables.tableWords,
-    encodeWords_append, List.length_append, encodeWords, encodeWord_length, List.length_nil]
-  omega
-
-theorem generic_bits_le_polynomial {q : Nat} (table : GenericGraphTables.Table q) :
-    (GenericGraphTables.tableBits table).length ≤
-      (encodingPolynomial q).eval (table.vertices + table.darts) :=
-  (GenericGraphTables.tableBits_length_le table).trans
-    (rowBound_le_polynomial q table.vertices table.darts)
-
-theorem generic_bits_le_of_size_le {q N : Nat} (table : GenericGraphTables.Table q)
-    (hsize : table.vertices + table.darts ≤ N) :
-    (GenericGraphTables.tableBits table).length ≤ (encodingPolynomial q).eval N :=
-  (generic_bits_le_polynomial table).trans (encodingPolynomial_mono q hsize)
 
 theorem size_add_two_le_bits (table : GraphTables.Table) :
     table.vertices + table.darts + 2 ≤ (GraphTables.tableBits table).length := by

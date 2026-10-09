@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAddAt
@@ -124,10 +125,6 @@ def program : Label → TM2.Stmt Alphabet Label (State σ)
   | .increment => .pop (.inner .power) (fun state _ => (state.1, none))
       (.push (.inner .query) (fun _ => true) (.goto fun _ => .guard))
 
-private theorem appendTrace {α : Type} (f : α → α) {a b : Nat} {x y z : α}
-    (hs : f^[a] x = y) (ht : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm a b, Function.iterate_add_apply, hs, ht]
-
 /-- The inner program is embedded with its actual table scan and geometric
 search; all three additional tapes are preserved by every inner transition. -/
 theorem paddingTrace (t : GraphTables.Table) (v : Fin t.vertices)
@@ -205,7 +202,7 @@ theorem bodyTrace (t : GraphTables.Table) (v : Fin t.vertices)
         frame (GraphTables.tableBits t) (encodeWord (v.val + 1)) [] [] []
           bound remaining (encodeWord (p + acc))⟩ :=
     incrementStep _ _ _ _ _ ambient none
-  exact appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _ hp ha) hc) hl) hi
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hp ha) hc) hl) hi
 
 theorem guardStep_succ (table bound suffix total : List Bool) (v n : Nat)
     (ambient : σ) (register : Option Bool) :
@@ -280,7 +277,7 @@ theorem loopTrace (t : GraphTables.Table) (n v : Nat) (hvn : v + n ≤ t.vertice
       have hb := bodyTrace t ⟨v, hv⟩ bound (encodeWord n ++ suffix) acc ambient none
       have ht := ih (v + 1) hnext
         (MachineCloudPadding.padding (PreprocessingCloudIndex.cloudSize t ⟨v, hv⟩) + acc) none
-      have hall := appendTrace _ (appendTrace _ hg hb) ht
+      have hall := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hg hb) ht
       simpa only [loopTime, cycleTime, dite_eq_left hv, sumFrom, amount,
         Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hall
 
@@ -348,7 +345,7 @@ theorem prefixTrace (t : GraphTables.Table) (b : Nat) (hb : b ≤ t.vertices)
   have hl := loopTrace t b 0 (by simpa only [Nat.zero_add] using hb)
     (encodeWord b ++ suffix) suffix 0 ambient none
   simp only [Nat.zero_add, Nat.add_zero, sumFrom_eq_offset t b hb] at hl
-  exact appendTrace _ (appendTrace _ hi hc) hl
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hi hc) hl
 
 /-- Uniform budget for one vertex iteration, including unary addition and
 cleanup. Its input argument bounds the complete table length. -/
@@ -429,35 +426,6 @@ theorem totalTime_le (t : GraphTables.Table) (b : Nat) (hb : b ≤ t.vertices)
     Polynomial.eval_C, Polynomial.eval_pow, Polynomial.eval_X, Polynomial.eval_ofNat,
     Polynomial.eval_one, cycleBudget, L] using htotal
 
-def prefixInTime (t : GraphTables.Table) (b : Nat) (hb : b ≤ t.vertices)
-    (suffix : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some .init, ((ambient, false), register),
-        frame (GraphTables.tableBits t) [] [] [] [] (encodeWord b ++ suffix) [] []⟩
-      (some ⟨none, ((ambient, false), none),
-        frame (GraphTables.tableBits t) (encodeWord b) [] [] []
-          (encodeWord b ++ suffix) (encodeWord 0 ++ suffix)
-          (encodeWord (PreprocessingPaddingOffsets.offset
-            (PreprocessingRegularTables.padding t) b))⟩)
-      (timePolynomial.eval (inputLength t b suffix)) where
-  steps := totalTime t b suffix
-  evals_in_steps := prefixTrace t b hb suffix ambient register
-  steps_le_m := totalTime_le t b hb suffix
-
-/-- At the complete vertex bound the output is the sum of all padding
-counts used by the actual regularized-table header. -/
-theorem all_padding_sum (t : GraphTables.Table) :
-    sumFrom t 0 t.vertices = ∑ v, PreprocessingRegularTables.padding t v := by
-  rw [sumFrom_eq_offset t t.vertices (Nat.le_refl _), PreprocessingPaddingOffsets.offset_all]
-
-/-- At a vertex bound, adding its local dummy index to this machine's result
-gives precisely the existing executable padding-order index. -/
-theorem paddingOrder_eq_prefix (t : GraphTables.Table) (v : Fin t.vertices)
-    (j : Fin (PreprocessingRegularTables.padding t v)) :
-    (PreprocessingRegularTables.paddingOrder (PreprocessingRegularTables.padding t) ⟨v, j⟩).val =
-      sumFrom t 0 v.val + j.val := by
-  rw [PreprocessingPaddingOffsets.paddingOrder_val,
-    sumFrom_eq_offset t v.val v.isLt.le]
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCloudPrefix
 

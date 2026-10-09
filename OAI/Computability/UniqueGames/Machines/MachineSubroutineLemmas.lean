@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.PinskerLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Model
@@ -130,9 +131,6 @@ def frameProgram (source : Λ → TM2.Stmt Γ Λ σ) : Λ → TM2.Stmt Γ Λ (σ
 @[simp] theorem frameConfiguration_tapes (ambient : τ) (c : TM2.Cfg Γ Λ σ) :
     (frameConfiguration ambient c).stk = c.stk := rfl
 
-theorem frameStatement_pushBound (q : TM2.Stmt Γ Λ σ) :
-    Runtime.statementPushBound (frameStatement (τ := τ) q) = Runtime.statementPushBound q := by
-  induction q <;> simp_all only [frameStatement, Runtime.statementPushBound]
 
 /-- Optional continuation and labels use the existing subroutine semantics. -/
 def statement (labels : Λ → Λ') (exit : Option Λ') (q : TM2.Stmt Γ Λ σ) :
@@ -341,6 +339,12 @@ theorem encodeWords_injective {xs ys : List Nat} (h : encodeWords xs = encodeWor
   induction xs with
   | nil => rfl
   | cons x xs ih => simp [encodeWords, ih, List.append_assoc]
+
+theorem encodeWords_flatMap {α : Type*} (items : List α) (words : α → List Nat) :
+    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
+  induction items with
+  | nil => rfl
+  | cons item items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
 
 @[simp] theorem encodeWords_length (ns : List Nat) :
     (encodeWords ns).length = ns.sum + ns.length := by
@@ -701,16 +705,6 @@ def doubleConstraint {n q : Nat} (c : Constraint n q) : Constraint (2 * n) q whe
   target := ⟨n + c.target.val, by have := c.target.isLt; omega⟩
   permutation := c.permutation
 
-def doubleInstance {q : Nat} (I : Instance q) : Instance q where
-  vertices := 2 * I.vertices
-  constraints := I.constraints.map doubleConstraint
-  nonempty h := I.nonempty (List.map_eq_nil_iff.mp h)
-
-def rowBits {n q : Nat} (c : Constraint n q) : List Bool :=
-  encodeWords (constraintWords c)
-
-def doubledRowBits {n q : Nat} (c : Constraint n q) : List Bool :=
-  encodeWords (constraintWords (doubleConstraint c))
 
 def rowsBits {n q : Nat} (cs : List (Constraint n q)) : List Bool :=
   encodeWords (cs.flatMap constraintWords)
@@ -718,57 +712,11 @@ def rowsBits {n q : Nat} (cs : List (Constraint n q)) : List Bool :=
 def doubledRowsBits {n q : Nat} (cs : List (Constraint n q)) : List Bool :=
   encodeWords (cs.flatMap (fun c => constraintWords (doubleConstraint c)))
 
-@[simp] theorem rowBits_eq {n q : Nat} (c : Constraint n q) :
-    rowBits c = encodeWord c.source.val ++ encodeWord c.target.val ++
-      encodeWords (tableWords c.permutation) := by
-  simp [rowBits, constraintWords, encodeWords, List.append_assoc]
-
-@[simp] theorem doubledRowBits_eq {n q : Nat} (c : Constraint n q) :
-    doubledRowBits c = encodeWord c.source.val ++ encodeWord (n + c.target.val) ++
-      encodeWords (tableWords c.permutation) := by
-  simp [doubledRowBits, constraintWords, doubleConstraint, encodeWords, List.append_assoc]
 
 @[simp] theorem rowsBits_nil {n q : Nat} : rowsBits ([] : List (Constraint n q)) = [] := rfl
 @[simp] theorem doubledRowsBits_nil {n q : Nat} :
     doubledRowsBits ([] : List (Constraint n q)) = [] := rfl
 
-@[simp] theorem rowsBits_cons {n q : Nat} (c : Constraint n q) (cs : List (Constraint n q)) :
-    rowsBits (c :: cs) = rowBits c ++ rowsBits cs := by
-  simp [rowsBits, rowBits]
-
-@[simp] theorem doubledRowsBits_cons {n q : Nat} (c : Constraint n q)
-    (cs : List (Constraint n q)) :
-    doubledRowsBits (c :: cs) = doubledRowBits c ++ doubledRowsBits cs := by
-  simp [doubledRowsBits, doubledRowBits]
-
-theorem gameBits_eq {q : Nat} (I : Instance q) :
-    gameBits I = encodeWord I.vertices ++ encodeWord q ++
-      encodeWord I.constraints.length ++ rowsBits I.constraints := by
-  simp [gameBits, gameWords, encodeWords, rowsBits, List.append_assoc]
-
-theorem doubled_gameBits_eq {q : Nat} (I : Instance q) :
-    gameBits (doubleInstance I) = encodeWord (2 * I.vertices) ++ encodeWord q ++
-      encodeWord I.constraints.length ++ doubledRowsBits I.constraints := by
-  simp [gameBits, gameWords, doubleInstance, encodeWords, doubledRowsBits,
-    List.flatMap_map, List.append_assoc]
-
-theorem input_length_eq {q : Nat} (I : Instance q) :
-    (gameBits (doubleInstance I)).length =
-      2 * I.vertices + q + I.constraints.length + 3 +
-        (doubledRowsBits I.constraints).length := by
-  rw [doubled_gameBits_eq]
-  simp only [List.length_append, encodeWord_length]
-  omega
-
-theorem vertices_le_input_length {q : Nat} (I : Instance q) :
-    I.vertices ≤ (gameBits (doubleInstance I)).length := by
-  rw [input_length_eq]
-  omega
-
-theorem rows_le_input_length {q : Nat} (I : Instance q) :
-    I.constraints.length ≤ (gameBits (doubleInstance I)).length := by
-  rw [input_length_eq]
-  omega
 
 end UniqueGamesTheorem.Explicit.MachineSingleOrbitCodec
 

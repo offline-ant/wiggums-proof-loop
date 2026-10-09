@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachinePaddedOverlayRuntimeLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRegularOwnerBody
 
@@ -23,20 +24,10 @@ def bodySize (t : GraphTables.Table) (output : List Bool) : Nat :=
 
 noncomputable def wide : Polynomial Nat := Polynomial.C (ExpanderFamily.growth + 1) * Polynomial.X
 
-noncomputable def rowPolynomial (q : Nat) : Polynomial Nat :=
-  wide + wide * Polynomial.C (q + 1) + 8192
-
-noncomputable def outputPolynomial (q : Nat) : Polynomial Nat :=
-  wide + regularPolynomial + Polynomial.C q * rowPolynomial q
-
-noncomputable def corePolynomial (q : Nat) : Polynomial Nat :=
-  Polynomial.C (5*q+32) * rotorPolynomial q + 10*wide + 2*wide + 13*wide + 5*wide +
-    Polynomial.C (5*q+10)*(wide+wide) + 4*wide + 2*outputPolynomial q +
-      Polynomial.C (8*q+41066)
-
+/-- Evaluate the same semiring cost expression at polynomial inputs. -/
 noncomputable def blockPolynomial (q : Nat) : Polynomial Nat :=
-  Polynomial.C q * corePolynomial q + Polynomial.C (5*q+11)*wide +
-    2*outputPolynomial q + Polynomial.C (5*q+40986)
+  MachineRegularVertexBlock.dummyTimeBound (Polynomial.C q) wide (rotorPolynomial q)
+    wide wide wide wide wide wide (wide + regularPolynomial) wide
 
 theorem blockPolynomial_eval (q L : Nat) :
     (blockPolynomial q).eval L =
@@ -47,12 +38,11 @@ theorem blockPolynomial_eval (q L : Nat) :
         ((ExpanderFamily.growth+1)*L) ((ExpanderFamily.growth+1)*L)
         (((ExpanderFamily.growth+1)*L) + regularPolynomial.eval L)
         ((ExpanderFamily.growth+1)*L) := by
-  simp only [blockPolynomial, corePolynomial, outputPolynomial, rowPolynomial, wide,
+  simp only [blockPolynomial, wide,
     Polynomial.eval_add, Polynomial.eval_mul, Polynomial.eval_C, Polynomial.eval_X,
-    Polynomial.eval_ofNat, MachineRegularVertexBlock.dummyTimeBound,
+    Polynomial.eval_ofNat, Polynomial.eval_one, MachineRegularVertexBlock.dummyTimeBound,
     MachineRegularVertexBlock.portTimeBound, MachineRegularInternalRow.coreTimeBound,
     MachineRegularDummyRow.timeBound, MachineRegularVertexBlock.rowSizeBound]
-  simp only [Nat.add_assoc]
 
 theorem dummyTimeBound_le (q L R x v i k o m O V W R' O' : Nat)
     (hL : L ≤ W) (hR : R ≤ R') (hx : x ≤ W) (hv : v ≤ W)
@@ -262,17 +252,6 @@ theorem totalSteps_le (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vertice
     MachineRegularOwnerBody.totalSteps H t v output ≤ timePolynomial.eval (bodySize t output) :=
   (MachineRegularOwnerBody.totalSteps_le H t v output).trans (ownerTime_le H t v output)
 
-noncomputable def ownerInTime (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vertices)
-    (output : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step (MachineRegularOwnerBody.program H))
-      (MachineRegularOwnerBody.cfg H (some MachineRegularOwnerBody.entry)
-        (MachineRegularOwnerBody.initialData t v output))
-      (some (MachineRegularOwnerBody.cfg H none
-        (MachineRegularOwnerBody.finalData H t v output)))
-      (timePolynomial.eval (bodySize t output)) where
-  steps := MachineRegularOwnerBody.totalSteps H t v output
-  evals_in_steps := MachineRegularOwnerBody.ownerTrace H t v output
-  steps_le_m := totalSteps_le H t v output
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOwnerBodyBounds
 

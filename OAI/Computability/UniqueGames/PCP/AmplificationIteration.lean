@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Nat.Log
 import Mathlib.Basic.Real.Basic
 import Mathlib.Tactic.Linarith
@@ -50,14 +51,6 @@ theorem run_preserves {X : Type*} (step : X → X) (P : X → Prop)
   | zero => exact hx
   | succ n ih => exact preserves _ ih
 
-theorem run_size {X : Type*} (step : X → X) (size : X → Nat) (C : Nat)
-    (blowup : ∀ x, size (step x) ≤ C * size x) (n : Nat) (x : X) :
-    size (run step n x) ≤ C ^ n * size x := by
-  induction n with
-  | zero => simp [run]
-  | succ n ih =>
-    have h := (blowup (run step n x)).trans (Nat.mul_le_mul_left C ih)
-    simpa [run, pow_succ, Nat.mul_assoc, Nat.mul_left_comm, Nat.mul_comm] using h
 
 /-- A concrete logarithmic iteration count, including the zero input. -/
 def rounds (n : Nat) : Nat := Nat.log2 n + 1
@@ -66,26 +59,6 @@ theorem rounds_large (n : Nat) : n < 2 ^ rounds n := by
   simpa [rounds, Nat.log2_eq_log_two] using
     (Nat.lt_pow_succ_log_self (by decide : 1 < 2) n)
 
-theorem rounds_power_le {n : Nat} (hn : 0 < n) : 2 ^ rounds n ≤ 2 * n := by
-  have h := Nat.pow_log_le_self 2 (Nat.ne_of_gt hn)
-  simpa [rounds, Nat.log2_eq_log_two, pow_succ, Nat.mul_comm] using
-    (Nat.mul_le_mul_right 2 h)
-
-/-- The constant blowup raised to the actual iteration count is polynomial in `n`. -/
-theorem blowup_rounds_le {C degree n : Nat} (hn : 0 < n) (hC : C ≤ 2 ^ degree) :
-    C ^ rounds n ≤ (2 * n) ^ degree := by
-  calc
-    C ^ rounds n ≤ (2 ^ degree) ^ rounds n := Nat.pow_le_pow_left hC _
-    _ = (2 ^ rounds n) ^ degree := by
-      rw [← pow_mul, ← pow_mul, Nat.mul_comm degree (rounds n)]
-    _ ≤ (2 * n) ^ degree := Nat.pow_le_pow_left (rounds_power_le hn) _
-
-theorem run_size_polynomial {X : Type*} (step : X → X) (size : X → Nat)
-    {C degree n : Nat} (hn : 0 < n) (hC : C ≤ 2 ^ degree)
-    (blowup : ∀ x, size (step x) ≤ C * size x) (x : X) :
-    size (run step (rounds n) x) ≤ (2 * n) ^ degree * size x :=
-  (run_size step size C blowup (rounds n) x).trans
-    (Nat.mul_le_mul_right _ (blowup_rounds_le hn hC))
 
 /-- An inverse-size initial gap reaches the fixed threshold after the concrete loop. -/
 theorem run_reaches_cap {X : Type*} (step : X → X) (gap : X → ℝ)

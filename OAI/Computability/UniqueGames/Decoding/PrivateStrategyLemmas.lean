@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.ParityLemmas
 import OAI.Computability.UniqueGames.Decoding.AdviceFibersLemmas
 import OAI.Computability.UniqueGames.Foundations.SamplingLemmas
@@ -230,19 +231,11 @@ theorem conditionalAgreement_eq_sum (Z : Submodule F2 U) (z : U)
       μ.probability (fun a => decide (π a.1.1 = a.2.1)) =
       μ.expectation (fun a => if π a.1.1 = a.2.1 then (1 : ℝ) else 0) := by
     simp [FiniteDistribution.probability, FiniteDistribution.expectation, mul_ite]
-  rw [hp, FiniteDistribution.expectation_product]
-  simp_rw [privateLaw_expectation]
-  rw [candidateLaw_expectation Z z τU hz (fun v =>
-    𝔼 σ : K →ₗ[F2] F2, ∑ Φ : H →ₗ[F2] E,
-      frequencyWeight (tableSign F σ) Φ *
-        (if π v = (privateOutput ι τ fallback (σ, Φ)).1 then (1 : ℝ) else 0)),
-    Finset.expect_comm]
-  apply Finset.expect_congr rfl
-  intro σ _
-  rw [Finset.expect_sum_comm]
-  apply Finset.sum_congr rfl
-  intro Φ _
-  exact (Finset.mul_expect _ _ _).symm
+  rw [hp, FiniteDistribution.expectation_product, FiniteDistribution.expectation_comm,
+    privateLaw_expectation]
+  have hc (b : ActualAnswer τ) := candidateLaw_expectation Z z τU hz
+    (fun v => if π v = b.val then (1 : ℝ) else 0)
+  simp_rw [hc]
 
 /-- The exact good Fourier mass in a witness coset; unlike the response law,
 this analysis-only quantity is allowed to mention the witness. -/

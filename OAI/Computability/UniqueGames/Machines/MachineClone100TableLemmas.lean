@@ -1,4 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.DeriveFintype
+import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineTransducerCopy
 import OAI.Computability.UniqueGames.PCP.SourceMachine
@@ -103,13 +105,6 @@ def contextNext {D : Nat} : Context D → Option (Label D)
 def cleanupNext {D : Nat} (j : Fin 4) : Label D :=
   if hj : j.val + 1 < 4 then .cleanup ⟨j.val + 1, hj⟩ else .guard
 
-def drain {D : Nat} (tape : Tape) (again next : Label D) :
-    TM2.Stmt Alphabet (Label D) (State D) :=
-  .pop tape (fun state head => (state.1, head))
-    (.branch (fun state => state.2.isSome)
-      (.goto fun _ => again)
-      (.load (fun state => (state.1, none)) (.goto fun _ => next)))
-
 def program (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ []) :
     Label triples.length → TM2.Stmt Alphabet (Label triples.length) (State triples.length)
   | .headerStart j => SourceMachine.fieldStart (headerTape j) (.headerLoop j)
@@ -122,13 +117,13 @@ def program (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ []) :
       (emission triples) (.scan c) q b
   | .restore c => MachineTransfer.loopAt .scratch (contextSource c) id false
       (.restore c) (contextNext c)
-  | .clearHeader => drain .header .clearHeader .guard
+  | .clearHeader => MachineDrain.drain .header .clearHeader (some .guard)
   | .guard => MachineUnaryCounter.guard .counter (.fieldStart 0) .finalCounter
   | .fieldStart j => SourceMachine.fieldStart (.field j) (.fieldLoop j)
   | .fieldLoop j => SourceMachine.fieldLoop .input (.field j) (.fieldLoop j)
       (SourceMachine.fieldNext Label.fieldStart
         (some (.setup (.inr (⟨0, List.length_pos_iff.mpr nonempty⟩, 0)))) j)
-  | .cleanup j => drain (.field j) (.cleanup j) (cleanupNext j)
+  | .cleanup j => MachineDrain.drain (.field j) (.cleanup j) (some (cleanupNext j))
   | .finalCounter => .pop .counter (fun state _ => (state.1, none))
       (.goto fun _ => .finalReverse)
   | .finalReverse => MachineTransfer.loopAt .reversed .output id false .finalReverse none
@@ -167,12 +162,6 @@ theorem output_eq_flatMap {Q : Type} [Fintype Q]
   | cons b input ih =>
     simp only [MachineTransducer.output, List.flatMap_cons, ih]
 
-theorem output_append {Q : Type} [Fintype Q]
-    (emit : Q → Bool → List Bool) (q : Q) (first rest : List Bool) :
-    MachineTransducer.output (fun state _ => state) emit q (first ++ rest) =
-      MachineTransducer.output (fun state _ => state) emit q first ++
-        MachineTransducer.output (fun state _ => state) emit q rest := by
-  simp only [output_eq_flatMap, List.flatMap_append]
 
 theorem affineEmit_replicate_true (scale offset v : Nat) :
     (List.replicate v true).flatMap (affineEmit scale offset) =
@@ -189,18 +178,6 @@ theorem affineEmit_word (scale offset v : Nat) :
     List.append_nil, affineEmit_replicate_true, affineEmit]
   rw [← List.append_assoc, List.replicate_append_replicate, Nat.add_comm (scale * v) offset]
 
-theorem affineEmit_word_append (scale offset v : Nat) (rest : List Bool) :
-    (encodeWord v ++ rest).flatMap (affineEmit scale offset) =
-      encodeWord (offset + scale * v) ++ rest.flatMap (affineEmit scale offset) := by
-  rw [List.flatMap_append, affineEmit_word]
-
-theorem affineEmit_words (scale offset : Nat) (vs : List Nat) :
-    (encodeWords vs).flatMap (affineEmit scale offset) =
-      encodeWords (vs.map (fun v => offset + scale * v)) := by
-  induction vs with
-  | nil => rfl
-  | cons v vs ih =>
-    simp only [encodeWords, List.flatMap_append, List.map_cons, affineEmit_word, ih]
 
 /-- Exact symbolic context transform used by the shared clone-table machine. -/
 theorem output_word (triples : List (Nat × Nat × Nat))
@@ -210,61 +187,6 @@ theorem output_word (triples : List (Nat × Nat × Nat))
   rw [output_eq_flatMap]
   exact affineEmit_word (contextScale c) (contextOffset triples c) v
 
-theorem output_word_append (triples : List (Nat × Nat × Nat))
-    (c : Context triples.length) (v : Nat) (rest : List Bool) :
-    MachineTransducer.output (fun q _ => q) (emission triples) c (encodeWord v ++ rest) =
-      encodeWord (contextOffset triples c + contextScale c * v) ++
-        MachineTransducer.output (fun q _ => q) (emission triples) c rest := by
-  rw [output_append, output_word]
-
-theorem output_words (triples : List (Nat × Nat × Nat))
-    (c : Context triples.length) (vs : List Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) c (encodeWords vs) =
-      encodeWords (vs.map (fun v => contextOffset triples c + contextScale c * v)) := by
-  rw [output_eq_flatMap]
-  exact affineEmit_words (contextScale c) (contextOffset triples c) vs
-
-theorem output_header_variables (triples : List (Nat × Nat × Nat)) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inl 0) (encodeWord v) =
-      encodeWord (100 * v) := by
-  simpa [contextOffset, contextScale] using output_word triples (.inl 0) v
-
-/-- The equation-count multiplier remains the arbitrary symbolic table length. -/
-theorem output_header_count (triples : List (Nat × Nat × Nat)) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inl 1) (encodeWord v) =
-      encodeWord (triples.length * v) := by
-  simpa [contextOffset, contextScale] using output_word triples (.inl 1) v
-
-theorem output_field (triples : List (Nat × Nat × Nat))
-    (i : Fin triples.length) (j : Fin 4) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inr (i, j)) (encodeWord v) =
-      encodeWord (tripleField (triples.get i) j + (if j.val < 3 then 100 else 1) * v) := by
-  exact output_word triples (.inr (i, j)) v
-
-theorem output_first_field (triples : List (Nat × Nat × Nat))
-    (i : Fin triples.length) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inr (i, 0)) (encodeWord v) =
-      encodeWord ((triples.get i).1 + 100 * v) := by
-  simpa [tripleField] using output_field triples i 0 v
-
-theorem output_second_field (triples : List (Nat × Nat × Nat))
-    (i : Fin triples.length) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inr (i, 1)) (encodeWord v) =
-      encodeWord ((triples.get i).2.1 + 100 * v) := by
-  simpa [tripleField] using output_field triples i 1 v
-
-theorem output_third_field (triples : List (Nat × Nat × Nat))
-    (i : Fin triples.length) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inr (i, 2)) (encodeWord v) =
-      encodeWord ((triples.get i).2.2 + 100 * v) := by
-  simpa [tripleField] using output_field triples i 2 v
-
-/-- RHS words are copied exactly, including both legal Boolean values. -/
-theorem output_rhs_field (triples : List (Nat × Nat × Nat))
-    (i : Fin triples.length) (v : Nat) :
-    MachineTransducer.output (fun q _ => q) (emission triples) (.inr (i, 3)) (encodeWord v) =
-      encodeWord v := by
-  simpa [tripleField] using output_field triples i 3 v
 
 end UniqueGamesTheorem.Explicit.MachineClone100Affine
 
@@ -280,98 +202,15 @@ open Turing
 open UniqueGamesTheorem.Foundations.Complexity
 open MachineClone100Model
 
-variable {D : Nat}
-
-/-- The finite drain statement pops one symbol and retains the ambient control. -/
-theorem drainStep_cons (tape : Tape) (again next : Label D)
-    (program : Label D → TM2.Stmt Alphabet (Label D) (State D))
-    (atAgain : program again = drain tape again next)
-    (base : Tape → List Bool) (bit : Bool) (input : List Bool)
-    (control : Unit × Context D) (register : Option Bool) :
-    TM2.step program
-      ⟨some again, (control, register), Function.update base tape (bit :: input)⟩ =
-      some ⟨some again, (control, some bit), Function.update base tape input⟩ := by
-  change some (TM2.stepAux (program again) (control, register)
-    (Function.update base tape (bit :: input))) = _
-  rw [atAgain]
-  simp [drain, TM2.stepAux]
-
-/-- The exit transition observes the empty tape and resets the optional bit. -/
-theorem drainStep_nil (tape : Tape) (again next : Label D)
-    (program : Label D → TM2.Stmt Alphabet (Label D) (State D))
-    (atAgain : program again = drain tape again next)
-    (base : Tape → List Bool) (control : Unit × Context D) (register : Option Bool) :
-    TM2.step program
-      ⟨some again, (control, register), Function.update base tape []⟩ =
-      some ⟨some next, (control, none), Function.update base tape []⟩ := by
-  change some (TM2.stepAux (program again) (control, register)
-    (Function.update base tape [])) = _
-  rw [atAgain]
-  simp [drain, TM2.stepAux]
-
-/-- Direct list induction gives exactly one transition per symbol plus the
-empty-tape exit; no whole execution trace is assumed. -/
-theorem drainTrace (tape : Tape) (again next : Label D)
-    (program : Label D → TM2.Stmt Alphabet (Label D) (State D))
-    (atAgain : program again = drain tape again next)
-    (base : Tape → List Bool) (input : List Bool)
-    (control : Unit × Context D) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step program))^[input.length + 1]
-      (some ⟨some again, (control, register), Function.update base tape input⟩) =
-      some ⟨some next, (control, none), Function.update base tape []⟩ := by
-  induction input generalizing register with
-  | nil =>
-    simpa only [List.length_nil, Nat.zero_add, Function.iterate_one,
-      MachineComposition.advance_some] using
-      drainStep_nil tape again next program atAgain base control register
-  | cons bit input ih =>
-    rw [List.length_cons, Function.iterate_succ_apply]
-    change (MachineComposition.advance (TM2.step program))^[input.length + 1]
-      (TM2.step program ⟨some again, (control, register),
-        Function.update base tape (bit :: input)⟩) = _
-    rw [drainStep_cons tape again next program atAgain, ih]
-
-/-- Caller form: the selected tape's initial contents are read from the frame. -/
-theorem drainTrace_base (tape : Tape) (again next : Label D)
-    (program : Label D → TM2.Stmt Alphabet (Label D) (State D))
-    (atAgain : program again = drain tape again next)
-    (base : Tape → List Bool) (control : Unit × Context D) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step program))^[(base tape).length + 1]
-      (some ⟨some again, (control, register), base⟩) =
-      some ⟨some next, (control, none), Function.update base tape []⟩ := by
-  simpa only [Function.update_eq_self] using
-    drainTrace tape again next program atAgain base (base tape) control register
-
-def drainInTime (tape : Tape) (again next : Label D)
-    (program : Label D → TM2.Stmt Alphabet (Label D) (State D))
-    (atAgain : program again = drain tape again next)
-    (base : Tape → List Bool) (control : Unit × Context D) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some again, (control, register), base⟩
-      (some ⟨some next, (control, none), Function.update base tape []⟩)
-      ((base tape).length + 1) where
-  steps := (base tape).length + 1
-  evals_in_steps := by
-    change (MachineComposition.advance (TM2.step program))^[_] _ = _
-    exact drainTrace_base tape again next program atAgain base control register
-  steps_le_m := Nat.le_refl _
-
 theorem clearHeaderTrace (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ [])
     (base : Tape → List Bool) (control : Unit × Context triples.length)
     (register : Option Bool) :
     (MachineComposition.advance (TM2.step (program triples nonempty)))^[(base .header).length + 1]
       (some ⟨some .clearHeader, (control, register), base⟩) =
       some ⟨some .guard, (control, none), Function.update base .header []⟩ :=
-  drainTrace_base .header .clearHeader .guard (program triples nonempty) rfl base control register
+  (MachineDrain.drainInTime Tape.header Label.clearHeader (some Label.guard)
+    (program triples nonempty) rfl base control register).evals_in_steps
 
-def clearHeaderInTime (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ [])
-    (base : Tape → List Bool) (control : Unit × Context triples.length)
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program triples nonempty))
-      ⟨some .clearHeader, (control, register), base⟩
-      (some ⟨some .guard, (control, none), Function.update base .header []⟩)
-      ((base .header).length + 1) :=
-  drainInTime .header .clearHeader .guard (program triples nonempty) rfl base control register
 
 /-- The four explicit updates made by the successive cleanup labels. -/
 def clearFields (base : Tape → List Bool) : Tape → List Bool :=
@@ -382,9 +221,6 @@ def clearFields (base : Tape → List Bool) : Tape → List Bool :=
     clearFields base (.field j) = [] := by
   fin_cases j <;> simp [clearFields]
 
-theorem clearFields_other (base : Tape → List Bool) (tape : Tape)
-    (other : ∀ j, tape ≠ .field j) : clearFields base tape = base tape := by
-  simp [clearFields, other]
 
 @[simp] theorem clearFields_input (base : Tape → List Bool) :
     clearFields base .input = base .input := by simp [clearFields]
@@ -399,14 +235,6 @@ theorem clearFields_other (base : Tape → List Bool) (tape : Tape)
 @[simp] theorem clearFields_output (base : Tape → List Bool) :
     clearFields base .output = base .output := by simp [clearFields]
 
-theorem clearFields_eq_self (base : Tape → List Bool)
-    (empty : ∀ j, base (.field j) = []) : clearFields base = base := by
-  funext tape
-  cases tape <;> simp [empty]
-
-@[simp] theorem clearFields_idempotent (base : Tape → List Bool) :
-    clearFields (clearFields base) = clearFields base :=
-  clearFields_eq_self (clearFields base) (clearFields_field base)
 
 def cleanupSteps (base : Tape → List Bool) : Nat :=
   (base (.field 0)).length + (base (.field 1)).length +
@@ -419,8 +247,8 @@ theorem cleanupTrace (triples : List (Nat × Nat × Nat)) (nonempty : triples �
       (base (.field slot)).length + 1]
       (some ⟨some (.cleanup slot), (control, register), base⟩) =
       some ⟨some (cleanupNext slot), (control, none), Function.update base (.field slot) []⟩ :=
-  drainTrace_base (.field slot) (.cleanup slot) (cleanupNext slot)
-    (program triples nonempty) rfl base control register
+  (MachineDrain.drainInTime (Tape.field slot) (Label.cleanup slot) (some (cleanupNext slot))
+    (program triples nonempty) rfl base control register).evals_in_steps
 
 /-- All four field stacks are consumed by the actual cleanup program. -/
 theorem cleanupFourTrace (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ [])
@@ -436,31 +264,13 @@ theorem cleanupFourTrace (triples : List (Nat × Nat × Nat)) (nonempty : triple
   have h₁ := cleanupTrace triples nonempty 1 t₀ control none
   have h₂ := cleanupTrace triples nonempty 2 t₁ control none
   have h₃ := cleanupTrace triples nonempty 3 t₂ control none
-  have hn₀ : cleanupNext (D := triples.length) 0 = .cleanup 1 := by simp [cleanupNext]
-  have hn₁ : cleanupNext (D := triples.length) 1 = .cleanup 2 := by simp [cleanupNext]
-  have hn₂ : cleanupNext (D := triples.length) 2 = .cleanup 3 := by simp [cleanupNext]
-  have hn₃ : cleanupNext (D := triples.length) 3 = .guard := by simp [cleanupNext]
-  rw [hn₀] at h₀
-  rw [hn₁] at h₁
-  rw [hn₂] at h₂
-  rw [hn₃] at h₃
-  have ht₁ : t₀ (.field 1) = base (.field 1) := by simp [t₀]
-  have ht₂ : t₁ (.field 2) = base (.field 2) := by simp [t₁, t₀]
-  have ht₃ : t₂ (.field 3) = base (.field 3) := by simp [t₂, t₁, t₀]
-  rw [ht₁] at h₁
-  rw [ht₂] at h₂
-  rw [ht₃] at h₃
-  have time : cleanupSteps base =
-      ((base (.field 3)).length + 1) +
-      (((base (.field 2)).length + 1) +
-      (((base (.field 1)).length + 1) + ((base (.field 0)).length + 1))) := by
-    unfold cleanupSteps
+  have combined := MachineComposition.iterate_trans
+    (MachineComposition.iterate_trans (MachineComposition.iterate_trans h₀ h₁) h₂) h₃
+  convert combined using 1
+  · congr 1
+    simp [cleanupSteps, t₀, t₁, t₂]
     omega
-  rw [time, Function.iterate_add_apply]
-  rw [Function.iterate_add_apply (m := (base (.field 2)).length + 1)]
-  rw [Function.iterate_add_apply (m := (base (.field 1)).length + 1)]
-  rw [h₀, h₁, h₂, h₃]
-  rfl
+  · rfl
 
 def cleanupFourInTime (triples : List (Nat × Nat × Nat)) (nonempty : triples ≠ [])
     (base : Tape → List Bool) (control : Unit × Context triples.length)
@@ -511,12 +321,6 @@ def contextTapes (triples : List (Nat × Nat × Nat)) (context : Context triples
     ((MachineTransducer.output (fun control _ => control) (emission triples)
       context (base (contextSource context))).reverse ++ base .reversed)
 
-@[simp] theorem contextTapes_reversed (triples : List (Nat × Nat × Nat))
-    (context : Context triples.length) (base : Tape → List Bool) :
-    contextTapes triples context base .reversed =
-      (MachineTransducer.output (fun control _ => control) (emission triples)
-        context (base (contextSource context))).reverse ++ base .reversed := by
-  simp [contextTapes]
 
 theorem contextTapes_other (triples : List (Nat × Nat × Nat))
     (context : Context triples.length) (base : Tape → List Bool) (tape : Tape)
@@ -524,10 +328,6 @@ theorem contextTapes_other (triples : List (Nat × Nat × Nat))
     contextTapes triples context base tape = base tape := by
   simp [contextTapes, different]
 
-@[simp] theorem contextTapes_source (triples : List (Nat × Nat × Nat))
-    (context : Context triples.length) (base : Tape → List Bool) :
-    contextTapes triples context base (contextSource context) = base (contextSource context) :=
-  contextTapes_other triples context base _ (contextSource_ne_reversed context)
 
 @[simp] theorem contextTapes_scratch (triples : List (Nat × Nat × Nat))
     (context : Context triples.length) (base : Tape → List Bool) :
@@ -600,20 +400,6 @@ def finishTapes (base : Tape → List Bool) : Tape → List Bool :=
   MachineTransfer.tapesAt .reversed .output (Function.update base .counter []) []
     ((base .reversed).reverse ++ base .output)
 
-@[simp] theorem finishTapes_counter (base : Tape → List Bool) :
-    finishTapes base .counter = [] := by simp [finishTapes, MachineTransfer.tapesAt]
-
-@[simp] theorem finishTapes_reversed (base : Tape → List Bool) :
-    finishTapes base .reversed = [] := by simp [finishTapes, MachineTransfer.tapesAt]
-
-@[simp] theorem finishTapes_output (base : Tape → List Bool) :
-    finishTapes base .output = (base .reversed).reverse ++ base .output := by
-  simp [finishTapes, MachineTransfer.tapesAt]
-
-theorem finishTapes_other (base : Tape → List Bool) (tape : Tape)
-    (hc : tape ≠ .counter) (hr : tape ≠ .reversed) (ho : tape ≠ .output) :
-    finishTapes base tape = base tape := by
-  simp [finishTapes, MachineTransfer.tapesAt, hc, hr, ho]
 
 theorem counterStep (triples : List (Nat × Nat × Nat)) (hne : triples ≠ [])
     (base : Tape → List Bool) (hcounter : base .counter = [false]) :

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.FinalCNFOutputLemmas
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Machines.MachineFiniteAlphabet
@@ -77,7 +78,6 @@ theorem runtimePolynomial_eval (bodyTime : Polynomial Nat) (N : Nat) :
     Polynomial.eval_one, Polynomial.eval_ofNat, Polynomial.eval_comp]
 
 end UniqueGamesTheorem.Foundations.Complexity.GraphIterationBounds
-
 
 
 /-! Actual polynomial-time iteration of the concrete graph-table round. A
@@ -168,7 +168,6 @@ noncomputable def gapMapCertificate :
     FinalCNFMachine.Program.computableInPolyTime
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineTableIteration
-
 
 
 namespace UniqueGamesTheorem.Foundations.Complexity.TableIterationFiniteAlphabet

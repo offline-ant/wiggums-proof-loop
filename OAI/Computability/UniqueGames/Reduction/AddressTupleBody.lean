@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Reduction.AddressOutcomeSpecs
 import OAI.Computability.UniqueGames.Reduction.AddressTupleCleanupLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineAddressEdgeLemmas
@@ -60,9 +61,6 @@ def instruction (rows : Rows k) (labels : Label k s d noiseCount rows → Λ) (e
       (cleanupLabels labels) (some (resetLabel labels)) l
   | .inr (.inr (.inr (.inr _))) => reset exit
 
-def program (rows : Rows k) : Label k s d noiseCount rows →
-    TM2.Stmt (fun _ : Arena k s d noiseCount => Bool) (Label k s d noiseCount rows) (BodyState k) :=
-  instruction rows id none
 
 def rhs (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length) : Fin k → Bool :=
   fun j => F.equations[(tuple j).val].rhs
@@ -71,23 +69,23 @@ def loaded (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) : Arena k s d noiseCount → List Bool :=
   MachineSourceTuple.stageTapes F tuple base k
 
-def tupleBits (rows : Rows k) (B C : Nat)
+def tupleBits (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length) : List Bool :=
-  (MachineOutcomeRows.selected rows (rhs F tuple)).flatMap (MachineOutcomeRows.payload B C values)
+  (MachineOutcomeRows.selected rows (rhs F tuple)).flatMap (MachineOutcomeRows.payload B values)
 
-noncomputable def emitted (rows : Rows k) (B C : Nat)
+noncomputable def emitted (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) : Arena k s d noiseCount → List Bool :=
   MachineAddressEdge.appended (Slots k s d noiseCount) (loaded F tuple base)
-    (tupleBits rows B C values F tuple)
+    (tupleBits rows B values F tuple)
 
-noncomputable def finalTapes (rows : Rows k) (B C : Nat)
+noncomputable def finalTapes (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) : Arena k s d noiseCount → List Bool :=
-  AddressTupleCleanup.cleared k s d noiseCount (emitted rows B C values F tuple base)
+  AddressTupleCleanup.cleared k s d noiseCount (emitted rows B values F tuple base)
 
 structure Ready (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) : Prop where
@@ -99,14 +97,14 @@ structure Ready (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.le
   copy : base .copyScratch = []
   fields : ∀j slot, base (.field j slot) = []
 
-noncomputable def budget (rows : Rows k) (B C : Nat)
+noncomputable def budget (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) : Nat :=
   (k * (10 * (SourceEncoding.inputBits F).length + 20) + 1) + 1 +
-    ((MachineOutcomeRows.rowCosts (Slots k s d noiseCount) B C values
+    ((MachineOutcomeRows.rowCosts (Slots k s d noiseCount) B values
       (MachineOutcomeRows.selected rows (rhs F tuple)) (loaded F tuple base)).sum + 1) +
-    AddressTupleCleanup.budget k s d noiseCount (emitted rows B C values F tuple base) + 1
+    AddressTupleCleanup.budget k s d noiseCount (emitted rows B values F tuple base) + 1
 
 noncomputable def run (rows : Rows k) (labels : Label k s d noiseCount rows → Λ)
     (exit : Option Λ)
@@ -114,14 +112,14 @@ noncomputable def run (rows : Rows k) (labels : Label k s d noiseCount rows → 
     (atLabels : ∀l, P (labels l) = instruction rows labels exit l)
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) (ready : Ready F tuple base)
-    (oldRhs : Fin k → Bool) (B C : Nat)
+    (oldRhs : Fin k → Bool) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
-    (valid : MachineOutcomeRows.Invariant (Slots k s d noiseCount) B C values
+    (valid : MachineOutcomeRows.Invariant (Slots k s d noiseCount) B values
       (MachineOutcomeRows.selected rows (rhs F tuple)) (loaded F tuple base)) :
     StateTransition.EvalsToInTime (TM2.step P)
       ⟨some (labels (main rows)), (((oldRhs, ()), ()), none), base⟩
-      (some ⟨exit, initialState k, finalTapes rows B C values F tuple base⟩)
-      (budget rows B C values F tuple base) := by
+      (some ⟨exit, initialState k, finalTapes rows B values F tuple base⟩)
+      (budget rows B values F tuple base) := by
   have sourceRun := MachineSourceTuple.placedLoadUnaryInTime
     (sourceLabels labels) (some (rhsLabel labels)) P (fun l => atLabels (.inl l))
     F tuple base ready.source ready.saved ready.index ready.work ready.scratch ready.copy (oldRhs, ())
@@ -140,16 +138,16 @@ noncomputable def run (rows : Rows k) (labels : Label k s d noiseCount rows → 
     (rowLabels labels)
     (AddressTupleCleanup.entry k s d noiseCount (cleanupLabels labels) (some (resetLabel labels)))
     P (fun l => atLabels (.inr (.inr (.inl l))))
-    (loaded F tuple base) (rhs F tuple) () none B C values valid
+    (loaded F tuple base) (rhs F tuple) () none B values valid
   have cleanupRun := AddressTupleCleanup.execution k s d noiseCount
     (cleanupLabels labels) (some (resetLabel labels)) P
     (fun l => atLabels (.inr (.inr (.inr (.inl l)))))
-    (emitted rows B C values F tuple base) (((rhs F tuple), ()), ()) none
+    (emitted rows B values F tuple base) (((rhs F tuple), ()), ()) none
   simp only [MachineDrainMany.finalRegister_none] at cleanupRun
   have resetRun : StateTransition.EvalsToInTime (TM2.step P)
       ⟨some (resetLabel labels), ((((rhs F tuple), ()), ()), none),
-        finalTapes rows B C values F tuple base⟩
-      (some ⟨exit, initialState k, finalTapes rows B C values F tuple base⟩) 1 := by
+        finalTapes rows B values F tuple base⟩
+      (some ⟨exit, initialState k, finalTapes rows B values F tuple base⟩) 1 := by
     refine { steps := 1, evals_in_steps := ?_, steps_le_m := Nat.le_refl _ }
     change TM2.step P ⟨some (resetLabel labels), _, _⟩ = _
     change some (TM2.stepAux (P (resetLabel labels)) _ _) = _
@@ -181,7 +179,6 @@ theorem tupleBits_actual (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equ
     (T : NoiseTables.Table s d) :
     tupleBits (AddressOutcomeSpecs.rows k T)
       (CanonicalAddress.base F.variables F.equations.length s d)
-      (AddressGame.bodyCapacity (source F) k s d)
       (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple =
       AddressOutcomeSpecs.tupleBits (source F) k T tuple := by
   unfold tupleBits
@@ -193,17 +190,15 @@ actual loader's canonical field values and the checked fixed-row specs. -/
 theorem actualInvariant (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (T : NoiseTables.Table s d) (base : Arena k s d noiseCount → List Bool)
     (ready : Ready F tuple base)
-    (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base) (B C : Nat)
-    (hB : base (headerTape k s d noiseCount .baseValue) = encodeWord B)
-    (hC : base (headerTape k s d noiseCount .capacity) = encodeWord C) :
-    MachineOutcomeRows.Invariant (Slots k s d noiseCount) B C
+    (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base) (B : Nat)
+    (hB : base (headerTape k s d noiseCount .baseValue) = encodeWord B) :
+    MachineOutcomeRows.Invariant (Slots k s d noiseCount) B
       (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple))
       (MachineOutcomeRows.selected (AddressOutcomeSpecs.rows k T) (rhs F tuple))
       (loaded F tuple base) := by
   constructor
   · exact AddressTupleLoaded.loaded_clean F tuple base clean
   · exact AddressTupleLoaded.loaded_radix F tuple base B hB
-  · exact AddressTupleLoaded.loaded_capacity F tuple base C hC
   · intro spec member
     have fields := AddressTupleLoaded.loaded_savedFields F tuple base ready.saved ready.fields
     change (fun i => loaded F tuple base (MachineAddressEdge.addressSlots
@@ -212,35 +207,12 @@ theorem actualInvariant (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equa
     exact AddressOutcomeSpecs.correct_rows T (AddressTupleLoaded.canonicalValues F tuple)
       (rhs F tuple) spec member
 
-/-- Actual fixed-row execution. Physical readiness and stored header values
-are its only data hypotheses; no template or body-execution premise remains. -/
-noncomputable def run_fixed_rows (T : NoiseTables.Table s d)
-    (labels : Label k s d noiseCount (AddressOutcomeSpecs.rows k T) → Λ) (exit : Option Λ)
-    (P : Λ → TM2.Stmt (fun _ : Arena k s d noiseCount => Bool) Λ (BodyState k))
-    (atLabels : ∀l, P (labels l) = instruction (AddressOutcomeSpecs.rows k T) labels exit l)
-    (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
-    (base : Arena k s d noiseCount → List Bool) (ready : Ready F tuple base)
-    (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base)
-    (oldRhs : Fin k → Bool) (B C : Nat)
-    (hB : base (headerTape k s d noiseCount .baseValue) = encodeWord B)
-    (hC : base (headerTape k s d noiseCount .capacity) = encodeWord C) :
-    StateTransition.EvalsToInTime (TM2.step P)
-      ⟨some (labels (main (AddressOutcomeSpecs.rows k T))), (((oldRhs, ()), ()), none), base⟩
-      (some ⟨exit, initialState k,
-        finalTapes (AddressOutcomeSpecs.rows k T) B C
-          (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple base⟩)
-      (budget (AddressOutcomeSpecs.rows k T) B C
-        (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple base) :=
-  run (AddressOutcomeSpecs.rows k T) labels exit P atLabels F tuple base ready oldRhs B C
-    (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple))
-    (actualInvariant F tuple T base ready clean B C hB hC)
-
-theorem finalTapes_eq (rows : Rows k) (B C : Nat)
+theorem finalTapes_eq (rows : Rows k) (B : Nat)
     (values : MachineOutcomeRows.Spec (4*k) (1+9*k) → MachineOutcomeRows.Values (1+9*k))
     (F : SourceEncoding.Input) (tuple : Fin k → Fin F.equations.length)
     (base : Arena k s d noiseCount → List Bool) (ready : Ready F tuple base) :
-    finalTapes rows B C values F tuple base = MachineAddressEdge.appended
-      (Slots k s d noiseCount) base (tupleBits rows B C values F tuple) :=
+    finalTapes rows B values F tuple base = MachineAddressEdge.appended
+      (Slots k s d noiseCount) base (tupleBits rows B values F tuple) :=
   AddressTupleFrame.cleared_appended_loaded F tuple base ready.index ready.work ready.fields _
 
 noncomputable def run_actual (T : NoiseTables.Table s d)
@@ -252,29 +224,21 @@ noncomputable def run_actual (T : NoiseTables.Table s d)
     (clean : MachineAddressEdge.Clean (Slots k s d noiseCount) base)
     (oldRhs : Fin k → Bool)
     (hB : base (headerTape k s d noiseCount .baseValue) =
-      encodeWord (CanonicalAddress.base F.variables F.equations.length s d))
-    (hC : base (headerTape k s d noiseCount .capacity) =
-      encodeWord (AddressGame.bodyCapacity (source F) k s d)) :
+      encodeWord (CanonicalAddress.base F.variables F.equations.length s d)) :
     StateTransition.EvalsToInTime (TM2.step P)
       ⟨some (labels (main (AddressOutcomeSpecs.rows k T))), (((oldRhs, ()), ()), none), base⟩
       (some ⟨exit, initialState k, MachineAddressEdge.appended (Slots k s d noiseCount)
         base (AddressOutcomeSpecs.tupleBits (source F) k T tuple)⟩)
       (budget (AddressOutcomeSpecs.rows k T)
         (CanonicalAddress.base F.variables F.equations.length s d)
-        (AddressGame.bodyCapacity (source F) k s d)
         (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple)) F tuple base) := by
-  have actual := run_fixed_rows T labels exit P atLabels F tuple base ready clean oldRhs
-    (CanonicalAddress.base F.variables F.equations.length s d)
-    (AddressGame.bodyCapacity (source F) k s d) hB hC
-  rw [finalTapes_eq _ _ _ _ F tuple base ready, tupleBits_actual] at actual
+  have actual := run (AddressOutcomeSpecs.rows k T) labels exit P atLabels F tuple base ready
+    oldRhs (CanonicalAddress.base F.variables F.equations.length s d)
+    (AddressOutcomeSpecs.values (AddressTupleLoaded.canonicalValues F tuple))
+    (actualInvariant F tuple T base ready clean _ hB)
+  rw [finalTapes_eq _ _ _ F tuple base ready, tupleBits_actual] at actual
   exact actual
 
-theorem saved_of_current (F : SourceEncoding.Input)
-    (digits : Fin k → Fin F.equations.length) (base : Arena k s d noiseCount → List Bool)
-    (currentWords : ∀j, base (current k s d noiseCount j) = encodeWord (digits j).val) :
-    ∀j, base (.savedIndex j) = encodeWord (digits j.rev).val := by
-  intro j
-  simpa only [AddressMachineSpace.current_rev] using currentWords j.rev
 
 end UniqueGamesTheorem.Integration.AddressTupleBody
 

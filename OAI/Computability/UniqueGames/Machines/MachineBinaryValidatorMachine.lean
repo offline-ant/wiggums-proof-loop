@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.DeriveFintype
 import OAI.Computability.UniqueGames.Machines.MachineBinaryParsingLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -59,15 +60,9 @@ private theorem finalDigit_true_iff (bits : List Bool) :
   | nil => simp [BinaryNameMachine.finalDigit, BinaryNameMachine.canonical]
   | cons bit bits =>
       simp only [BinaryNameMachine.finalDigit, BinaryNameMachine.canonical]
-      have hsome : ∀ (ds : List Bool) (b : Bool),
-          ∃ last, BinaryNameMachine.finalDigit ds (some b) = some last := by
-        intro ds
-        induction ds with
-        | nil => intro b; exact ⟨b, rfl⟩
-        | cons d ds ih => intro b; exact ih d
-      obtain ⟨last, hlast⟩ := hsome bits bit
-      rw [hlast]
-      simp
+      induction bits generalizing bit with
+      | nil => simp [BinaryNameMachine.finalDigit]
+      | cons next bits ih => exact ih next
 
 /-- A valid framed payload advances exactly to the next literal or clause. -/
 theorem run_frame (slot : Fin 3) (bits rest : List Bool) (last : Bool)
@@ -170,32 +165,26 @@ theorem clause_inverse (input : List Bool) (accepted : run (.sign 0) input = .do
   refine ⟨#v[a, b, c], rest, ?_, hrest⟩
   simp [clauseBits, hA, hB, hC, List.append_assoc]
 
-private theorem clauses_inverse_aux (fuel : Nat) (input : List Bool)
-    (enough : input.length < fuel) (accepted : run .clause input = .done) :
+private theorem clauses_inverse (input : List Bool)
+    (accepted : run .clause input = .done) :
     ∃ clauses, input = clausesBits clauses := by
-  induction fuel generalizing input with
-  | zero => omega
-  | succ fuel ih =>
+  induction input using (measure (List.length (α := Bool))).wf.induction with
+  | h input ih =>
       cases input with
       | nil => simp [run] at accepted
       | cons flag input =>
           cases flag with
           | false =>
-              have hdone : run .done input = .done := accepted
-              have hempty := (run_done_iff input).mp hdone
+              have hempty := (run_done_iff input).mp accepted
               subst input
               exact ⟨[], rfl⟩
           | true =>
-              have haccepted : run (.sign 0) input = .done := accepted
-              obtain ⟨clause, rest, hinput, hrest⟩ := clause_inverse input haccepted
-              have hlength := congrArg List.length hinput
-              simp only [List.length_append] at hlength
-              have henough : rest.length < fuel := by
-                simp only [List.length_cons] at enough
+              obtain ⟨clause, rest, hinput, hrest⟩ := clause_inverse input accepted
+              have shorter : rest.length < (true :: input).length := by
+                rw [List.length_cons, hinput, List.length_append]
                 omega
-              obtain ⟨clauses, hclauses⟩ := ih rest henough hrest
-              refine ⟨clause :: clauses, ?_⟩
-              simp [clausesBits, hinput, hclauses]
+              obtain ⟨clauses, hclauses⟩ := ih rest shorter hrest
+              exact ⟨clause :: clauses, by simp [clausesBits, hinput, hclauses]⟩
 
 /-- Exact language recognition, including rejection of incomplete, padded,
 or trailing input. -/
@@ -203,166 +192,11 @@ theorem run_clause_iff (input : List Bool) :
     run .clause input = .done ↔ ∃ formula, input = formulaBits formula := by
   constructor
   · intro accepted
-    obtain ⟨clauses, hclauses⟩ :=
-      clauses_inverse_aux (input.length + 1) input (by omega) accepted
+    obtain ⟨clauses, hclauses⟩ := clauses_inverse input accepted
     exact ⟨⟨clauses⟩, hclauses⟩
   · rintro ⟨formula, rfl⟩
     exact run_formula formula
 
-def accepts (input : List Bool) : Bool := decide (run .clause input = .done)
-
-theorem accepts_eq_decode (input : List Bool) :
-    accepts input = (decodeFormula input).isSome := by
-  cases parsed : decodeFormula input with
-  | none =>
-      have rejected : run .clause input ≠ .done := by
-        intro accepted
-        obtain ⟨formula, encoded⟩ := (run_clause_iff input).mp accepted
-        have roundtrip := decodeFormula_encoded formula
-        rw [← encoded, parsed] at roundtrip
-        cases roundtrip
-      simp [accepts, rejected]
-  | some formula =>
-      have encoded := BinaryParsing.decodeFormula_sound input formula parsed
-      have accepted := (run_clause_iff input).mpr ⟨formula, encoded⟩
-      simp [accepts, accepted]
-
-open Turing
-open UniqueGamesTheorem.Foundations.Complexity
-open MachineComposition
-
-abbrev Alphabet (_ : Bool) := Bool
-abbrev State := Mode × Option Bool
-
-/-- Every nonempty pop performs exactly one finite DFA transition. The empty
-pop emits the final acceptance bit, resets control, and halts. -/
-def instruction : TM2.Stmt Alphabet Unit State :=
-  .pop false (fun state head => (state.1, head))
-    (.branch (fun state => state.2.isSome)
-      (.load (fun state => (nextMode state.1 (state.2.getD false), none))
-        (.goto fun _ => ()))
-      (.push true (fun state => decide (state.1 = .done))
-        (.load (fun _ => (.clause, none)) .halt)))
-
-abbrev machine : FinTM2 where
-  K := Bool
-  k₀ := false
-  k₁ := true
-  Γ := Alphabet
-  Λ := Unit
-  main := ()
-  σ := State
-  initialState := (.clause, none)
-  m _ := instruction
-
-def tapes (input output : List Bool) : Bool → List Bool
-  | false => input
-  | true => output
-
-def cfg (label : Option Unit) (input output : List Bool) (mode : Mode)
-    (register : Option Bool := none) : machine.Cfg :=
-  ⟨label, (mode, register), tapes input output⟩
-
-@[simp] private theorem tapes_input (input output : List Bool) :
-    tapes input output false = input := rfl
-
-@[simp] private theorem tapes_output (input output : List Bool) :
-    tapes input output true = output := rfl
-
-private theorem update_input (input output replacement : List Bool) :
-    Function.update (tapes input output) false replacement = tapes replacement output := by
-  funext k
-  cases k <;> rfl
-
-private theorem update_output (input output replacement : List Bool) :
-    Function.update (tapes input output) true replacement = tapes input replacement := by
-  funext k
-  cases k <;> rfl
-
-theorem step_empty (mode : Mode) (output : List Bool) (register : Option Bool) :
-    machine.step (cfg (some ()) [] output mode register) =
-      some (cfg none [] (decide (mode = .done) :: output) .clause) := by
-  change some (TM2.stepAux instruction _ _) = _
-  simp [instruction, cfg, TM2.stepAux, update_input, update_output]
-  rfl
-
-theorem step_cons (mode : Mode) (bit : Bool) (input output : List Bool)
-    (register : Option Bool) :
-    machine.step (cfg (some ()) (bit :: input) output mode register) =
-      some (cfg (some ()) input output (nextMode mode bit)) := by
-  change some (TM2.stepAux instruction _ _) = _
-  simp [instruction, cfg, TM2.stepAux, update_input]
-  rfl
-
-/-- Exact execution on every word, including malformed, noncanonical, and
-trailing input. Rejection drains the entire input through a finite sink state. -/
-theorem runTrace (input output : List Bool) (mode : Mode) (register : Option Bool) :
-    (advance machine.step)^[input.length + 1]
-      (some (cfg (some ()) input output mode register)) =
-      some (cfg none [] (decide (run mode input = .done) :: output) .clause) := by
-  induction input generalizing mode register with
-  | nil =>
-      simpa only [List.length_nil, Nat.zero_add, Function.iterate_one,
-        advance_some, run] using! step_empty mode output register
-  | cons bit input ih =>
-      rw [List.length_cons, Function.iterate_succ_apply]
-      simp only [advance_some]
-      rw [step_cons]
-      exact ih (nextMode mode bit) none
-
-theorem initList_eq (input : List Bool) :
-    initList machine input = cfg (some ()) input [] .clause := by
-  unfold initList cfg
-  congr 1
-  funext k
-  cases k <;> rfl
-
-theorem haltList_eq (output : List Bool) :
-    haltList machine output = cfg none [] output .clause := by
-  unfold haltList cfg
-  congr 1
-  funext k
-  cases k <;> rfl
-
-/-- A total raw-bit validator with the exact same answer as the binary codec. -/
-theorem validatorTrace (input : List Bool) :
-    (advance machine.step)^[input.length + 1]
-      (some (initList machine input)) =
-      some (haltList machine [(BinaryEncoding.decodeFormula input).isSome]) := by
-  rw [initList_eq, haltList_eq]
-  have h := runTrace input [] .clause none
-  change (advance machine.step)^[input.length + 1]
-    (some (cfg (some ()) input [] .clause)) =
-    some (cfg none [] [accepts input] .clause) at h
-  rw [accepts_eq_decode] at h
-  exact h
-
-def outputsInTime (input : List Bool) :
-    TM2OutputsInTime machine input (some [(BinaryEncoding.decodeFormula input).isSome])
-      (input.length + 1) where
-  steps := input.length + 1
-  evals_in_steps := validatorTrace input
-  steps_le_m := Nat.le_refl _
-
-/-- The polynomial certificate supplies the explicit machine above. There is
-no assumed parser, verifier, or runtime hypothesis. -/
-noncomputable def computableInPolyTime :
-    TM2ComputableInPolyTime (id : List Bool → List Bool) (id : List Bool → List Bool)
-      (fun input => [(BinaryEncoding.decodeFormula input).isSome]) where
-  tm := machine
-  inputAlphabet := Equiv.refl Bool
-  outputAlphabet := Equiv.refl Bool
-  time := Polynomial.X + 1
-  outputsFun input := by
-    change TM2OutputsInTime machine (input.map id)
-      (some ([(BinaryEncoding.decodeFormula input).isSome].map id))
-      ((Polynomial.X + 1 : Polynomial Nat).eval input.length)
-    simpa only [List.map_id_fun, id_eq, Polynomial.eval_add,
-      Polynomial.eval_X, Polynomial.eval_one] using outputsInTime input
-
-theorem machine_finiteAlphabet (k : machine.K) : Finite (machine.Γ k) := by
-  change Finite Bool
-  infer_instance
 
 end UniqueGamesTheorem.BinaryValidatorMachine
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
@@ -139,15 +140,6 @@ section Difference
 
 variable {P R B : Type*} [AddCommGroup P] [AddCommGroup B]
 
-/-- The output difference at a fixed perturbation is invariant under logical
-shifts. This is the conditioning input for the exact nonlinear noise law. -/
-theorem output_difference_shift
-    (C : P → B) (e : R → P) (lam : R → B)
-    (hC : ∀ u h, C (u + e h) = C u + lam h) (u a : P) (h : R) :
-    C (u + e h + a) - C (u + e h) = C (u + a) - C u := by
-  have hreorder : u + e h + a = (u + a) + e h := by abel
-  rw [hreorder, hC, hC]
-  abel
 
 end Difference
 
@@ -209,17 +201,6 @@ theorem expect_linear_surjective (f : P →ₗ[k] B) (hf : Function.Surjective f
   intro u h
   exact f.map_add u h
 
-/-- Fixed-perturbation conditional uniformity without a range conversion. -/
-theorem expect_uniform_difference_embedded (e : R →ₗ[k] P) (lam : R →ₗ[k] B)
-    (hlam : Function.Surjective lam) (C : P → B)
-    (hC : ∀ u h, C (u + e h) = C u + lam h) (a : P) (f : B → B → M) :
-    (𝔼 u, f (C u) (C (u + a) - C u)) =
-      𝔼 u, 𝔼 b : B, f b (C (u + a) - C u) := by
-  apply expect_uniform_output_embedded e lam hlam C hC
-  intro u h
-  have he : u + e h + a = (u + a) + e h := by
-    simp only [add_assoc, add_comm (e h) a]
-  rw [he, hC, hC, add_sub_add_right_eq_sub]
 
 end UniqueGamesTheorem.Gadget.EmbeddedConditional
 
@@ -463,34 +444,11 @@ theorem pullback_ne_top_iff {F B K : Type*} [Field F] [AddCommGroup B]
     [Module F B] [FiniteDimensional F B] [AddCommGroup K] [Module F K]
     (L : B →ₗ[F] K) (S : Submodule F (Module.Dual F K)) :
     S.map L.dualMap ≠ ⊤ ↔ ∃ b : B, b ≠ 0 ∧ L b ∈ S.dualCoannihilator := by
-  let W := S.map L.dualMap
-  have hann : W.dualCoannihilator = S.dualCoannihilator.comap L := by
-    ext b
-    simp only [Submodule.mem_dualCoannihilator, Submodule.mem_comap]
-    constructor
-    · intro h z hz
-      exact h (z.comp L) ⟨z, hz, rfl⟩
-    · intro h z ⟨w, hw, hwz⟩
-      subst z
-      exact h w hw
-  constructor
-  · intro hW
-    have hn : W.dualCoannihilator ≠ ⊥ := by
-      intro hz
-      have hh := Subspace.dualCoannihilator_dualAnnihilator_eq (W := W)
-      rw [hz, Submodule.dualAnnihilator_bot] at hh
-      exact hW hh.symm
-    obtain ⟨b, hb, hb0⟩ := (Submodule.ne_bot_iff _).1 hn
-    exact ⟨b, hb0, by simpa [hann] using hb⟩
-  · rintro ⟨b, hb0, hb⟩ htop
-    have hz : b ∈ W.dualCoannihilator := by simpa [hann] using hb
-    change b ∈ (S.map L.dualMap).dualCoannihilator at hz
-    rw [htop] at hz
-    have hall : ∀ z : Module.Dual F B, z b = 0 := by
-      simpa only [Submodule.mem_dualCoannihilator, Submodule.mem_top,
-        forall_true_left] using hz
-    obtain ⟨z, hz'⟩ := Module.Projective.exists_dual_ne_zero F hb0
-    exact hz' (hall z)
+  have htop : S.map L.dualMap = ⊤ ↔ (S.map L.dualMap).dualCoannihilator = ⊥ := by
+    nth_rw 1 [← Subspace.dualCoannihilator_dualAnnihilator_eq (W := S.map L.dualMap)]
+    rw [Submodule.dualAnnihilator_eq_top_iff]
+  rw [ne_eq, htop, ← ne_eq, Submodule.ne_bot_iff]
+  simp [Submodule.mem_dualCoannihilator, Submodule.mem_map, and_comm]
 
 /-- The nonzero part of a codimension-`r` subspace has density at most `2⁻ʳ`
 among all nonzero ambient vectors. The dimensions are written additively to
@@ -897,24 +855,6 @@ theorem arbitrary_expected_drop_le (r : ℕ) (next : Ω → ℕ) (p : ℚ)
       rfl
     _ ≤ harmonic r * p := mul_le_mul_of_nonneg_left hloss (harmonic_nonneg _)
 
-/-- Averaging a conditional rank-loss estimate uses only a bound on the bad
-space's probability, even when the selected lift depends on that space. -/
-theorem expected_drop_le_four_theta [Nonempty Ω]
-    (drop : Ω → ℚ) (bad : Ω → Prop) [DecidablePred bad] (C θ ε : ℚ)
-    (hC : 0 ≤ C) (hθ : 0 ≤ θ)
-    (hconditional : ∀ ω, drop ω ≤ 3 * θ + C * θ * if bad ω then 1 else 0)
-    (hbad : probability bad ≤ ε) (hsmall : C * ε ≤ 1) :
-    average drop ≤ 4 * θ := by
-  have haverage : average drop ≤ 3 * θ + C * θ * probability bad := by
-    calc
-      average drop ≤ average (fun ω => 3 * θ + C * θ * if bad ω then 1 else 0) :=
-        average_mono hconditional
-      _ = 3 * θ + C * θ * probability bad := by
-        rw [average_add, average_const, average_mul_left]
-        rfl
-  have hbad' := mul_le_mul_of_nonneg_left hbad (mul_nonneg hC hθ)
-  have hsmall' := mul_le_mul_of_nonneg_right hsmall hθ
-  nlinarith
 
 def badRankCoefficient (r₀ : ℕ) : ℚ := harmonic r₀ * 2 ^ r₀
 
@@ -931,28 +871,6 @@ theorem depth_budget (r₀ : ℕ) (θ : ℚ) (hθ : 0 < θ) :
   change (depth r₀ θ : ℚ) * (8 * θ) ≤ harmonic r₀ at hb
   nlinarith
 
-/-- Expected harmonic losses telescope. The ranks may be arbitrary functions
-of the full path; this assertion introduces no independence premise. -/
-theorem expected_total_drop_le [Nonempty Ω] (rank : ℕ → Ω → ℕ)
-    (r₀ s : ℕ) (θ : ℚ) (hinitial : ∀ ω, rank 0 ω = r₀)
-    (hstep : ∀ j < s,
-      average (fun ω => harmonic (rank j ω) - harmonic (rank (j + 1) ω)) ≤ 4 * θ) :
-    harmonic r₀ - average (fun ω => harmonic (rank s ω)) ≤ 4 * s * θ := by
-  have haux : ∀ n, n ≤ s →
-      harmonic r₀ - average (fun ω => harmonic (rank n ω)) ≤ 4 * n * θ := by
-    intro n
-    induction n with
-    | zero =>
-      intro _
-      simp only [hinitial, average_const, Nat.cast_zero, mul_zero, zero_mul, sub_self, le_refl]
-    | succ n ih =>
-      intro hn
-      have hprev := ih (by omega)
-      have hnext := hstep n (by omega)
-      rw [average_sub] at hnext
-      push_cast
-      linarith
-  exact haux s le_rfl
 
 /-- The potential-to-survival step needs only the final finite experiment,
 allowing earlier levels to have different path sample spaces. -/
@@ -977,69 +895,6 @@ theorem survival_probability_ge_half_of_potential (rank : Ω → ℕ) (r₀ : �
   have hpos := harmonic_pos hr₀
   nlinarith
 
-/-- At depth `s` with `4sθ ≤ H(r₀)/2`, at least half the paths have nonzero
-terminal rank. The terminal bound follows from rank monotonicity in the actual
-gadget, and is kept explicit here. -/
-theorem survival_probability_ge_half [Nonempty Ω] (rank : ℕ → Ω → ℕ)
-    (r₀ s : ℕ) (θ : ℚ) (hr₀ : 0 < r₀)
-    (hinitial : ∀ ω, rank 0 ω = r₀)
-    (hterminal : ∀ ω, rank s ω ≤ r₀)
-    (hstep : ∀ j < s,
-      average (fun ω => harmonic (rank j ω) - harmonic (rank (j + 1) ω)) ≤ 4 * θ)
-    (hdepth : 4 * s * θ ≤ harmonic r₀ / 2) :
-    (1 / 2 : ℚ) ≤ probability (fun ω => 0 < rank s ω) := by
-  have htotal := expected_total_drop_le rank r₀ s θ hinitial hstep
-  apply survival_probability_ge_half_of_potential (rank s) r₀ hr₀ hterminal
-  linarith
-
-/-- Direct assembly of the adaptive calculation. `conditionalDrop` is the
-conditional mean after fixing the history; `hmean` is the finite averaging
-identity. The only assertion about bad orientations is their probability
-bound, so a future lift is allowed to depend on the incoming orientation. -/
-theorem survival_of_adaptive_step_law [Nonempty Ω]
-    (rank : ℕ → Ω → ℕ) (bad : ℕ → Ω → Prop)
-    [∀ j, DecidablePred (bad j)] (conditionalDrop : ℕ → Ω → ℚ)
-    (r₀ : ℕ) (θ ε : ℚ) (hr₀ : 0 < r₀) (hθ : 0 < θ)
-    (hinitial : ∀ ω, rank 0 ω = r₀)
-    (hterminal : ∀ ω, rank (depth r₀ θ) ω ≤ r₀)
-    (hmean : ∀ j < depth r₀ θ,
-      average (fun ω => harmonic (rank j ω) - harmonic (rank (j + 1) ω)) =
-        average (conditionalDrop j))
-    (hconditional : ∀ j < depth r₀ θ, ∀ ω,
-      conditionalDrop j ω ≤ 3 * θ + badRankCoefficient r₀ * θ *
-        if bad j ω then 1 else 0)
-    (hbad : ∀ j < depth r₀ θ, probability (bad j) ≤ ε)
-    (hsmall : badRankCoefficient r₀ * ε ≤ 1) :
-    (1 / 2 : ℚ) ≤ probability (fun ω => 0 < rank (depth r₀ θ) ω) := by
-  apply survival_probability_ge_half rank r₀ (depth r₀ θ) θ hr₀ hinitial hterminal
-  · intro j hj
-    rw [hmean j hj]
-    exact expected_drop_le_four_theta (conditionalDrop j) (bad j)
-      (badRankCoefficient r₀) θ ε (badRankCoefficient_nonneg r₀)
-      (le_of_lt hθ) (hconditional j hj) (hbad j hj) hsmall
-  · exact depth_budget r₀ θ hθ
-
-/-- A final independent uniform symbol detects a surviving character with
-probability at least one half. Multiplying this conditional bound by the
-surviving-path probability gives the required quarter. -/
-theorem detection_probability_ge_quarter [Nonempty Ω]
-    (survives : Ω → Prop) [DecidablePred survives] (conditionalDetection : Ω → ℚ)
-    (hsurvival : (1 / 2 : ℚ) ≤ probability survives)
-    (hnonneg : ∀ ω, 0 ≤ conditionalDetection ω)
-    (hdetect : ∀ ω, survives ω → (1 / 2 : ℚ) ≤ conditionalDetection ω) :
-    (1 / 4 : ℚ) ≤ average conditionalDetection := by
-  have h : (1 / 2 : ℚ) * probability survives ≤ average conditionalDetection := by
-    calc
-      (1 / 2 : ℚ) * probability survives =
-          average (fun ω => (1 / 2 : ℚ) * if survives ω then 1 else 0) :=
-        (average_mul_left _ _).symm
-      _ ≤ average conditionalDetection := by
-        apply average_mono
-        intro ω
-        by_cases hs : survives ω
-        · simpa only [ite_eq_left hs, mul_one] using hdetect ω hs
-        · simpa only [ite_eq_right hs, mul_zero] using hnonneg ω
-  linarith
 
 /-- Uniform paths and a separately sampled uniform terminal symbol have the
 product law used in the leaf-noise experiment. -/
@@ -1051,33 +906,6 @@ theorem probability_product {Ξ : Type*} [Fintype Ξ]
     (Finset.expect_product (Finset.univ : Finset Ω) (Finset.univ : Finset Ξ)
       (fun z => if detects z then (1 : ℚ) else 0))
 
-theorem product_detection_probability_ge_quarter [Nonempty Ω]
-    {Ξ : Type*} [Fintype Ξ]
-    (survives : Ω → Prop) [DecidablePred survives]
-    (detects : Ω × Ξ → Prop) [DecidablePred detects]
-    (hsurvival : (1 / 2 : ℚ) ≤ probability survives)
-    (hdetect : ∀ ω, survives ω →
-      (1 / 2 : ℚ) ≤ probability (fun ξ => detects (ω, ξ))) :
-    (1 / 4 : ℚ) ≤ probability detects := by
-  rw [probability_product]
-  exact detection_probability_ge_quarter survives _ hsurvival
-    (fun ω => probability_nonneg _) hdetect
-
-/-- Terminal family detection with actual binary characters rather than an
-assumed conditional probability bound. A character can be selected separately
-on every surviving path. -/
-theorem binary_product_detection_probability_ge_quarter [Nonempty Ω]
-    {Ξ : Type*} [Fintype Ξ] [AddGroup Ξ]
-    (survives : Ω → Prop) [DecidablePred survives]
-    (detects : Ω × Ξ → Prop) [DecidablePred detects]
-    (hsurvival : (1 / 2 : ℚ) ≤ probability survives)
-    (hcharacter : ∀ ω, survives ω → ∃ χ : Ξ →+ ZMod 2, ∃ v : Ξ,
-      χ v ≠ 0 ∧ ∀ ξ, χ ξ ≠ 0 → detects (ω, ξ)) :
-    (1 / 4 : ℚ) ≤ probability detects := by
-  apply product_detection_probability_ge_quarter survives detects hsurvival
-  intro ω hω
-  obtain ⟨χ, v, hv, hcontains⟩ := hcharacter ω hω
-  exact binary_family_detection_ge_half (fun ξ => detects (ω, ξ)) χ v hv hcontains
 
 end UniqueGamesTheorem.Gadget.Harmonic
 

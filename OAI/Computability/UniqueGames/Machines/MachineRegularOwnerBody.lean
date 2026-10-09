@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRegularOwnerProgram
 
 namespace OAI
@@ -9,10 +10,6 @@ namespace UniqueGamesTheorem.Foundations.Complexity.MachineRegularOwnerBody
 open Turing MachineComposition PCP
 open PreprocessingCloudIndex PreprocessingRegularTables
 open MachineRegularTable PreprocessingRegularLoopWords
-
-private theorem joinTrace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 private theorem oneStep {A : Type} {f : A → Option A} {a b : A}
     (h : f a = some b) : (advance f)^[1] (some a) = some b := by
@@ -81,19 +78,6 @@ theorem working_update_global (data : Data) (fuel saved word : List Bool) :
       | inr e => simp [working, core, MachineRegularOriginalBody.frame]
   | inr i => simp [working, core]
 
-theorem working_update_output (data : Data) (fuel saved word : List Bool) :
-    Function.update (working data fuel saved) (core 8) word =
-      working { data with output := word } fuel saved := by
-  funext j
-  cases j with
-  | inl j => cases j with
-    | inl i => fin_cases i <;>
-        simp [working, core, MachineRegularOriginalBody.frame, MachineRegularMetadata.frame]
-    | inr j => cases j with
-      | inl e => cases e <;>
-          simp [working, core, MachineRegularOriginalBody.frame, MachineRegularMetadata.frame]
-      | inr e => simp [working, core, MachineRegularOriginalBody.frame]
-  | inr i => simp [working, core]
 
 /-- The local rank starts at the actual cloud size, copied from its physical tape. -/
 theorem copyCountTrace (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vertices)
@@ -351,7 +335,7 @@ theorem loopPrefixTrace (H : BaseTable) (t : GraphTables.Table) (v : Fin t.verti
         ((output ++ blocksPrefix (dummyBits H t v) n) ++ dummyBits H t v ⟨n, h⟩)
         (encodeWord (padding t v - (n + 1)))
       have bumpRun := oneStep bump
-      have all := joinTrace (joinTrace (joinTrace first guardRun) vertex) bumpRun
+      have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first guardRun) vertex) bumpRun
       simpa only [loopSteps, loopFrame, loopData, blocksPrefix_succ _ n h,
         List.append_assoc, Nat.add_assoc] using all
 
@@ -361,7 +345,7 @@ theorem preparationTrace (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vert
       (some (cfg H (some entry) (initialData t v output))) =
       some ⟨some .guard, readyState H,
         working (seededData t v output) (encodeWord (padding t v)) []⟩ :=
-  joinTrace (joinTrace (metadataTrace H t v output) (copyCountTrace H t v output))
+  UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (metadataTrace H t v output) (copyCountTrace H t v output))
     (copyFuelTrace H t v output)
 
 theorem cleanupFrame (data : Data) (fuel : List Bool) (d o : Nat) :
@@ -474,7 +458,7 @@ theorem loopTrace (H : BaseTable) (t : GraphTables.Table) (v : Fin t.vertices)
         loopFrame H t v output (padding t v)⟩ := by
     simpa only [loopFrame, Nat.sub_self] using
       oneStep (loopZeroStep H (loopData H t v output (padding t v)))
-  exact joinTrace first last
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first last
 
 /-- Actual complete owner execution, including the genuinely empty padding case.
 The bound is assembled from proven component bounds; its family term is not
@@ -492,7 +476,7 @@ noncomputable def ownerInTime (H : BaseTable) (t : GraphTables.Table)
         some ⟨some (.cleanup MachineRegularOwnerCleanup.entry), readyState H,
           working (seededData t v output) (encodeWord 0) []⟩ := by
       simpa only [hp] using oneStep (guardZeroStep H (seededData t v output))
-    have all := joinTrace (joinTrace prepared gate) (cleanupZeroTrace H t v output hp)
+    have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prepared gate) (cleanupZeroTrace H t v output hp)
     refine { steps := _, evals_in_steps := all, steps_le_m := ?_ }
     simp only [ownerTime, cleanupCost, ite_eq_left hp, Nat.add_zero, le_refl]
   · have gate : (advance (TM2.step (program H)))^[1]
@@ -501,8 +485,8 @@ noncomputable def ownerInTime (H : BaseTable) (t : GraphTables.Table)
         some ⟨some (.family .start), readyState H,
           working (seededData t v output) (encodeWord (padding t v)) []⟩ :=
       oneStep (guardPositiveStep H (seededData t v output) (padding t v) (Nat.pos_of_ne_zero hp))
-    have all := joinTrace
-      (joinTrace (joinTrace (joinTrace prepared gate) (familyTrace H t v output))
+    have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
+      (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prepared gate) (familyTrace H t v output))
         (loopTrace H t v output)) (cleanupLoopTrace H t v output)
     refine { steps := _, evals_in_steps := all, steps_le_m := ?_ }
     have hb : familySteps H t v output ≤

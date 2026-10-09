@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.PreprocessingRegularLoopWordsLemmas
 
 namespace OAI
@@ -53,10 +54,6 @@ theorem initList_eq (bits : List Bool) :
   change Tape at k
   cases k <;> rfl
 
-private theorem trace_trans {α : Type*} (f : α → α) {a b : ℕ} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 /-- The two actual header-field readers reach the prepared counter boundary. -/
 theorem readCountersTrace (n m : ℕ) (clauseBits : List Bool) :
     (MachineComposition.advance (TM2.step program))^[n + m + 4]
@@ -87,7 +84,7 @@ theorem readCountersTrace (n m : ℕ) (clauseBits : List Bool) :
     funext k
     cases k <;> simp [SourceMachine.fieldTapes, firstTapes, counterTapes]
   rw [secondFrame] at second
-  have total := trace_trans _ first second
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
   rw [show (n + 2) + (m + 2) = n + m + 4 by omega] at total
   simpa only [initList_eq, t0, initialState] using! total
 
@@ -128,8 +125,7 @@ theorem startTrace (n m : ℕ) (clauseBits : List Bool) :
     (MachineComposition.advance (TM2.step program))^[3 * n + 5 * m + 13]
       (some (initList machine (encodeWords [n, m] ++ clauseBits))) =
       some ⟨some .guard, initialState, startTapes n m clauseBits⟩ := by
-  have total := trace_trans _
-    (trace_trans _ (readCountersTrace n m clauseBits) (headersTrace n m clauseBits))
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (readCountersTrace n m clauseBits) (headersTrace n m clauseBits))
     (initializeIndexTrace n m clauseBits)
   simpa only [show (n + m + 4) + (2 * n + 4 * m + 8) + 1 =
     3 * n + 5 * m + 13 by omega] using total
@@ -145,24 +141,6 @@ theorem formulaStartTrace (F : Target.Formula) :
   simpa only [formulaBits, formulaWords, encodeWords_append] using
     startTrace F.variables F.clauses.length (encodeWords (F.clauses.flatMap clauseWords))
 
-def startInTime (n m : ℕ) (clauseBits : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      (initList machine (encodeWords [n, m] ++ clauseBits))
-      (some ⟨some .guard, initialState, startTapes n m clauseBits⟩)
-      (3 * n + 5 * m + 13) where
-  steps := 3 * n + 5 * m + 13
-  evals_in_steps := startTrace n m clauseBits
-  steps_le_m := Nat.le_refl _
-
-def formulaStartInTime (F : Target.Formula) :
-    StateTransition.EvalsToInTime (TM2.step program) (initList machine (formulaBits F))
-      (some ⟨some .guard, initialState,
-        startTapes F.variables F.clauses.length
-          (encodeWords (F.clauses.flatMap clauseWords))⟩)
-      (3 * F.variables + 5 * F.clauses.length + 13) where
-  steps := 3 * F.variables + 5 * F.clauses.length + 13
-  evals_in_steps := formulaStartTrace F
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineStart
 

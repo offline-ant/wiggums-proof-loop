@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryEqualityBit
 import OAI.Computability.UniqueGames.Machines.PoweringMachineEqualityField
@@ -53,13 +54,6 @@ def globalTapeEquiv (max : Nat) : GlobalTape max ≃ Fin (4 + (11 + max + 1)) :=
 def enumeration (max : Nat) : Fin (4 + (11 + max + 1)) ≃ GlobalTape max :=
   (globalTapeEquiv max).symm
 
-@[simp] theorem globalTapeEquiv_enumeration (max : Nat) (i : Fin (4 + (11 + max + 1))) :
-    globalTapeEquiv max (enumeration max i) = i :=
-  (globalTapeEquiv max).apply_symm_apply i
-
-@[simp] theorem enumeration_globalTapeEquiv (max : Nat) (tape : GlobalTape max) :
-    enumeration max (globalTapeEquiv max tape) = tape :=
-  (globalTapeEquiv max).symm_apply_apply tape
 
 @[simp] theorem source_index (max : Nat) :
     (globalTapeEquiv max (.inl .source)).val = 0 := rfl
@@ -73,34 +67,10 @@ def enumeration (max : Nat) : Fin (4 + (11 + max + 1)) ≃ GlobalTape max :=
 @[simp] theorem darts_index (max : Nat) :
     (globalTapeEquiv max (.inl .darts)).val = 3 := rfl
 
-theorem sharedRole_index (max : Nat) (i : Fin 11) :
-    (globalTapeEquiv max (.inr (.inl (.inl i)))).val = 4 + i.val := rfl
-
-theorem trajectory_index (max : Nat) (i : Fin max) :
-    (globalTapeEquiv max (.inr (.inl (.inr i)))).val = 4 + (11 + i.val) := rfl
 
 @[simp] theorem finalOutput_index (max : Nat) :
     (globalTapeEquiv max (finalOutput max)).val = 4 + (11 + max) := rfl
 
-/-- The exact cardinality follows from the explicit executable bijection. -/
-theorem card_globalTape (max : Nat) :
-    Fintype.card (GlobalTape max) = 4 + (11 + max + 1) := by
-  simpa only [Fintype.card_fin] using Fintype.card_congr (globalTapeEquiv max)
-
-theorem natCard_globalTape (max : Nat) :
-    Nat.card (GlobalTape max) = 4 + (11 + max + 1) := by
-  simpa only [Nat.card_fin] using Nat.card_congr (globalTapeEquiv max)
-
-/-- A fixed finite list of all tape names is available without ambient search. -/
-def allTapes (max : Nat) : List (GlobalTape max) := List.ofFn (enumeration max)
-
-theorem allTapes_length (max : Nat) : (allTapes max).length = 4 + (11 + max + 1) := by
-  simpa only [allTapes] using (List.length_ofFn (f := enumeration max))
-
-theorem mem_allTapes (max : Nat) (tape : GlobalTape max) : tape ∈ allTapes max := by
-  change tape ∈ List.ofFn (enumeration max)
-  apply List.mem_ofFn.mpr
-  exact ⟨globalTapeEquiv max tape, enumeration_globalTapeEquiv max tape⟩
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringGlobalEnumeration
 

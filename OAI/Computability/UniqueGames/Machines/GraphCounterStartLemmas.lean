@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.DeriveFintype
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.GraphCounterFinish
@@ -380,50 +381,34 @@ theorem stageTapes_frame (m : Nat) (base : K → List Bool) (r : Nat)
     · exact ih
 
 include distinct in
-theorem stageTapes_current (m : Nat) (base : K → List Bool) (r : Nat) (j : Fin k) :
-    stageTapes tape m base r (tape (.current j)) =
-      if j.val < r then encodeWord 0 else base (tape (.current j)) := by
+/-- One invariant describes both digit banks and the unchanged shared tapes. -/
+theorem stageTapes_spec (m : Nat) (base : K → List Bool) (r : Nat) (q : Tape k) :
+    stageTapes tape m base r (tape q) =
+      match q with
+      | .current j => if j.val < r then encodeWord 0 else base (tape q)
+      | .remaining j => if j.val < r then encodeWord (m-1) else base (tape q)
+      | _ => base (tape q) := by
   induction r with
-  | zero => simp [stageTapes]
+  | zero => cases q <;> simp [stageTapes]
   | succ r ih =>
-    simp only [stageTapes]
-    split
-    next hr =>
-      by_cases hj : j = (⟨r,hr⟩ : Fin k)
-      · subst j; simp [digitOutput,distinct.eq_iff]
-      · rw [digitOutput_frame _ _ _ _ _
-          (distinct.ne (by simpa using hj)) (distinct.ne (by simp)),ih]
-        have hval : j.val ≠ r := by intro h; apply hj; exact Fin.ext h
-        have he : j.val < r+1 ↔ j.val < r := by omega
-        simp only [he]
-    next hr =>
-      rw [ih]
-      have hjr : j.val < r := by omega
-      have hjr' : j.val < r+1 := by omega
-      simp only [hjr,hjr',ite_true]
-
-include distinct in
-theorem stageTapes_remaining (m : Nat) (base : K → List Bool) (r : Nat) (j : Fin k) :
-    stageTapes tape m base r (tape (.remaining j)) =
-      if j.val < r then encodeWord (m-1) else base (tape (.remaining j)) := by
-  induction r with
-  | zero => simp [stageTapes]
-  | succ r ih =>
-    simp only [stageTapes]
-    split
-    next hr =>
-      by_cases hj : j = (⟨r,hr⟩ : Fin k)
-      · subst j; simp [digitOutput]
-      · rw [digitOutput_frame _ _ _ _ _
-          (distinct.ne (by simp)) (distinct.ne (by simpa using hj)),ih]
-        have hval : j.val ≠ r := by intro h; apply hj; exact Fin.ext h
-        have he : j.val < r+1 ↔ j.val < r := by omega
-        simp only [he]
-    next hr =>
-      rw [ih]
-      have hjr : j.val < r := by omega
-      have hjr' : j.val < r+1 := by omega
-      simp only [hjr,hjr',ite_true]
+      rw [stageTapes]
+      split
+      next hr =>
+        cases q with
+        | radix => simp [digitOutput, distinct.eq_iff, ih]
+        | scratch => simp [digitOutput, distinct.eq_iff, ih]
+        | current j | remaining j =>
+          by_cases hj : j.val = r
+          · have he : j = ⟨r, hr⟩ := Fin.ext hj
+            subst j
+            simp [digitOutput, distinct.eq_iff]
+          · have hne : j ≠ ⟨r, hr⟩ := fun h => hj (congrArg Fin.val h)
+            have hlt : j.val < r + 1 ↔ j.val < r := by omega
+            simp [digitOutput, distinct.eq_iff, hne, ih, hlt]
+      next hr =>
+        rw [ih]
+        cases q <;> simp_all only
+        all_goals split <;> split <;> (first | rfl | omega)
 
 /-- Place the actual finite initialization prefix inside an ambient program. -/
 def prefixInTime (m : Nat) (hm : 0 < m) (base : K → List Bool)
@@ -442,12 +427,10 @@ def prefixInTime (m : Nat) (hm : 0 < m) (base : K → List Bool)
     let j : Fin k := ⟨r,hrk⟩
     let before := stageTapes tape m base r
     have one := digitInTime tape distinct labels exit program atProgram j m hm before
-      (by dsimp only [before]; rw [stageTapes_frame tape _ _ _ _
-          (fun _ => distinct.ne (by simp)) (fun _ => distinct.ne (by simp))]; exact hradix)
-      (by simp [before,stageTapes_current tape distinct,j,hcurrent])
-      (by simp [before,stageTapes_remaining tape distinct,j,hremaining])
-      (by dsimp only [before]; rw [stageTapes_frame tape _ _ _ _
-          (fun _ => distinct.ne (by simp)) (fun _ => distinct.ne (by simp))]; exact hscratch)
+      (by simpa only [before, stageTapes_spec tape distinct] using hradix)
+      (by simp [before, stageTapes_spec tape distinct, j, hcurrent])
+      (by simp [before, stageTapes_spec tape distinct, j, hremaining])
+      (by simpa only [before, stageTapes_spec tape distinct] using hscratch)
       ambient
     have one' : StateTransition.EvalsToInTime (TM2.step program)
         ⟨some (labelAt labels r),(ambient,none),before⟩
@@ -485,26 +468,13 @@ def initializeInTime (m : Nat) (hm : 0 < m) (base : K → List Bool)
 include distinct in
 theorem output_current (m : Nat) (base : K → List Bool) (j : Fin k) :
     stageTapes tape m base k (tape (.current j)) = encodeWord 0 := by
-  rw [stageTapes_current tape distinct]
-  exact ite_eq_left j.isLt
+  simp only [stageTapes_spec tape distinct, j.isLt, ite_true]
 
 include distinct in
 theorem output_remaining (m : Nat) (base : K → List Bool) (j : Fin k) :
     stageTapes tape m base k (tape (.remaining j)) = encodeWord (m-1) := by
-  rw [stageTapes_remaining tape distinct]
-  exact ite_eq_left j.isLt
+  simp only [stageTapes_spec tape distinct, j.isLt, ite_true]
 
-include distinct in
-theorem output_radix (m : Nat) (base : K → List Bool) :
-    stageTapes tape m base k (tape .radix) = base (tape .radix) :=
-  stageTapes_frame tape m base k _
-    (fun _ => distinct.ne (by simp)) (fun _ => distinct.ne (by simp))
-
-include distinct in
-theorem output_scratch (m : Nat) (base : K → List Bool) :
-    stageTapes tape m base k (tape .scratch) = base (tape .scratch) :=
-  stageTapes_frame tape m base k _
-    (fun _ => distinct.ne (by simp)) (fun _ => distinct.ne (by simp))
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineOdometerInit
 
@@ -571,111 +541,6 @@ theorem registerEmitTrace (source destination scratch : K)
   rw [emitStep destination offset emitLabel exit program atEmit]
   simp only [Function.update_self, Function.update_idem]
   rw [← List.append_assoc, prefix_encodeWord]
-
-/-- Timed witness retaining the exact `2*n+5`-transition execution. -/
-def registerEmitInTime (source destination scratch : K)
-    (sourceDestination : source ≠ destination) (sourceScratch : source ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (offset : Nat)
-    (firstLabel secondLabel emitLabel : Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atFirst : program firstLabel =
-      Reduction.MachineTransfer.loopAt source scratch id false firstLabel (some secondLabel))
-    (atSecond : program secondLabel =
-      MachineCopy.forkLoop scratch source destination false secondLabel (some emitLabel))
-    (atEmit : program emitLabel = emitStatement destination offset exit)
-    (base : K → List Bool) (n : Nat) (sourceWord : base source = encodeWord n)
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some firstLabel, (ambient, register), base⟩
-      (some ⟨exit, (ambient, none),
-        Function.update base destination (encodeWord (offset + n) ++ base destination)⟩)
-      (2 * n + 5) where
-  steps := 2 * n + 5
-  evals_in_steps := registerEmitTrace source destination scratch sourceDestination sourceScratch
-    destinationScratch offset firstLabel secondLabel emitLabel exit program atFirst atSecond
-    atEmit base n sourceWord scratchEmpty ambient register
-  steps_le_m := Nat.le_refl _
-
-/-- The three labels are transfer, restore-and-copy, and fixed-offset emission. -/
-def program (source destination scratch : K) (offset : Nat) (exit : Option (Fin 3)) :
-    Fin 3 → TM2.Stmt (Alphabet (K := K)) (Fin 3) (σ × Option Bool) :=
-  fun label => if label = 0 then
-    Reduction.MachineTransfer.loopAt source scratch id false 0 (some 1)
-  else if label = 1 then
-    MachineCopy.forkLoop scratch source destination false 1 (some 2)
-  else emitStatement destination offset exit
-
-def programInTime (source destination scratch : K)
-    (sourceDestination : source ≠ destination) (sourceScratch : source ≠ scratch)
-    (destinationScratch : destination ≠ scratch) (offset : Nat) (exit : Option (Fin 3))
-    (base : K → List Bool) (n : Nat) (sourceWord : base source = encodeWord n)
-    (scratchEmpty : base scratch = []) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program source destination scratch offset exit))
-      ⟨some 0, (ambient, register), base⟩
-      (some ⟨exit, (ambient, none),
-        Function.update base destination (encodeWord (offset + n) ++ base destination)⟩)
-      (2 * n + 5) :=
-  registerEmitInTime source destination scratch sourceDestination sourceScratch
-    destinationScratch offset 0 1 2 exit (program source destination scratch offset exit)
-    (by simp [program]) (by simp [program]) (by simp [program])
-    base n sourceWord scratchEmpty ambient register
-
-/-- Three Boolean stacks, three labels, and one optional Boolean register. -/
-def machine (offset : Nat) : FinTM2 where
-  K := Fin 3
-  k₀ := 0
-  k₁ := 1
-  Γ _ := Bool
-  Λ := Fin 3
-  main := 0
-  σ := Unit × Option Bool
-  initialState := ((), none)
-  m := program 0 1 2 offset none
-
-def machineInTime (offset : Nat) (base : Fin 3 → List Bool) (n : Nat)
-    (sourceWord : base 0 = encodeWord n) (scratchEmpty : base 2 = [])
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine offset).step
-      ⟨some (0 : Fin 3), ((), register), base⟩
-      (some ⟨none, ((), none),
-        Function.update base (1 : Fin 3) (encodeWord (offset + n) ++ base 1)⟩)
-      (2 * n + 5) :=
-  programInTime (0 : Fin 3) 1 2 (by decide) (by decide) (by decide)
-    offset none base n sourceWord scratchEmpty () register
-
-omit [DecidableEq K] in
-theorem emitStatement_pushes (destination : K) (offset : Nat) (exit : Option Λ) :
-    Runtime.statementPushBound (emitStatement (σ := σ) destination offset exit) = offset := by
-  cases exit <;> simp [emitStatement, statementPushBound_pushWord, finish,
-    Runtime.statementPushBound]
-
-omit [DecidableEq K] in
-theorem program_pushes_le (source destination scratch : K) (offset : Nat)
-    (exit : Option (Fin 3)) (label : Fin 3) :
-    Runtime.statementPushBound
-      (program (σ := σ) source destination scratch offset exit label) ≤ max 2 offset := by
-  unfold program
-  split
-  · simp [Reduction.MachineTransfer.loopAt, Reduction.MachineTransfer.exitAt,
-      Runtime.statementPushBound]
-  · split
-    · simp [MachineCopy.forkLoop, Reduction.MachineTransfer.exitAt,
-        Runtime.statementPushBound]
-    · simpa only [emitStatement_pushes] using (Nat.le_max_right 2 offset)
-
-/-- The fixed offset is included in the finite program's push bound. -/
-theorem machine_pushes_le (offset : Nat) :
-    Runtime.programPushBound (machine offset) ≤ max 2 offset := by
-  have h : ∀ labels : List (Fin 3),
-      Runtime.maxLabelPushes (machine offset).m labels ≤ max 2 offset := by
-    intro labels
-    change Runtime.maxLabelPushes (program (σ := Unit) (0 : Fin 3) 1 2 offset none)
-      labels ≤ max 2 offset
-    induction labels with
-    | nil => exact Nat.zero_le _
-    | cons label labels ih =>
-      exact max_le (program_pushes_le (σ := Unit) (0 : Fin 3) 1 2 offset none label) ih
-  exact h _
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegisterEmit
 
@@ -810,17 +675,8 @@ theorem firstStep (first second : FinTM2)
           (MachineEmbedding.statement (some (bridgeLabel first second false)) (first.m label)))
         ((firstStates first second) (state, (second.initialState, none)))
         (MachineEmbedding.tapes tapes (fun _ => []))) = _
-      have controlled := MachineControl.stepAux_simulation id (firstStates first second)
-        (MachineEmbedding.statement
-          (Δ := MachineEmbedding.Alphabet second.Γ (fun _ : Unit => second.Γ second.k₀))
-          (some (bridgeLabel first second false)) (first.m label))
-        (state, (second.initialState, none)) (MachineEmbedding.tapes tapes (fun _ => []))
-      have embedded := MachineEmbedding.stepAux_simulation
-        (Δ := MachineEmbedding.Alphabet second.Γ (fun _ : Unit => second.Γ second.k₀))
-        (some (bridgeLabel first second false)) (second.initialState, (none : Register second))
-        (fun _ => []) (first.m label) state tapes
-      exact congrArg some (controlled.trans
-        (congrArg (MachineControl.configuration id (firstStates first second)) embedded))
+      erw [MachineControl.stepAux_simulation, MachineEmbedding.stepAux_simulation]
+      rfl
 
 theorem secondStep (first second : FinTM2)
     (relabel : first.Γ first.k₁ → second.Γ second.k₀)

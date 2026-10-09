@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.GenericGraphTables
 import OAI.Computability.UniqueGames.PCP.QueriesLemmas
@@ -34,20 +35,6 @@ def rows (input : GenericGraphTables.Table q) :
   Vector.ofFn (fun index =>
     rowFromDart input ((Enumeration.dartEquiv input.darts q).symm index))
 
-@[simp] theorem rows_at (input : GenericGraphTables.Table q)
-    (index : Fin (Enumeration.dartCount input.darts q)) :
-    (rows input)[index] =
-      rowFromDart input ((Enumeration.dartEquiv input.darts q).symm index) := by
-  simp [rows]
-
-/-- Reversal changes only the occurrence's orientation, preserving event and slot. -/
-theorem rows_reverseIndex (input : GenericGraphTables.Table q)
-    (index : Fin (Enumeration.dartCount input.darts q)) :
-    (rows input)[index].reverseIndex =
-      Enumeration.dartEquiv input.darts q
-        (((Enumeration.dartEquiv input.darts q).symm index).1,
-          !((Enumeration.dartEquiv input.darts q).symm index).2) := by
-  simp [rows, rowFromDart]
 
 private theorem dartRow_ext {n m : Nat} {left right : GraphTables.DartRow n m}
     (ht : left.tail = right.tail) (hr : left.reverseIndex = right.reverseIndex)
@@ -139,11 +126,6 @@ def build (input : GenericGraphTables.Table q) : GraphTables.Table where
 @[simp] theorem build_darts (input : GenericGraphTables.Table q) :
     (build input).darts = Enumeration.dartCount input.darts q := rfl
 
-private theorem table_rows_congr {n m : Nat} {left right : GraphTables.Rows n m}
-    (h : left = right) (hl : GraphTables.Valid left) (hr : GraphTables.Valid right) :
-    (⟨n, m, left, hl⟩ : GraphTables.Table) = ⟨n, m, right, hr⟩ := by
-  subst right
-  rfl
 
 private theorem semantics_rows_congr {n m : Nat} {left right : GraphTables.Rows n m}
     (h : left = right) (hl : GraphTables.Valid left) (hr : GraphTables.Valid right) :
@@ -152,14 +134,6 @@ private theorem semantics_rows_congr {n m : Nat} {left right : GraphTables.Rows 
   subst right
   rfl
 
-/-- Exact table equality in the explicit enumerations, without a representation choice. -/
-theorem build_eq_ofEnumeratedGraph (input : GenericGraphTables.Table q) :
-    build input =
-      GraphTables.ofEnumeratedGraph (AlphabetGraph.graph (GenericGraphTables.semantics input))
-        (Enumeration.vertexEquiv input.vertices input.darts q)
-        (Enumeration.dartEquiv input.darts q) Enumeration.labelEquiv := by
-  exact table_rows_congr (rows_eq_graphRows input) (rows_valid input)
-    (GraphTables.graphRows_valid _)
 
 /-- Full decoded graph equality, including reversal, endpoints, and every predicate bit. -/
 theorem semantics_build (input : GenericGraphTables.Table q) :
@@ -170,14 +144,6 @@ theorem semantics_build (input : GenericGraphTables.Table q) :
   exact (semantics_rows_congr (rows_eq_graphRows input) (rows_valid input)
     (GraphTables.graphRows_valid _)).trans (GraphTables.semantics_ofGraph _)
 
-/-- Encoding and decoding the executable output recovers the full intended table. -/
-theorem decode_build (input : GenericGraphTables.Table q) :
-    GraphTables.decodeTableBits (GraphTables.tableBits (build input)) =
-      some (GraphTables.ofEnumeratedGraph
-        (AlphabetGraph.graph (GenericGraphTables.semantics input))
-        (Enumeration.vertexEquiv input.vertices input.darts q)
-        (Enumeration.dartEquiv input.darts q) Enumeration.labelEquiv) := by
-  rw [GraphTables.decodeTableBits_encoded, build_eq_ofEnumeratedGraph]
 
 theorem edgeSatisfied_build (input : GenericGraphTables.Table q)
     (labeling : QueryIncidence.Vertex (AlphabetGraph.Event (Fin input.darts) (Fin q))
@@ -217,30 +183,6 @@ theorem perfect_completeness [Nonempty (Fin q)] (input : GenericGraphTables.Tabl
   rw [index_eq] at h
   exact h.trans (accepted _)
 
-/-- The gap statement transfers to every labeling of the actual numbered table. -/
-theorem gap_transfer [Nonempty (Fin q)] (input : GenericGraphTables.Table q) (a b : Nat)
-    (source : ∀ labeling : Fin input.vertices → Fin q,
-      a * input.darts ≤ b * (GenericGraphTables.semantics input).rejectionCount labeling)
-    (labeling : Fin (build input).vertices → GraphTables.Label) :
-    a * (build input).darts ≤
-      (b * 12288) * (GraphTables.semantics (build input)).rejectionCount labeling := by
-  classical
-  let lifted := fun vertex => Enumeration.labelEquiv.symm
-    (labeling (Enumeration.vertexEquiv input.vertices input.darts q vertex))
-  have h := AlphabetGraph.gap_transfer (GenericGraphTables.semantics input) a b
-    (by simpa only [Fintype.card_fin] using source) lifted
-  rw [Enumeration.card_dart] at h
-  have counts := rejectionCount_build input lifted
-  have restored : (fun v : Fin (build input).vertices => Enumeration.labelEquiv
-      (lifted ((Enumeration.vertexEquiv input.vertices input.darts q).symm v))) = labeling := by
-    funext v
-    dsimp only [lifted]
-    rw [Enumeration.labelEquiv.apply_symm_apply]
-    exact congrArg labeling
-      ((Enumeration.vertexEquiv input.vertices input.darts q).apply_symm_apply v)
-  rw [restored] at counts
-  rw [← counts] at h
-  exact h
 
 /-- The serialized row list follows the same explicit occurrence order as the vector. -/
 theorem rowList_eq_ordered (input : GenericGraphTables.Table q) :
@@ -262,22 +204,6 @@ theorem tableWords_eq_ordered (input : GenericGraphTables.Table q) :
   simp only [GraphTables.tableWords, rowList_eq_ordered, build_vertices, build_darts,
     List.flatMap_map]
 
-@[simp] theorem rowList_length (input : GenericGraphTables.Table q) :
-    (GraphTables.rowList (build input)).length = Enumeration.dartCount input.darts q := by
-  exact GraphTables.rowList_length (build input)
-
-theorem tableWords_length (input : GenericGraphTables.Table q) :
-    (GraphTables.tableWords (build input)).length =
-      2 + 4098 * Enumeration.dartCount input.darts q := by
-  exact GraphTables.tableWords_length (build input)
-
-theorem tableBits_length_le (input : GenericGraphTables.Table q) :
-    (GraphTables.tableBits (build input)).length ≤
-      Enumeration.vertexCount input.vertices input.darts q +
-        Enumeration.dartCount input.darts q + 2 + Enumeration.dartCount input.darts q *
-          (Enumeration.vertexCount input.vertices input.darts q +
-            Enumeration.dartCount input.darts q + 8192) := by
-  exact GraphTables.tableBits_length_le (build input)
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Table
 

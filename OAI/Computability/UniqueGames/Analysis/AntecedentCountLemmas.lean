@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Basic.Real.Basic
 import Mathlib.LinearAlgebra.Dual.Lemmas
@@ -51,16 +52,6 @@ compression is fixed. -/
 abbrev Admissible (P : Submodule F2 W) (Q : Submodule F2 V) :=
   {X : W →ₗ[F2] V // Disjoint X.range Q ∧ P ⊔ X.ker = ⊤}
 
-/-- Reindex the actual maps by their actual compressed frequency. -/
-def compressionEquiv (P : Submodule F2 W) (Q : Submodule F2 V) :
-    Admissible P Q ≃ Σ Y : P →ₗ[F2] (V ⧸ Q), Antecedent P Q Y where
-  toFun X := ⟨compress X.val Q P, ⟨X.val, rfl, X.property⟩⟩
-  invFun X := ⟨X.2.val, X.2.property.2⟩
-  left_inv X := rfl
-  right_inv X := by
-    rcases X with ⟨Y, ⟨X, hXY, hd, hk⟩⟩
-    cases hXY
-    rfl
 
 /-- Choosing a codomain complement only changes the coordinates of the fixed
 compressed output. -/
@@ -95,14 +86,6 @@ def subspaceEquiv (P : Submodule F2 W) (Q D : Submodule F2 V)
 
 variable [FiniteDimensional F2 W] [FiniteDimensional F2 V]
 
-omit [FiniteDimensional F2 V] in
-/-- Every admissible antecedent has the rank of its fixed compression. -/
-theorem rank_eq (P : Submodule F2 W) (Q : Submodule F2 V)
-    (Y : P →ₗ[F2] (V ⧸ Q)) (X : Antecedent P Q Y) :
-    Module.finrank F2 X.val.range = Module.finrank F2 Y.range := by
-  have h := compress_rank_preserved X.val Q P X.property.2.1.symm X.property.2.2
-  rw [X.property.1] at h
-  exact h.symm
 
 /-- Exact number of antecedents of a fixed quotient compression. The graph
 and omitted-domain parameters have `rank Y * (dim Q + codim P)` bits. -/
@@ -134,28 +117,6 @@ theorem card_antecedent_le (P : Submodule F2 W) (Q : Submodule F2 V)
       Nat.mul_le_mul hY (Nat.add_le_add hQ hP)
     _ = 2 * d * k := by ring
 
-/-- Exact finite-sum reindexing by compressed maps, with the true fiber
-multiplicity. This holds for signed weights as well as nonnegative energies. -/
-theorem sum_compression [Fintype (W →ₗ[F2] V)]
-    (P : Submodule F2 W) (Q : Submodule F2 V)
-    [Fintype (P →ₗ[F2] (V ⧸ Q))]
-    {R : Type*} [Semiring R] (weight : (P →ₗ[F2] (V ⧸ Q)) → R) :
-    (∑ X : Admissible P Q, weight (compress X.val Q P)) =
-      ∑ Y : P →ₗ[F2] (V ⧸ Q),
-        (2 : R) ^ (Module.finrank F2 Y.range *
-          (Module.finrank F2 Q + Module.finrank F2 (W ⧸ P))) * weight Y := by
-  classical
-  calc
-    (∑ X : Admissible P Q, weight (compress X.val Q P)) =
-        ∑ X : Σ Y : P →ₗ[F2] (V ⧸ Q), Antecedent P Q Y, weight X.1 :=
-      Fintype.sum_equiv (compressionEquiv P Q) _ _ (fun _ => rfl)
-    _ = _ := by
-      rw [Fintype.sum_sigma]
-      apply Finset.sum_congr rfl
-      intro Y _
-      simp only [Finset.sum_const, Finset.card_univ, nsmul_eq_mul]
-      rw [← Nat.card_eq_fintype_card, card_antecedent]
-      simp only [Nat.cast_pow, Nat.cast_ofNat]
 
 end
 

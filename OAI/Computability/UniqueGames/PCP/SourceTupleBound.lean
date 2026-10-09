@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.SourceAddressArithmeticLemmas
 import OAI.Computability.UniqueGames.PCP.SourceTupleBody
 
@@ -179,10 +180,6 @@ theorem bodyBudget_le (F : Target.Formula) (c : ClauseContext F u) :
   unfold bodyBudget
   omega
 
-theorem fixed_parameters_body_bound (u D : Nat) :
-    ∃ p : Polynomial Nat, ∀ (F : Target.Formula) (c : ClauseContext F u),
-      bodyBudget (D := D) F c ≤ p.eval (formulaBits F).length :=
-  ⟨bodyPolynomial u D, fun F c => bodyBudget_le F c⟩
 
 /-- The actual body execution with the same fixed polynomial for every tuple. -/
 theorem bodyInPolynomialTime {Extra : Type} [DecidableEq Extra]

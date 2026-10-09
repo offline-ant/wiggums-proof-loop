@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineProductFieldLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAddAt
 import OAI.Computability.UniqueGames.PCP.SourceAddressArithmeticLemmas
@@ -171,17 +172,9 @@ inductive Kind
   | left | right | occurrences
   deriving DecidableEq
 
-protected abbrev Kind.enumList : List Kind := [.left, .right, .occurrences]
-
-protected theorem Kind.enumList_getElem?_ctorIdx_eq (x : Kind) :
-    Kind.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Kind.enumList_nodup : Kind.enumList.Nodup := by decide
-
 instance : Fintype Kind where
-  elems := ⟨Kind.enumList, Kind.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.left, .right, .occurrences}
+  complete x := by cases x <;> simp
 
 def polynomial (u D : Nat) : Kind → Polynomial Nat
   | .left => Polynomial.C (2 ^ (2 ^ u)) * Polynomial.X ^ u
@@ -218,18 +211,10 @@ inductive Control
   | bitCount | occurrenceCount | accA | accB | counter | scratch
   deriving DecidableEq
 
-protected abbrev Control.enumList : List Control := [.variableCount, .clauseCount, .leftBlockSize,
-  .rightTemporary, .dummyIndex, .bitCount, .occurrenceCount, .accA, .accB, .counter, .scratch]
-
-protected theorem Control.enumList_getElem?_ctorIdx_eq (x : Control) :
-    Control.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Control.enumList_nodup : Control.enumList.Nodup := by decide
-
 instance : Fintype Control where
-  elems := ⟨Control.enumList, Control.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.variableCount, .clauseCount, .leftBlockSize,
+  .rightTemporary, .dummyIndex, .bitCount, .occurrenceCount, .accA, .accB, .counter, .scratch}
+  complete x := by cases x <;> simp
 
 abbrev Coefficients (u D : Nat) :=
   Fin (CookLevin.PolynomialMachine.width (polynomial u D .left)) ⊕
@@ -260,21 +245,8 @@ def controlSlots (kind : Kind) : Fin 6 ↪ Control where
     cases kind <;> fin_cases i <;> fin_cases j <;> cases h <;> rfl
 
 def localSlots (u D : Nat) (kind : Kind) :
-    MachineHorner.Layout (CookLevin.PolynomialMachine.width (polynomial u D kind)) ↪ Layout u D where
-  toFun
-    | .inl i => .inl (controlSlots kind i)
-    | .inr i => .inr (coefficientBlock u D kind i)
-  inj' := by
-    intro a b h
-    cases a with
-    | inl a =>
-      cases b with
-      | inl b => exact congrArg Sum.inl ((controlSlots kind).injective (Sum.inl.inj h))
-      | inr b => cases h
-    | inr a =>
-      cases b with
-      | inl b => cases h
-      | inr b => exact congrArg Sum.inr ((coefficientBlock u D kind).injective (Sum.inr.inj h))
+    MachineHorner.Layout (CookLevin.PolynomialMachine.width (polynomial u D kind)) ↪ Layout u D :=
+  (controlSlots kind).sumMap (coefficientBlock u D kind)
 
 variable {u D : Nat} {K Λ σ : Type}
 
@@ -405,10 +377,6 @@ theorem evalPhaseTrace (slots : Layout u D ↪ K) (labels : Label u D → Λ) (e
   simpa only [evalStart, MachineHorner.resultTapes, evalSlots_destination,
     hdest, List.append_nil] using h
 
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 /-- The actual header program preserves its two operands and every caller frame.
 The four retained outputs are left-block size, dummy index, bit count, and
 occurrence count. The temporary and all coefficient/work tapes are restored. -/
@@ -496,8 +464,7 @@ theorem trace (slots : Layout u D ↪ K) (labels : Label u D → Λ) (exit : Opt
     rw [atLabels]
     cases exit <;> simp [statement, TM2.stepAux, Reduction.MachineTransfer.exitAt,
       t7, bitValue, encodeWord, List.replicate_succ]
-  have total := trace_trans _ (trace_trans _ (trace_trans _ (trace_trans _
-    (trace_trans _ (trace_trans _ (trace_trans _ h1 h2) h3) copyingLeft) adding) clearing)
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2) h3) copyingLeft) adding) clearing)
       copyingDummy) increment
   have htime :
       Eval.steps (polynomial u D .left) n + Eval.steps (polynomial u D .right) m +
@@ -559,71 +526,14 @@ def inTime (slots : Layout u D ↪ K) (labels : Label u D → Λ) (exit : Option
   evals_in_steps := trace slots labels exit program atLabels base n m hn hm clean ambient register
   steps_le_m := Nat.le_refl _
 
-def inPolynomialTime (slots : Layout u D ↪ K) (labels : Label u D → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
-    (atLabels : ∀ l, program (labels l) = statement slots labels exit l)
-    (base : K → List Bool) (n m L : Nat)
-    (hn : base (control slots .variableCount) = encodeWord n)
-    (hm : base (control slots .clauseCount) = encodeWord m)
-    (clean : Clean slots base) (hnL : n ≤ L) (hmL : m ≤ L)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (evalStart .left)), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base n m⟩)
-      ((timePolynomial u D).eval L) where
-  steps := steps u D n m
-  evals_in_steps := trace slots labels exit program atLabels base n m hn hm clean ambient register
-  steps_le_m := steps_le_timePolynomial u D n m L hnL hmL
 
-/-- Formula headers supply the operand bounds for the actual transition count. -/
-def formulaInTime (slots : Layout u D ↪ K) (labels : Label u D → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
-    (atLabels : ∀ l, program (labels l) = statement slots labels exit l)
-    (base : K → List Bool) (F : Target.Formula)
-    (hn : base (control slots .variableCount) = encodeWord F.variables)
-    (hm : base (control slots .clauseCount) = encodeWord F.clauses.length)
-    (clean : Clean slots base) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (evalStart .left)), ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base F.variables F.clauses.length⟩)
-      ((timePolynomial u D).eval (formulaBits F).length) :=
-  inPolynomialTime slots labels exit program atLabels base F.variables F.clauses.length
-    (formulaBits F).length hn hm clean (SourceBounds.formulaBits_length_ge_variables F)
-    (SourceBounds.formulaBits_length_ge_clauses F) ambient register
-
-theorem result_frame (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) (k : K)
-    (hl : k ≠ control slots .leftBlockSize) (ho : k ≠ control slots .occurrenceCount)
-    (hd : k ≠ control slots .dummyIndex) (hb : k ≠ control slots .bitCount) :
-    resultTapes slots base n m k = base k := by
-  simp [resultTapes, hl, ho, hd, hb]
-
-@[simp] theorem result_left (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (control slots .leftBlockSize) = encodeWord (leftValue u n) := by
-  simp [resultTapes]
 @[simp] theorem result_occurrences (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
     resultTapes slots base n m (control slots .occurrenceCount) = encodeWord (occurrenceValue u D m) := by
-  simp [resultTapes]
-@[simp] theorem result_dummy (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (control slots .dummyIndex) = encodeWord (dummyValue u n m) := by
   simp [resultTapes]
 @[simp] theorem result_bits (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
     resultTapes slots base n m (control slots .bitCount) = encodeWord (bitValue u n m) := by
   simp [resultTapes]
-@[simp] theorem result_variableCount (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (control slots .variableCount) = base (control slots .variableCount) := by
-  simp [resultTapes]
-@[simp] theorem result_clauseCount (slots : Layout u D ↪ K) (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (control slots .clauseCount) = base (control slots .clauseCount) := by
-  simp [resultTapes]
 
-theorem result_source_headers (slots : Layout u D ↪ K) (base : K → List Bool)
-    (F : Target.Formula) (hm : 0 < F.clauses.length) :
-    resultTapes slots base F.variables F.clauses.length (control slots .bitCount) =
-      encodeWord (SourceOccurrences.nBits F u) ∧
-    resultTapes slots base F.variables F.clauses.length (control slots .occurrenceCount) =
-      encodeWord (SourceOccurrences.sourceList F u D).length := by
-  simp only [result_bits, result_occurrences, bitValue_eq_nBits,
-    occurrenceValue_eq_length F u D hm, and_self]
 
 def program (slots : Layout u D ↪ K) : Label u D →
     TM2.Stmt (fun _ : K => Bool) (Label u D) (MachineHorner.State σ) :=
@@ -641,31 +551,6 @@ def machine (u D : Nat) : FinTM2 where
   initialState := (((), ()), none)
   m := program (Function.Embedding.refl _)
 
-/-- Consume the preserved header registers established by `SourceLoopInit`.
-The caller supplies the static placement and empty work registers. -/
-def afterInitializationInTime {Extra : Type} [DecidableEq Extra]
-    (slots : Layout u D ↪ SourceLoopInit.Tape u Extra)
-    (hnslot : control slots .variableCount = SourceLoopInit.variableHeader)
-    (hmslot : control slots .clauseCount = SourceLoopInit.clauseHeader)
-    (labels : Label u D → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : SourceLoopInit.Tape u Extra => Bool) Λ
-      (MachineHorner.State σ))
-    (atLabels : ∀ l, program (labels l) = statement slots labels exit l)
-    (base : SourceLoopInit.Tape u Extra → List Bool) (F : Target.Formula)
-    (hn : base SourceLoopInit.variableHeader = [])
-    (hm : base SourceLoopInit.clauseHeader = [])
-    (clean : Clean slots (SourceLoopInit.outputTapes F base))
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels (evalStart .left)), ((ambient, ()), register),
-        SourceLoopInit.outputTapes F base⟩
-      (some ⟨exit, ((ambient, ()), none),
-        resultTapes slots (SourceLoopInit.outputTapes F base) F.variables F.clauses.length⟩)
-      ((timePolynomial u D).eval (formulaBits F).length) :=
-  formulaInTime slots labels exit program atLabels (SourceLoopInit.outputTapes F base) F
-    (by rw [hnslot, SourceLoopInit.output_variableHeader, hn, List.append_nil])
-    (by rw [hmslot, SourceLoopInit.output_clauseHeader, hm, List.append_nil])
-    clean ambient register
 
 end
 

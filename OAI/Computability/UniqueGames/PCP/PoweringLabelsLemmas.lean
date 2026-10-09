@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Data.Fin.Tuple.Basic
@@ -50,37 +51,17 @@ instance finiteBall [Finite D] (G : PortGraph V D) (t : Nat) (v : V) :
     Finite (Ball G t v) :=
   Finite.of_surjective (wordToBall G t v) (wordToBall_surjective G t v)
 
-theorem card_portWords [Finite D] (t : Nat) :
-    Nat.card (PortWords D t) = ∑ n : Fin (t + 1), Nat.card D ^ n.val := by
-  simp [PortWords, Nat.card_sigma, Nat.card_fun]
-
-theorem card_ball_le [Finite D] (G : PortGraph V D) (t : Nat) (v : V) :
-    Nat.card (Ball G t v) ≤ ∑ n : Fin (t + 1), Nat.card D ^ n.val := by
-  calc
-    _ ≤ Nat.card (PortWords D t) := Nat.card_le_card_of_surjective
-      (wordToBall G t v) (wordToBall_surjective G t v)
-    _ = _ := card_portWords t
 
 structure AddressSelector (G : PortGraph V D) (t : Nat) (v : V) where
   address : Ball G t v → PortWords D t
   correct : ∀ u, wordToBall G t v (address u) = u
 
-noncomputable def classicalSelector (G : PortGraph V D) (t : Nat) (v : V) :
-    AddressSelector G t v where
-  address u := Classical.choose (wordToBall_surjective G t v u)
-  correct u := Classical.choose_spec (wordToBall_surjective G t v u)
 
 /-- Executable first-match search, with a proof that a match is present. -/
-def scanWitness {A : Type*} (p : A → Prop) [DecidablePred p] :
-    (xs : List A) → (∃ a ∈ xs, p a) → {a // p a}
-  | [], h => False.elim (by simp at h)
-  | a :: xs, h =>
-    if ha : p a then ⟨a, ha⟩ else
-      scanWitness p xs (by
-        obtain ⟨b, hb, hp⟩ := h
-        rcases List.mem_cons.mp hb with he | hm
-        · exact False.elim (ha (he ▸ hp))
-        · exact ⟨b, hm, hp⟩)
+def scanWitness {A : Type*} (p : A → Prop) [DecidablePred p]
+    (xs : List A) (h : ∃ a ∈ xs, p a) : {a // p a} :=
+  ⟨xs[xs.findIdx (fun a => decide (p a))]'(List.findIdx_lt_length_of_exists (by simpa using h)),
+    of_decide_eq_true (List.findIdx_getElem (p := fun a => decide (p a)))⟩
 
 /-- A concrete complete address list supplies a computational selector. Its
 length depends on the degree and radius, not on the ambient vertex count. -/
@@ -110,9 +91,6 @@ theorem decode_encode {G : PortGraph V D} {t : Nat} {v : V}
   change ℓ (wordToBall G t v (S.address u)) = ℓ u
   rw [S.correct]
 
-theorem decode_surjective {G : PortGraph V D} {t : Nat} {v : V}
-    (S : AddressSelector G t v) : Function.Surjective (decode (A := A) S) :=
-  fun ℓ => ⟨encode G t v ℓ, decode_encode S ℓ⟩
 
 theorem encode_injective (G : PortGraph V D) (t : Nat) (v : V) :
     Function.Injective (encode (A := A) G t v) := by
@@ -121,16 +99,6 @@ theorem encode_injective (G : PortGraph V D) (t : Nat) (v : V) :
   obtain ⟨w, rfl⟩ := wordToBall_surjective G t v u
   exact congrFun h w
 
-theorem decoded_word_collision {G : PortGraph V D} {t : Nat} {v : V}
-    (S : AddressSelector G t v) (a : PaddedLabel D t A) (w z : PortWords D t)
-    (h : (wordToBall G t v w).val = (wordToBall G t v z).val) :
-    decode S a (wordToBall G t v w) = decode S a (wordToBall G t v z) :=
-  congrArg (decode S a) (Subtype.ext h)
-
-theorem card_paddedLabel [Finite D] [Finite A] (t : Nat) :
-    Nat.card (PaddedLabel D t A) =
-      Nat.card A ^ (∑ n : Fin (t + 1), Nat.card D ^ n.val) := by
-  rw [Nat.card_fun, card_portWords]
 
 end UniqueGamesTheorem.Foundations.PCP.PoweringLabels
 
@@ -188,22 +156,6 @@ theorem mem_allAddresses (d t : Nat) (w : PortWords (Fin d) t) :
   refine ⟨n, List.mem_finRange n, ?_⟩
   exact List.mem_map.mpr ⟨p, mem_allWords d n.val p, rfl⟩
 
-theorem length_allWords (d : Nat) :
-    ∀ n, (allWords d n).length = d ^ n := by
-  intro n
-  induction n with
-  | zero => rfl
-  | succ n ih =>
-    simp only [allWords, List.length_flatMap, List.length_map, ih,
-      List.map_const', List.length_finRange, List.sum_replicate_nat]
-    exact (Nat.mul_comm d (d ^ n)).trans (Nat.pow_succ d n).symm
-
-/-- The selector's search-list bound depends only on degree and radius. -/
-theorem length_allAddresses (d t : Nat) :
-    (allAddresses d t).length = ∑ n : Fin (t + 1), d ^ n.val := by
-  unfold allAddresses
-  simp only [List.length_flatMap, List.length_map, length_allWords]
-  exact (Fin.sum_univ_def (fun n : Fin (t + 1) => d ^ n.val)).symm
 
 /-- A fully executable selector from the explicit bounded address list. -/
 def finitePortSelector {d : Nat} [DecidableEq V] (G : PortGraph V (Fin d))
@@ -269,9 +221,6 @@ theorem mode_mass_lower (opinion : Ω → A) :
       _ = mass opinion (mode opinion) * (Fintype.card A : ℝ) := by simp [mul_comm]
   exact (div_le_iff₀ hk).2 hsum
 
-theorem exists_letter_mass_lower (opinion : Ω → A) :
-    ∃ a : A, 1 / (Fintype.card A : ℝ) ≤ mass opinion a :=
-  ⟨mode opinion, mode_mass_lower opinion⟩
 
 end UniqueGamesTheorem.Foundations.PCP.PoweringDecoding
 
@@ -297,33 +246,17 @@ open scoped BigOperators
 /-- The number of words with length at most `t`, including the empty word. -/
 def addressCount (d t : Nat) : Nat := ∑ i : Fin (t + 1), d ^ i.val
 
-/-- Reverse the digit positions before using the little-endian arithmetic
-encoding from mathlib. Both directions are the same executable operation. -/
-def reverseWordEquiv (d n : Nat) : (Fin n → Fin d) ≃ (Fin n → Fin d) where
-  toFun p i := p i.rev
-  invFun p i := p i.rev
-  left_inv p := by funext i; simp only [Fin.rev_rev]
-  right_inv p := by funext i; simp only [Fin.rev_rev]
-
-/-- An executable bijection from fixed-length port words to their ranks. -/
+/-- Reverse digit positions for a head-major rank using mathlib's
+little-endian arithmetic encoding. -/
 def wordEquiv (d n : Nat) : (Fin n → Fin d) ≃ Fin (d ^ n) :=
-  (reverseWordEquiv d n).trans finFunctionFinEquiv
+  (Fin.revPerm.arrowCongr (Equiv.refl (Fin d))).trans finFunctionFinEquiv
 
-theorem wordEquiv_val (d n : Nat) (p : Fin n → Fin d) :
-    (wordEquiv d n p).val = ∑ i : Fin n, (p i.rev).val * d ^ i.val := rfl
 
 /-- Arithmetic prefix sums give a rank for every bounded-length address. -/
 def addressEquiv (d t : Nat) : PortWords (Fin d) t ≃ Fin (addressCount d t) :=
   (Equiv.sigmaCongrRight (fun i : Fin (t + 1) => wordEquiv d i.val)).trans
     finSigmaFinEquiv
 
-theorem addressEquiv_val (d t : Nat) (w : PortWords (Fin d) t) :
-    (addressEquiv d t w).val =
-      (∑ i : Fin w.1.val, d ^ i.val) + (wordEquiv d w.1.val w.2).val := by
-  change (finSigmaFinEquiv
-    (⟨w.1, wordEquiv d w.1.val w.2⟩ : (i : Fin (t + 1)) × Fin (d ^ i.val))).val = _
-  rw [finSigmaFinEquiv_apply]
-  rfl
 
 /-- A padded label is a base-`q` integer whose digits are indexed by the
 explicit bounded-address equivalence. -/
@@ -332,10 +265,6 @@ def paddedLabelEquiv (d t q : Nat) :
   ((addressEquiv d t).arrowCongr (Equiv.refl (Fin q))).trans
     (wordEquiv q (addressCount d t))
 
-theorem paddedLabelEquiv_val (d t q : Nat) (a : PaddedLabel (Fin d) t (Fin q)) :
-    (paddedLabelEquiv d t q a).val =
-      ∑ i : Fin (addressCount d t),
-        (a ((addressEquiv d t).symm i.rev)).val * q ^ i.val := rfl
 
 /-- False and true are the adjacent orientation digits zero and one. -/
 def orientationEquiv : Bool ≃ Fin 2 := finTwoEquiv.symm
@@ -355,20 +284,11 @@ theorem dartBlockEquiv_val (d n : Nat) (p : Fin (n + 1) → Fin d) (b : Bool) :
   change (orientationEquiv b).val + 2 * (wordEquiv d (n + 1) p).val = _
   exact Nat.add_comm _ _
 
-/-- The tuple permutation putting the vertex before its word and orientation. -/
-def dartVertexEquiv (vertices d n : Nat) :
-    (Bool × (Fin vertices × (Fin (n + 1) → Fin d))) ≃
-      (Fin vertices × ((Fin (n + 1) → Fin d) × Bool)) where
-  toFun x := (x.2.1, (x.2.2, x.1))
-  invFun x := (x.2.2, (x.1, x.2.1))
-  left_inv x := by rcases x with ⟨b, v, p⟩; rfl
-  right_inv x := by rcases x with ⟨v, p, b⟩; rfl
-
 /-- Executable vertex-major dart numbering, with adjacent orientations. -/
 def dartEquiv (vertices d n : Nat) :
     (Bool × (Fin vertices × (Fin (n + 1) → Fin d))) ≃
       Fin (2 * vertices * d ^ (n + 1)) :=
-  (dartVertexEquiv vertices d n).trans
+  ((Equiv.prodComm _ _).trans (Equiv.prodAssoc _ _ _)).trans
     (((Equiv.refl (Fin vertices)).prodCongr (dartBlockEquiv d n)).trans
       (finProdFinEquiv.trans
         (finCongr (show vertices * (2 * d ^ (n + 1)) =
@@ -383,34 +303,14 @@ theorem dartEquiv_val (vertices d n : Nat) (b : Bool) (v : Fin vertices)
   rw [dartBlockEquiv_val]
   omega
 
-/-- The true orientation immediately follows the false orientation. -/
-theorem dartEquiv_true_eq_false_add_one (vertices d n : Nat) (v : Fin vertices)
-    (p : Fin (n + 1) → Fin d) :
-    (dartEquiv vertices d n (true, (v, p))).val =
-      (dartEquiv vertices d n (false, (v, p))).val + 1 := by
-  rw [dartEquiv_val, dartEquiv_val, orientationEquiv_true, orientationEquiv_false]
-  rfl
 
 def encodeWord (d n : Nat) : (Fin n → Fin d) → Fin (d ^ n) := wordEquiv d n
 def decodeWord (d n : Nat) : Fin (d ^ n) → (Fin n → Fin d) := (wordEquiv d n).symm
 
-@[simp] theorem decodeWord_encodeWord (d n : Nat) (p : Fin n → Fin d) :
-    decodeWord d n (encodeWord d n p) = p := (wordEquiv d n).symm_apply_apply p
-
-@[simp] theorem encodeWord_decodeWord (d n : Nat) (i : Fin (d ^ n)) :
-    encodeWord d n (decodeWord d n i) = i := (wordEquiv d n).apply_symm_apply i
 
 def encodeAddress (d t : Nat) : PortWords (Fin d) t → Fin (addressCount d t) :=
   addressEquiv d t
 
-def decodeAddress (d t : Nat) : Fin (addressCount d t) → PortWords (Fin d) t :=
-  (addressEquiv d t).symm
-
-@[simp] theorem decodeAddress_encodeAddress (d t : Nat) (w : PortWords (Fin d) t) :
-    decodeAddress d t (encodeAddress d t w) = w := (addressEquiv d t).symm_apply_apply w
-
-@[simp] theorem encodeAddress_decodeAddress (d t : Nat) (i : Fin (addressCount d t)) :
-    encodeAddress d t (decodeAddress d t i) = i := (addressEquiv d t).apply_symm_apply i
 
 def encodeLabel (d t q : Nat) :
     PaddedLabel (Fin d) t (Fin q) → Fin (q ^ addressCount d t) := paddedLabelEquiv d t q
@@ -419,8 +319,6 @@ def decodeLabel (d t q : Nat) :
     Fin (q ^ addressCount d t) → PaddedLabel (Fin d) t (Fin q) :=
   (paddedLabelEquiv d t q).symm
 
-@[simp] theorem decodeLabel_encodeLabel (d t q : Nat) (a : PaddedLabel (Fin d) t (Fin q)) :
-    decodeLabel d t q (encodeLabel d t q a) = a := (paddedLabelEquiv d t q).symm_apply_apply a
 
 @[simp] theorem encodeLabel_decodeLabel (d t q : Nat) (i : Fin (q ^ addressCount d t)) :
     encodeLabel d t q (decodeLabel d t q i) = i := (paddedLabelEquiv d t q).apply_symm_apply i
@@ -447,25 +345,6 @@ def decodeDart (vertices d n : Nat) :
     encodeDart vertices d n (decodeDart vertices d n i) = i :=
   (dartEquiv vertices d n).apply_symm_apply i
 
-theorem card_words (d n : Nat) : Nat.card (Fin n → Fin d) = d ^ n := by
-  simpa only [Nat.card_fin] using Nat.card_congr (wordEquiv d n)
-
-theorem card_addresses (d t : Nat) :
-    Nat.card (PortWords (Fin d) t) = addressCount d t := by
-  simpa only [Nat.card_fin] using Nat.card_congr (addressEquiv d t)
-
-theorem card_labels (d t q : Nat) :
-    Nat.card (PaddedLabel (Fin d) t (Fin q)) = q ^ addressCount d t := by
-  simpa only [Nat.card_fin] using Nat.card_congr (paddedLabelEquiv d t q)
-
-theorem card_darts (vertices d n : Nat) :
-    Nat.card (Bool × (Fin vertices × (Fin (n + 1) → Fin d))) =
-      2 * vertices * d ^ (n + 1) := by
-  simpa only [Nat.card_fin] using Nat.card_congr (dartEquiv vertices d n)
-
-theorem length_allAddresses (d t : Nat) :
-    (PoweringAddresses.allAddresses d t).length = addressCount d t :=
-  PoweringAddresses.length_allAddresses d t
 
 end UniqueGamesTheorem.Foundations.PCP.PoweringEnumeration
 
@@ -506,28 +385,6 @@ theorem reach_prepend (G : PortGraph V D) {t : Nat} (u : V) (d : D) {v : V}
     (fun i : Fin (l + 1) => Fin.cases d p i), ?_⟩
   simpa only [wordEnd, Fin.cases_zero, Fin.cases_succ] using hp
 
-/-- Reversal records each arrival port, not the original outgoing port. -/
-def reversePorts (G : PortGraph V D) : V → List D → List D
-  | _, [] => []
-  | v, d :: ds => reversePorts G (next G v d) ds ++ [(G.rot (v, d)).2]
-
-theorem reversePorts_length (G : PortGraph V D) (v : V) (ds : List D) :
-    (reversePorts G v ds).length = ds.length := by
-  induction ds generalizing v with
-  | nil => rfl
-  | cons d ds ih => simp [reversePorts, ih]
-
-theorem walkEnd_reversePorts (G : PortGraph V D) (v : V) (ds : List D) :
-    walkEnd G (walkEnd G v ds) (reversePorts G v ds) = v := by
-  induction ds generalizing v with
-  | nil => rfl
-  | cons d ds ih =>
-    change walkEnd G (walkEnd G (next G v d) ds)
-      (reversePorts G (next G v d) ds ++ [(G.rot (v, d)).2]) = v
-    rw [walkEnd_append, ih]
-    change (G.rot (G.rot (v, d))).1 = v
-    exact congrArg Prod.fst (G.rot_involutive (v, d))
-
 theorem wordEnd_eq_walkEnd_ofFn (G : PortGraph V D) :
     ∀ n v (p : Fin n → D), wordEnd G n v p = walkEnd G v (List.ofFn p) := by
   intro n
@@ -540,15 +397,20 @@ theorem wordEnd_eq_walkEnd_ofFn (G : PortGraph V D) :
 
 theorem reach_reverse {G : PortGraph V D} {t : Nat} {u v : V}
     (h : ReachLE G t u v) : ReachLE G t v u := by
-  obtain ⟨l, hl, p, hp⟩ := h
-  refine ⟨(reversePorts G u (List.ofFn p)).length, ?_,
-    (reversePorts G u (List.ofFn p)).get, ?_⟩
-  · simpa only [reversePorts_length, List.length_ofFn] using hl
-  · rw [wordEnd_eq_walkEnd_ofFn, List.ofFn_get]
-    have hlist : walkEnd G u (List.ofFn p) = v := by
-      rw [← wordEnd_eq_walkEnd_ofFn]
-      exact hp
-    rw [← hlist, walkEnd_reversePorts]
+  obtain ⟨l, hl, p, rfl⟩ := h
+  apply reach_mono hl
+  clear hl
+  induction l generalizing u with
+  | zero => exact reach_refl G 0 u
+  | succ l ih =>
+    have hend : wordEnd G (l + 1) u p =
+        next G (wordEnd G l u (Fin.init p)) (p (Fin.last l)) := by
+      rw [wordEnd_eq_walkEnd_ofFn, List.ofFn_succ', List.concat_eq_append,
+        walkEnd_append, ← wordEnd_eq_walkEnd_ofFn]
+      rfl
+    rw [hend]
+    apply reach_prepend G _ (G.rot (wordEnd G l u (Fin.init p), p (Fin.last l))).2
+    simpa only [next, Prod.mk.eta, rot_rot] using ih (u := u) (Fin.init p)
 
 /-- The actual prefix places each traversed edge's tail in the start ball. -/
 theorem tail_reach (G : PortGraph V D) :
@@ -828,34 +690,11 @@ theorem rejection_count_bound [Fintype E] [DecidableEq X]
   simpa [failed, verifierRejectionCount, ConstraintGraph.rejectionCount,
     Finset.card_product, Nat.mul_comm] using bound
 
-@[simp] theorem card_label (q : Nat) : Fintype.card (Label q) = 2 ^ q := by
-  simp [Label]
-
-@[simp] theorem card_vertex [Fintype E] [Fintype X] :
-    Fintype.card (Vertex E X) = Fintype.card E + Fintype.card X := by
-  simp [Vertex, Fintype.card_sum]
 
 @[simp] theorem card_dart [Fintype E] :
     Fintype.card (Dart E q) = 2 * q * Fintype.card E := by
   simp [Dart, Fintype.card_prod, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc]
 
-theorem gap_transfer [Fintype E] [DecidableEq X] (T : Verifier E X q)
-    (positive : 0 < q) (a b : Nat)
-    (sourceGap : ∀ assignment : X → Bool,
-      a * Fintype.card E ≤ b * verifierRejectionCount T assignment)
-    (labeling : Vertex E X → Label q) :
-    a * Fintype.card (Dart E q) ≤ (b * q) * (graph T positive).rejectionCount labeling := by
-  have source := Nat.mul_le_mul_left (2 * q) (sourceGap (decodedAssignment positive labeling))
-  have incidences := Nat.mul_le_mul_left (b * q) (rejection_count_bound T positive labeling)
-  rw [card_dart]
-  calc
-    a * (2 * q * Fintype.card E) = (2 * q) * (a * Fintype.card E) := by ac_rfl
-    _ ≤ (2 * q) * (b * verifierRejectionCount T (decodedAssignment positive labeling)) := source
-    _ = (b * q) * (2 * verifierRejectionCount T (decodedAssignment positive labeling)) := by ac_rfl
-    _ ≤ (b * q) * (graph T positive).rejectionCount labeling := incidences
-
-theorem six_query_alphabet : Fintype.card (Label 6) = 64 := by
-  simp
 
 end UniqueGamesTheorem.Foundations.PCP.QueryIncidence
 

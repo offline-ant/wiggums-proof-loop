@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
@@ -31,15 +32,6 @@ def reset (current remaining : K) (resetLabel carryLabel : Λ) :
     TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool) :=
   MachineUnaryAddAt.loop current remaining resetLabel (some carryLabel)
 
-omit [DecidableEq K] in
-theorem incrementPushBound (current remaining : K) (doneLabel resetLabel : Λ) :
-    Runtime.statementPushBound (increment (σ := σ) current remaining doneLabel resetLabel) =
-      1 := rfl
-
-omit [DecidableEq K] in
-theorem resetPushBound (current remaining : K) (resetLabel carryLabel : Λ) :
-    Runtime.statementPushBound (reset (σ := σ) current remaining resetLabel carryLabel) =
-      1 := rfl
 
 private theorem update_current (current remaining : K) (distinct : current ≠ remaining)
     (base : K → List Bool) (input output replacement : List Bool) :
@@ -141,75 +133,6 @@ theorem carryTrace (current remaining : K) (distinct : current ≠ remaining)
   simpa only [Nat.add_zero] using resetTrace current remaining distinct resetLabel carryLabel
     program atReset base d 0 currentSuffix remainingSuffix ambient none
 
-/-- The exact step count for one digit, including its possible reset. -/
-def digitSteps (d r : ℕ) : ℕ := if r = 0 then d + 2 else 1
-
-/-- The bounded digit operation follows actual transitions on both branches.
-It restores an exhausted digit to zero before returning the carry. -/
-theorem digitTrace (current remaining : K) (distinct : current ≠ remaining)
-    (checkLabel doneLabel resetLabel carryLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atCheck : program checkLabel = increment current remaining doneLabel resetLabel)
-    (atReset : program resetLabel = reset current remaining resetLabel carryLabel)
-    (base : K → List Bool) (d r : ℕ) (currentSuffix remainingSuffix : List Bool)
-    (ambient : σ) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step program))^[digitSteps d r]
-      (some ⟨some checkLabel, (ambient, register),
-        digitTapes current remaining base d r currentSuffix remainingSuffix⟩) =
-      some ⟨some (if r = 0 then carryLabel else doneLabel), (ambient, none),
-        digitTapes current remaining base (if r = 0 then 0 else d + 1)
-          (if r = 0 then d else r - 1) currentSuffix remainingSuffix⟩ := by
-  cases r with
-  | zero =>
-    simpa only [digitSteps, ↓reduceIte] using carryTrace current remaining distinct
-      checkLabel doneLabel resetLabel carryLabel program atCheck atReset base d
-      currentSuffix remainingSuffix ambient register
-  | succ r =>
-    simpa only [digitSteps, Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel,
-      Function.iterate_one, MachineComposition.advance_some] using
-        incrementStep_succ current remaining distinct checkLabel doneLabel resetLabel
-          program atCheck base d r currentSuffix remainingSuffix ambient register
-
-omit [DecidableEq K] in
-theorem digitSteps_le (n d r : ℕ) (hn : 0 < n) (budget : d + r = n - 1) :
-    digitSteps d r ≤ n + 1 := by
-  unfold digitSteps
-  split <;> omega
-
-omit [DecidableEq K] in
-theorem digitBudget (n d r : ℕ) (_hn : 0 < n) (budget : d + r = n - 1) :
-    (if r = 0 then 0 else d + 1) + (if r = 0 then d else r - 1) = n - 1 := by
-  by_cases hr : r = 0 <;> simp only [hr, ↓reduceIte] <;> omega
-
-/-- Every unrelated stack is preserved, including any separate stored radix
-or input bound. Both digit-stack suffixes are preserved by the trace itself. -/
-theorem digitFrame (current remaining other : K)
-    (notCurrent : other ≠ current) (notRemaining : other ≠ remaining)
-    (base : K → List Bool) (d r : ℕ) (currentSuffix remainingSuffix : List Bool) :
-    digitTapes current remaining base (if r = 0 then 0 else d + 1)
-      (if r = 0 then d else r - 1) currentSuffix remainingSuffix other =
-      digitTapes current remaining base d r currentSuffix remainingSuffix other := by
-  simp only [digitTapes, MachineUnaryAddAt.unaryTapes_other current remaining other
-    notCurrent notRemaining]
-
-/-- A composable actual-time witness for any well-formed positive-radix digit. -/
-def digitInTime (current remaining : K) (distinct : current ≠ remaining)
-    (checkLabel doneLabel resetLabel carryLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atCheck : program checkLabel = increment current remaining doneLabel resetLabel)
-    (atReset : program resetLabel = reset current remaining resetLabel carryLabel)
-    (base : K → List Bool) (n d r : ℕ) (hn : 0 < n) (budget : d + r = n - 1)
-    (currentSuffix remainingSuffix : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some checkLabel, (ambient, register),
-        digitTapes current remaining base d r currentSuffix remainingSuffix⟩
-      (some ⟨some (if r = 0 then carryLabel else doneLabel), (ambient, none),
-        digitTapes current remaining base (if r = 0 then 0 else d + 1)
-          (if r = 0 then d else r - 1) currentSuffix remainingSuffix⟩) (n + 1) where
-  steps := digitSteps d r
-  evals_in_steps := digitTrace current remaining distinct checkLabel doneLabel resetLabel
-    carryLabel program atCheck atReset base d r currentSuffix remainingSuffix ambient register
-  steps_le_m := digitSteps_le n d r hn budget
 
 section AscendingCycle
 
@@ -351,41 +274,6 @@ theorem tupleOrder_dimension_zero (n : ℕ) :
   funext i
   exact Fin.elim0 i
 
-/-- A positive-dimensional zero-radix loop has no tuples to visit. -/
-theorem tupleOrder_radix_zero {q : ℕ} (hq : 0 < q) : tupleOrder 0 q = [] := by
-  apply List.length_eq_zero_iff.mp
-  rw [tupleOrder_length, Nat.zero_pow hq]
-
-/-- Coordinate zero is the least significant digit. This is the same radix
-rank used by `SourceOccurrences.Encoding.function`. -/
-theorem tupleRank_cons {n q : ℕ} (d : Fin n) (tail : Fin q → Fin n) :
-    (finFunctionFinEquiv (Fin.cons d tail)).val =
-      d.val + n * (finFunctionFinEquiv tail).val := by
-  rw [finFunctionFinEquiv_apply, Fin.sum_univ_succ]
-  simp only [Fin.cons_zero, Fin.cons_succ, Fin.val_zero, Fin.val_succ, pow_zero, mul_one]
-  congr 1
-  rw [finFunctionFinEquiv_apply, Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro i _
-  simp [pow_succ, Nat.mul_comm, Nat.mul_left_comm]
-
-theorem tupleRank_increment_lowest {n q : ℕ} (d d' : Fin n)
-    (tail : Fin q → Fin n) (hsucc : d'.val = d.val + 1) :
-    (finFunctionFinEquiv (Fin.cons d' tail)).val =
-      (finFunctionFinEquiv (Fin.cons d tail)).val + 1 := by
-  rw [tupleRank_cons, tupleRank_cons, hsucc]
-  omega
-
-/-- Resetting an exhausted low digit and incrementing the tail advances the
-same explicit tuple rank by one. -/
-theorem tupleRank_carry {n q : ℕ} (hn : 0 < n) (d : Fin n)
-    (tail tail' : Fin q → Fin n) (hmax : d.val = n - 1)
-    (htail : (finFunctionFinEquiv tail').val = (finFunctionFinEquiv tail).val + 1) :
-    (finFunctionFinEquiv (Fin.cons (⟨0, hn⟩ : Fin n) tail')).val =
-      (finFunctionFinEquiv (Fin.cons d tail)).val + 1 := by
-  rw [tupleRank_cons, tupleRank_cons, htail, hmax]
-  simp only [Nat.zero_add, Nat.mul_add, Nat.mul_one]
-  omega
 
 theorem tupleRank_snoc {n q : ℕ} (tail : Fin q → Fin n) (d : Fin n) :
     (finFunctionFinEquiv (Fin.snoc tail d)).val =
@@ -506,9 +394,6 @@ termination_by depth
 
 def reverseDigit (d : Fin n) : Fin n := ⟨n - 1 - d.val, by omega⟩
 
-theorem reverseDigit_current (d : Fin n) : n - 1 - (reverseDigit d).val = d.val := by
-  dsimp only [reverseDigit]
-  omega
 
 def order {depth : ℕ} {exitLabel : Λ} {start finish : Configuration K Λ σ}
     (tree : NestedCycle n current remaining bodyLabel checkLabel resetLabel program
@@ -520,43 +405,6 @@ def order {depth : ℕ} {exitLabel : Λ} {start finish : Configuration K Λ σ}
       (order (children (reverseDigit d))).map (fun tail => Fin.snoc tail d))
 termination_by depth
 
-theorem order_eq_tupleOrder {depth : ℕ} {exitLabel : Λ} {start finish : Configuration K Λ σ}
-    (tree : NestedCycle n current remaining bodyLabel checkLabel resetLabel program
-      depth exitLabel start finish) : tree.order = tupleOrder n depth := by
-  induction tree with
-  | leaf exitLabel start finish count atBody atExit run =>
-    simpa only [order] using (tupleOrder_dimension_zero n).symm
-  | node depth exitLabel positive distinct atCheck atReset s children ih =>
-    simp only [order, ih, tupleOrder_snoc]
-
-theorem order_length {depth : ℕ} {exitLabel : Λ} {start finish : Configuration K Λ σ}
-    (tree : NestedCycle n current remaining bodyLabel checkLabel resetLabel program
-      depth exitLabel start finish) : tree.order.length = n ^ depth := by
-  rw [order_eq_tupleOrder, tupleOrder_length]
-
-theorem steps_eq_work_add_overhead {depth : ℕ} {exitLabel : Λ}
-    {start finish : Configuration K Λ σ}
-    (tree : NestedCycle n current remaining bodyLabel checkLabel resetLabel program
-      depth exitLabel start finish) : tree.steps = tree.work + counterOverhead n depth := by
-  induction tree with
-  | leaf exitLabel start finish count atBody atExit run =>
-    simp only [steps, work, counterOverhead, Nat.add_zero]
-  | node depth exitLabel positive distinct atCheck atReset s children ih =>
-    have hn : n - 1 + 1 = n := by omega
-    have hsum : (∑ r ∈ Finset.range n,
-        if hr : r < n then steps (children ⟨r, hr⟩) else 0) =
-        (∑ r : Fin n, work (children r)) + n * counterOverhead n depth := by
-      calc
-        _ = ∑ r : Fin n, steps (children r) := by
-          rw [← Fin.sum_univ_eq_sum_range]
-          simp only [Fin.isLt, ↓reduceDIte]
-        _ = ∑ r : Fin n, (work (children r) + counterOverhead n depth) := by
-          apply Finset.sum_congr rfl
-          intro r _
-          exact ih r
-        _ = _ := by simp [Finset.sum_add_distrib]
-    simp only [steps, work, cycleSteps, hn, hsum, counterOverhead, Nat.mul_add]
-    omega
 
 /-- The whole nested-loop trace is derived from its actual leaf traces and
 the concrete increment/reset code. -/
@@ -663,43 +511,6 @@ def entry (q : ℕ) (radix : K) (bodyLabel exitLabel : Λ) :
         (.load (fun state => (state.1, none)) (.goto fun _ => bodyLabel))
         (.load (fun state => (state.1, none)) (.goto fun _ => exitLabel)))
 
-theorem entryStep_dimension_zero (radix : K) (startLabel bodyLabel exitLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atStart : program startLabel = entry 0 radix bodyLabel exitLabel)
-    (base : K → List Bool) (ambient : σ) (register : Option Bool) :
-    TM2.step program ⟨some startLabel, (ambient, register), base⟩ =
-      some ⟨some bodyLabel, (ambient, none), base⟩ := by
-  change some (TM2.stepAux (program startLabel) (ambient, register) base) = _
-  rw [atStart]
-  simp [entry, TM2.stepAux]
-
-theorem entryStep_radix_zero (q : ℕ) (hq : 0 < q) (radix : K)
-    (startLabel bodyLabel exitLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atStart : program startLabel = entry q radix bodyLabel exitLabel)
-    (base : K → List Bool) (suffix : List Bool) (hradix : base radix = encodeWord 0 ++ suffix)
-    (ambient : σ) (register : Option Bool) :
-    TM2.step program ⟨some startLabel, (ambient, register), base⟩ =
-      some ⟨some exitLabel, (ambient, none), base⟩ := by
-  change some (TM2.stepAux (program startLabel) (ambient, register) base) = _
-  rw [atStart]
-  simp [entry, Nat.ne_of_gt hq, TM2.stepAux, hradix, encodeWord]
-
-theorem entryStep_radix_positive (q n : ℕ) (hn : 0 < n) (radix : K)
-    (startLabel bodyLabel exitLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atStart : program startLabel = entry q radix bodyLabel exitLabel)
-    (base : K → List Bool) (suffix : List Bool) (hradix : base radix = encodeWord n ++ suffix)
-    (ambient : σ) (register : Option Bool) :
-    TM2.step program ⟨some startLabel, (ambient, register), base⟩ =
-      some ⟨some bodyLabel, (ambient, none), base⟩ := by
-  cases n with
-  | zero => omega
-  | succ n =>
-    change some (TM2.stepAux (program startLabel) (ambient, register) base) = _
-    rw [atStart]
-    by_cases hq : q = 0 <;>
-      simp [entry, hq, TM2.stepAux, hradix, encodeWord, List.replicate_succ]
 
 namespace Control
 
@@ -726,10 +537,6 @@ def program (q : ℕ) (current remaining : Fin q → K) (radix : K)
   | .inr (.inr (some false)) => emitter
   | .inr (.inr (some true)) => .halt
 
-omit [DecidableEq K] in
-theorem label_card (q : ℕ) : Fintype.card (Label q) = 2 * q + 3 := by
-  simp [Label]
-  omega
 
 end Control
 

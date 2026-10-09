@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.Conditioning
 import OAI.Computability.UniqueGames.Soundness.ConditionalReindex
 
@@ -74,10 +75,6 @@ theorem probability_product_and (μ : FiniteDistribution Q) (ν : FiniteDistribu
       cases event q <;> cases given s <;> simp
     _ = _ := by rw [Finset.sum_mul_sum]
 
-theorem probability_product_right (μ : FiniteDistribution Q)
-    (ν : FiniteDistribution S) (given : S → Bool) :
-    (μ.product ν).probability (fun x => given x.2) = ν.probability given := by
-  simpa using probability_product_and μ ν (fun _ => true) given
 
 /-- Exact factorization for an arbitrary joint event of clean coordinates and
 an arbitrary observation/event depending only on the nonclean coordinates. -/
@@ -118,47 +115,6 @@ theorem conditioned_inside (μ : P → FiniteDistribution Q) (K : Finset P)
     exact ne_of_gt positive
   exact mul_div_cancel_right₀ _ hne
 
-/-- Fixing an independently sampled seed additionally exposes the intercept and
-all slope data, without exposing any of the clean questions. The seed's mass
-and the outside-observation mass factor off from every clean event. -/
-theorem seeded_inside_outside (ν : FiniteDistribution S)
-    (μ : P → FiniteDistribution Q) (seed : S) (K : Finset P)
-    (given : (PositionOutside K → Q) → Bool)
-    (event : (PositionInside K → Q) → Bool) :
-    (ν.product (FiniteDistribution.table μ)).probability
-      (fun x => (decide (x.1 = seed) && given (fun i => x.2 i.val)) &&
-        event (fun i => x.2 i.val)) =
-      (FiniteDistribution.table (fun i : PositionInside K => μ i.val)).probability event *
-        (ν.weight seed *
-          (FiniteDistribution.table (fun i : PositionOutside K => μ i.val)).probability given) := by
-  simp_rw [Bool.and_assoc, Bool.and_comm (given _)]
-  rw [probability_product_and ν (FiniteDistribution.table μ)
-    (fun s => decide (s = seed))
-    (fun x : P → Q => event (fun i => x i.val) && given (fun i => x i.val)),
-    table_inside_outside]
-  have hseed : ν.probability (fun s => decide (s = seed)) = ν.weight seed := by
-    simp [FiniteDistribution.probability]
-  rw [hseed]
-  ring
-
-/-- Public conditioning on the independently generated advice, including its
-intercept, and on arbitrary nonclean question data leaves the weighted clean
-product law unchanged. `K` may be any function of `seed`; it is fixed here after
-the public seed has been exposed. -/
-theorem conditioned_seed_inside (ν : FiniteDistribution S)
-    (μ : P → FiniteDistribution Q) (seed : S) (K : Finset P)
-    (given : (PositionOutside K → Q) → Bool)
-    (positive : 0 < (ν.product (FiniteDistribution.table μ)).probability
-      (fun x => decide (x.1 = seed) && given (fun i => x.2 i.val)))
-    (event : (PositionInside K → Q) → Bool) :
-    ((ν.product (FiniteDistribution.table μ)).condition
-      (fun x => decide (x.1 = seed) && given (fun i => x.2 i.val)) positive).probability
-        (fun x => event (fun i => x.2 i.val)) =
-      (FiniteDistribution.table (fun i : PositionInside K => μ i.val)).probability event := by
-  have hgiven := seeded_inside_outside ν μ seed K given (fun _ => true)
-  simp only [Bool.and_true, FiniteDistribution.probability_true, one_mul] at hgiven
-  rw [FiniteDistribution.probability_condition, seeded_inside_outside, hgiven]
-  exact mul_div_cancel_right₀ _ (ne_of_gt (hgiven ▸ positive))
 
 /-- Reindexing a finite coordinate set gives the usual `iid` law on `Fin r`. -/
 theorem table_reindex (μ : FiniteDistribution Q) {A : Type} [Fintype A] [DecidableEq A]
@@ -199,48 +155,6 @@ theorem conditioned_incidence_reindex
   rw [← table_reindex μ e, FiniteDistribution.probability_transport]
   exact h
 
-/-- Equality of the complete conditional question distribution, not only its
-individual marginals. The target is the ordinary repeated incidence law. -/
-theorem conditioned_incidence_distribution
-    {O N D : Type} [Fintype O] [DecidableEq O] [Fintype N] [DecidableEq N]
-    [Zero D] [DecidableEq D]
-    (μ : FiniteDistribution (O × Fin 3))
-    (J : Finset P) (name : O → Fin 3 → N) (gamma : RawCoefficients J D)
-    (observed : PositionOutside (zeroSet J gamma) → O × N)
-    (positive : 0 < (FiniteDistribution.table (fun _ : P => μ)).probability
-      (fun x => decide (outsideRecord (zeroSet J gamma) name x = observed)))
-    {r : ℕ} (e : Fin r ≃ PositionInside (zeroSet J gamma)) :
-    (((FiniteDistribution.table (fun _ : P => μ)).condition
-      (fun x => decide (outsideRecord (zeroSet J gamma) name x = observed))
-        positive).pushforward
-          (fun x i => incidence name (x (e i).val))) =
-      (μ.pushforward (incidence name)).iid r := by
-  classical
-  apply FiniteDistribution.eq_of_weight_eq
-  intro questions
-  have h := conditioned_incidence_reindex μ J name gamma observed positive e
-    (fun x => decide (x = questions))
-  calc
-    _ = ((FiniteDistribution.table (fun _ : P => μ)).condition
-        (fun x => decide (outsideRecord (zeroSet J gamma) name x = observed)) positive).probability
-          (fun x => decide ((fun i => incidence name (x (e i).val)) = questions)) := by
-      unfold FiniteDistribution.pushforward FiniteDistribution.probability
-      apply Finset.sum_congr rfl
-      intro x _
-      by_cases hx : (fun i => incidence name (x (e i).val)) = questions <;> simp [hx]
-    _ = _ := h
-    _ = _ := by simp [FiniteDistribution.probability]
-
-omit [Fintype P] in
-/-- A clean-mask rule reads only the independent advice seed. Thus even after
-fixing the entire question tuple, its distribution is unchanged. The seed may
-include the projection mask, all slope columns, and the independent intercept. -/
-theorem clean_mask_independent (ν : FiniteDistribution S)
-    (μ : FiniteDistribution Q) (clean : S → Finset P) (K : Finset P)
-    (questionEvent : Q → Bool) :
-    (ν.product μ).probability (fun x => decide (clean x.1 = K) && questionEvent x.2) =
-      ν.probability (fun s => decide (clean s = K)) * μ.probability questionEvent := by
-  exact probability_product_and ν μ (fun s => decide (clean s = K)) questionEvent
 
 end
 end UniqueGamesTheorem.Clean.ProductLaw

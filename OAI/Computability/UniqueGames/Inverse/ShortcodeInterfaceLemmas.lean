@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Data.Matrix.Basic
@@ -12,6 +13,7 @@ import OAI.Computability.UniqueGames.Inverse.AffineWitnessLemmas
 import OAI.Computability.UniqueGames.Inverse.AffineWitnessNormalizationLemmas
 import OAI.Computability.UniqueGames.Inverse.MatrixChartIntervalsLemmas
 import OAI.Computability.UniqueGames.Inverse.MatrixChartLemmas
+import OAI.Computability.UniqueGames.Inverse.RowErasureLemmas
 
 namespace OAI
 
@@ -312,10 +314,9 @@ section
 
 /-!
 The size bound for simultaneous row/column slices.
-Starting at any point of a nonempty slice, maps from the quotient by its column
-span into the common row kernel give distinct points of that same affine slice.
+Transport the matrix slice to linear maps, then use the quotient
+parametrization to identify it with maps into the common row kernel.
 Rank-nullity gives the dimension lower bound even when equations are dependent.
-This argument uses only finite-dimensional linear algebra.
 -/
 
 namespace UniqueGamesTheorem.Inverse.Shortcode
@@ -339,69 +340,70 @@ def columnSpan (S : Slice ell m) : Submodule F2 (Vector m) :=
 abbrev Directions (S : Slice ell m) :=
   (Vector m ⧸ S.columnSpan) →ₗ[F2] S.rowMap.ker
 
+theorem row_equations_iff (S : Slice ell m) (M : Mat ell m) :
+    (∀ i j, (∑ a, S.rowCoefficient i a * M a j) = S.rowValue i j) ↔
+      S.rowMap.comp (Matrix.toLin' M) = Matrix.toLin' S.rowValue := by
+  let A : Matrix (Fin S.rows) (Fin ell) F2 := S.rowCoefficient
+  let B : Matrix (Fin S.rows) (Fin m) F2 := S.rowValue
+  change (∀ i j, (∑ a, A i a * M a j) = B i j) ↔
+    (Matrix.toLin' A).comp (Matrix.toLin' M) = Matrix.toLin' B
+  constructor
+  · intro h
+    have hm : A * M = B := by
+      ext i j
+      exact h i j
+    rw [← Matrix.toLin'_mul, hm]
+  · intro h
+    have hm : A * M = B := by
+      apply Matrix.toLin'.injective
+      rw [Matrix.toLin'_mul]
+      exact h
+    intro i j
+    exact congrFun (congrFun hm i) j
+
+/-- This is an equivalence of the actual equations, not merely a cardinality
+comparison or a homogeneous approximation of the affine slice. -/
+theorem contains_iff_inSlice (S : Slice ell m) (M₀ : Mat ell m)
+    (hM₀ : S.Contains M₀) (M : Mat ell m) :
+    S.Contains M ↔
+      AffineWitness.InSlice S.rowMap S.columnSpan
+        (Matrix.toLin' M₀) (Matrix.toLin' M) := by
+  rw [Slice.Contains, S.row_equations_iff]
+  exact AffineWitness.explicit_slice_iff S.rowMap
+    (Matrix.toLin' S.rowValue) S.columnCoefficient S.columnValue
+    (Matrix.toLin' M₀) (Matrix.toLin' M)
+    ((S.row_equations_iff M₀).mp hM₀.1) hM₀.2
+
+/-- Exact finite sample-space equivalence between the matrix representation
+and the linear-map representation of a nonempty affine slice. -/
+def linearSliceEquiv (S : Slice ell m) (M₀ : Mat ell m)
+    (hM₀ : S.Contains M₀) :
+    S.points ≃ AffineWitness.Slice S.rowMap S.columnSpan (Matrix.toLin' M₀) :=
+  Matrix.toLin'.toEquiv.subtypeEquiv fun M => by
+    simpa only [points, Finset.mem_filter, Finset.mem_univ, true_and,
+      LinearEquiv.coe_toEquiv] using
+      S.contains_iff_inSlice M₀ hM₀ M
+
 def directionMap (S : Slice ell m) (N : S.Directions) :
     Vector m →ₗ[F2] Vector ell :=
-  S.rowMap.ker.subtype.comp (N.comp S.columnSpan.mkQ)
+  RowErasureSliceQuotient.direction S.rowMap S.columnSpan N
 
 def directionMatrix (S : Slice ell m) (N : S.Directions) : Mat ell m :=
   LinearMap.toMatrix' (S.directionMap N)
 
-theorem directionMatrix_injective (S : Slice ell m) :
-    Function.Injective S.directionMatrix := by
-  intro N P h
-  have hmap : S.directionMap N = S.directionMap P :=
-    LinearMap.toMatrix'.injective h
-  apply LinearMap.ext
-  intro x
-  obtain ⟨v, rfl⟩ := S.columnSpan.mkQ_surjective x
-  apply Subtype.ext
-  exact congrArg (fun f : Vector m →ₗ[F2] Vector ell => f v) hmap
+/-- The matrix parametrization is the quotient parametrization transported
+through the exact matrix/linear-map slice equivalence. -/
+def directionEquiv (S : Slice ell m) (M₀ : Mat ell m) (h₀ : S.Contains M₀) :
+    S.Directions ≃ S.points :=
+  (RowErasureSliceQuotient.equiv S.rowMap S.columnSpan (Matrix.toLin' M₀)).trans
+    (S.linearSliceEquiv M₀ h₀).symm
 
-theorem directionMatrix_row (S : Slice ell m) (N : S.Directions)
-    (i : Fin S.rows) (j : Fin m) :
-    (∑ a, S.rowCoefficient i a * S.directionMatrix N a j) = 0 := by
-  have h := (N (S.columnSpan.mkQ (Pi.single j 1))).property
-  have hi := congrFun h i
-  change (∑ a, S.rowCoefficient i a *
-    (N (S.columnSpan.mkQ (Pi.single j 1)) : Vector ell) a) = 0 at hi
-  exact hi
-
-theorem directionMatrix_column (S : Slice ell m) (N : S.Directions)
-    (i : Fin S.columns) :
-    evaluate (S.directionMatrix N) (S.columnCoefficient i) = 0 := by
-  have hq : S.columnSpan.mkQ (S.columnCoefficient i) = 0 := by
-    apply (Submodule.Quotient.mk_eq_zero S.columnSpan).mpr
-    exact Submodule.subset_span ⟨i, rfl⟩
-  change (S.directionMatrix N) *ᵥ (S.columnCoefficient i) = 0
-  rw [directionMatrix, LinearMap.toMatrix'_mulVec]
-  simp [directionMap, hq]
-
-theorem contains_add_direction (S : Slice ell m) (M : Mat ell m)
-    (hM : S.Contains M) (N : S.Directions) :
-    S.Contains (M + S.directionMatrix N) := by
-  constructor
-  · intro i j
-    simp only [Matrix.add_apply, mul_add, Finset.sum_add_distrib]
-    rw [hM.1 i j, S.directionMatrix_row N i j, add_zero]
-  · intro i
-    have hd := S.directionMatrix_column N i
-    change evaluate (M + S.directionMatrix N) (S.columnCoefficient i) = _
-    have he : evaluate (M + S.directionMatrix N) (S.columnCoefficient i) =
-        evaluate M (S.columnCoefficient i) +
-          evaluate (S.directionMatrix N) (S.columnCoefficient i) := by
-      ext a
-      simp [evaluate, add_mul, Finset.sum_add_distrib]
-    rw [he, hM.2 i, hd, add_zero]
-
-def directionEmbedding (S : Slice ell m) (M : Mat ell m) (hM : S.Contains M) :
-    S.Directions ↪ S.points where
-  toFun N := ⟨M + S.directionMatrix N, by
-    simp only [points, Finset.mem_filter, Finset.mem_univ, true_and]
-    exact S.contains_add_direction M hM N⟩
-  inj' := by
-    intro N P h
-    apply S.directionMatrix_injective
-    exact add_left_cancel (congrArg Subtype.val h)
+@[simp] theorem directionEquiv_val (S : Slice ell m) (M₀ : Mat ell m)
+    (h₀ : S.Contains M₀) (N : S.Directions) :
+    (S.directionEquiv M₀ h₀ N).val = M₀ + S.directionMatrix N := by
+  change LinearMap.toMatrix' (Matrix.toLin' M₀ + S.directionMap N) = _
+  rw [map_add, LinearMap.toMatrix'_toLin']
+  rfl
 
 theorem columnSpan_finrank_le (S : Slice ell m) :
     Module.finrank F2 S.columnSpan ≤ S.columns := by
@@ -442,8 +444,7 @@ theorem card_directions_le (S : Slice ell m) (hne : S.points.Nonempty) :
   have hcontains : S.Contains M := by simpa only [points, Finset.mem_filter,
     Finset.mem_univ, true_and] using hM
   simpa only [Nat.card_eq_finsetCard] using
-    Nat.card_le_card_of_injective (S.directionEmbedding M hcontains)
-      (S.directionEmbedding M hcontains).injective
+    (Nat.card_congr (S.directionEquiv M hcontains)).le
 
 /-- The size bound, with truncation making it valid also in small dimensions.
 There is no independence hypothesis on the listed equations. -/
@@ -469,8 +470,8 @@ end
 
 section
 
-/-! Exact connection between the finite-array shortcode slices and the
-linear-map slices used by affine witness normalization. -/
+/-! Transport affine targets through the exact matrix/linear-map slice
+identification, preserving agreement on the entire slice. -/
 
 namespace UniqueGamesTheorem.Inverse.Shortcode
 
@@ -481,68 +482,6 @@ namespace Slice
 
 variable {ell m : ℕ}
 
-theorem evaluate_eq_toLin (M : Mat ell m) (z : Vector m) :
-    evaluate M z = Matrix.toLin' M z := rfl
-
-theorem row_equations_iff (S : Slice ell m) (M : Mat ell m) :
-    (∀ i j, (∑ a, S.rowCoefficient i a * M a j) = S.rowValue i j) ↔
-      S.rowMap.comp (Matrix.toLin' M) = Matrix.toLin' S.rowValue := by
-  let A : Matrix (Fin S.rows) (Fin ell) F2 := S.rowCoefficient
-  let B : Matrix (Fin S.rows) (Fin m) F2 := S.rowValue
-  change (∀ i j, (∑ a, A i a * M a j) = B i j) ↔
-    (Matrix.toLin' A).comp (Matrix.toLin' M) = Matrix.toLin' B
-  constructor
-  · intro h
-    have hm : A * M = B := by
-      ext i j
-      exact h i j
-    rw [← Matrix.toLin'_mul, hm]
-  · intro h
-    have hm : A * M = B := by
-      apply Matrix.toLin'.injective
-      rw [Matrix.toLin'_mul]
-      exact h
-    intro i j
-    exact congrFun (congrFun hm i) j
-
-/-- This is an equivalence of the actual equations, not merely a cardinality
-comparison or a homogeneous approximation of the affine slice. -/
-theorem contains_iff_inSlice (S : Slice ell m) (M₀ : Mat ell m)
-    (hM₀ : S.Contains M₀) (M : Mat ell m) :
-    S.Contains M ↔
-      AffineWitness.InSlice S.rowMap S.columnSpan
-        (Matrix.toLin' M₀) (Matrix.toLin' M) := by
-  have hrow₀ := (S.row_equations_iff M₀).mp hM₀.1
-  have hcol₀ : ∀ i, Matrix.toLin' M₀ (S.columnCoefficient i) =
-      S.columnValue i := hM₀.2
-  have heq := AffineWitness.explicit_slice_iff S.rowMap
-    (Matrix.toLin' S.rowValue) S.columnCoefficient S.columnValue
-    (Matrix.toLin' M₀) (Matrix.toLin' M) hrow₀ hcol₀
-  constructor
-  · intro hM
-    exact heq.mp ⟨(S.row_equations_iff M).mp hM.1, hM.2⟩
-  · intro hM
-    have h := heq.mpr hM
-    exact ⟨(S.row_equations_iff M).mpr h.1, h.2⟩
-
-/-- Exact finite sample-space equivalence between the matrix representation
-and the linear-map representation of a nonempty affine slice. -/
-def linearSliceEquiv (S : Slice ell m) (M₀ : Mat ell m)
-    (hM₀ : S.Contains M₀) :
-    S.points ≃ AffineWitness.Slice S.rowMap S.columnSpan (Matrix.toLin' M₀) where
-  toFun M := ⟨Matrix.toLin' M.val,
-    (S.contains_iff_inSlice M₀ hM₀ M.val).mp (by
-      simpa only [points, Finset.mem_filter, Finset.mem_univ, true_and] using M.property)⟩
-  invFun N := ⟨LinearMap.toMatrix' N.val, by
-    simp only [points, Finset.mem_filter, Finset.mem_univ, true_and]
-    apply (S.contains_iff_inSlice M₀ hM₀ _).mpr
-    simpa only [Matrix.toLin'_toMatrix'] using N.property⟩
-  left_inv M := by
-    apply Subtype.ext
-    exact LinearMap.toMatrix'_toLin' M.val
-  right_inv N := by
-    apply Subtype.ext
-    exact Matrix.toLin'_toMatrix' N.val
 
 /-- Pointwise preservation on the genuine slice preserves its exact uniform
 affine agreement, including the empty-slice convention. -/
@@ -567,18 +506,6 @@ theorem affineAgreement_eq_of_linear_target_eq (S : Slice ell m)
   intro M hM
   exact htarget (Matrix.toLin' M) ((S.contains_iff_inSlice M₀ hM₀ M).mp hM)
 
-/-- Changing the representative inside the column span and correcting the
-intercept leaves the shortcode agreement exactly unchanged. -/
-theorem affineAgreement_translate (S : Slice ell m)
-    (M₀ : Mat ell m) (hM₀ : S.Contains M₀)
-    (f : Mat ell m → Vector ell) (z w : Vector m) (hw : w ∈ S.columnSpan)
-    (u : Vector ell) :
-    S.affineAgreement f (z + w) (u + evaluate M₀ w) =
-      S.affineAgreement f z u := by
-  apply S.affineAgreement_eq_of_linear_target_eq M₀ hM₀ f z (z + w) u _
-  intro M hM
-  exact AffineWitness.translate_target S.rowMap S.columnSpan (Matrix.toLin' M₀)
-    M hM z w hw u
 
 end Slice
 end
@@ -787,15 +714,6 @@ def describe {ell m r : ℕ} (S : Slice ell m)
 @[simp] theorem describe_intercept {ell m r : ℕ} (S : Slice ell m)
     (z : Vector m) (u : Vector ell) : (describe (r := r) S z u).intercept = u := rfl
 
-/-- Every slice/target returned by the bounded inverse theorem has a fixed-size
-description with the same solution set and exactly the same agreement. -/
-theorem exists_description {ell m r : ℕ} (S : Slice ell m)
-    (hrows : S.rows ≤ r) (hcols : S.columns ≤ r)
-    (z : Vector m) (u : Vector ell) :
-    ∃ d : Description ell m r, d.toSlice.points = S.points ∧
-      d.coefficient = z ∧ d.intercept = u := by
-  refine ⟨describe S z u, ?_, rfl, rfl⟩
-  exact padSlice_points S hrows hcols
 
 end
 end UniqueGamesTheorem.Inverse.RowErasureDescriptions

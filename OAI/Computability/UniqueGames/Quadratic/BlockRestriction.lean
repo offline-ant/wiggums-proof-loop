@@ -1,5 +1,6 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Quadratic.BlockKernelLemmas
-import OAI.Computability.UniqueGames.Quadratic.GenericSeparationLemmas
+import OAI.Computability.UniqueGames.Quadratic.TraceDual
 
 namespace OAI
 
@@ -20,48 +21,18 @@ noncomputable section
 
 variable {F : Type*} [Field F] [Fintype F] [CharP F 2] [Algebra (ZMod 2) F]
 
-omit [Fintype F] [CharP F 2] [Algebra (ZMod 2) F] in
-private theorem dot_add_first (x y z : Vec F) :
-    dot (x + y) z = dot x z + dot y z := by
-  simp only [dot, Pi.add_apply]
-  ring
-
-/-- The actual trace character as a binary linear functional. -/
-def blockCharacterLinear (g z : Vec F) :
-    (Vec F × Vec F) →ₗ[ZMod 2] ZMod 2 where
-  toFun := blockCharacter g z
-  map_add' := by
-    intro p q
-    simp only [blockCharacter, Prod.fst_add, Prod.snd_add, dot_add_right, map_add]
-    ring
-  map_smul' := by
-    intro c p
-    have hc : c = 0 ∨ c = 1 := by
-      fin_cases c
-      · exact Or.inl rfl
-      · exact Or.inr rfl
-    rcases hc with rfl | rfl <;> simp [blockCharacter]
-
-/-- Restriction to one block, linear in the logical character `z`. -/
+/-- Restriction to one block of the two trace pairings, linear in the
+logical character through the common lift and subspace inclusion. -/
 def blockRestriction (S : Submodule (ZMod 2) (Vec F))
     (g : S →ₗ[ZMod 2] Vec F) (v : Vec F) :
-    S →ₗ[ZMod 2] ((U v) →ₗ[ZMod 2] ZMod 2) where
-  toFun z := (blockCharacterLinear (g z) z).comp (U v).subtype
-  map_add' := by
-    intro z w
-    ext p
-    simp only [LinearMap.comp_apply, blockCharacterLinear, LinearMap.coe_mk,
-      AddHom.coe_mk, LinearMap.add_apply, map_add, Submodule.coe_add,
-      blockCharacter, dot_add_first, map_add]
-    ring
-  map_smul' := by
-    intro c z
-    have hc : c = 0 ∨ c = 1 := by
-      fin_cases c
-      · exact Or.inl rfl
-      · exact Or.inr rfl
-    rcases hc with rfl | rfl <;> ext p <;>
-      simp [blockCharacterLinear, blockCharacter]
+    S →ₗ[ZMod 2] ((U v) →ₗ[ZMod 2] ZMod 2) :=
+  let B : S →ₗ[ZMod 2] ((U v) →ₗ[ZMod 2] ZMod 2) :=
+    ((traceDotForm.compl₁₂ g (LinearMap.fst _ _ _)) +
+    (traceDotForm.compl₁₂ S.subtype (LinearMap.snd _ _ _))).compl₂ (U v).subtype
+  -- Consumers unfold restriction to the literal character, so retain that `toFun`.
+  B.copy (fun z => (B z).copy (fun p => blockCharacter (g z) z p)
+    (by funext p; simp [B, blockCharacter]))
+    (by funext z; exact LinearMap.copy_eq _ _ _)
 
 omit [Fintype F] in
 @[simp] theorem blockRestriction_apply (S : Submodule (ZMod 2) (Vec F))
@@ -121,13 +92,6 @@ theorem finrank_ker_blockRestriction_le_one
   finrank_ker_le_one_of_nonzero_unique (blockRestriction S g v)
     (blockRestriction_nonzero_kernel_unique S g hv hS)
 
-theorem finrank_blockRestriction_source_le_range_add_one
-    (S : Submodule (ZMod 2) (Vec F)) (g : S →ₗ[ZMod 2] Vec F)
-    {v : Vec F} (hv : v ≠ 0) (hS : IsGeneric S) :
-    Module.finrank (ZMod 2) S ≤
-      Module.finrank (ZMod 2) (blockRestriction S g v).range + 1 :=
-  finrank_source_le_range_add_one (blockRestriction S g v)
-    (blockRestriction_nonzero_kernel_unique S g hv hS)
 
 end
 

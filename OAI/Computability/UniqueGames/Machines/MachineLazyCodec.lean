@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.PCP.PreprocessingLazyWords
 
@@ -26,12 +27,6 @@ theorem rowsBits_ofFn (v e count : Nat) :
     congr 1
     omega
 
-private theorem encodeWords_flatMap {α : Type*} (items : List α) (words : α → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
-  induction items with
-  | nil => rfl
-  | cons item items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 theorem rowBits_stay {n d : Nat} (v : Fin n) (p : Fin d) :
     MachineDummyRows.rowBits v.val (2 * d * v.val + p.val) =
       encodeWords (rowWords (stayRow d v p)) := by
@@ -42,7 +37,7 @@ theorem rowBits_stay {n d : Nat} (v : Fin n) (p : Fin d) :
 theorem rowsBits_stay {n d : Nat} (v : Fin n) :
     MachineDummyRows.rowsBits v.val (2 * d * v.val) d =
       encodeWords ((List.ofFn (stayRow d v)).flatMap rowWords) := by
-  rw [rowsBits_ofFn, encodeWords_flatMap]
+  rw [rowsBits_ofFn, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
   simp only [List.flatMap_def, List.map_ofFn]
   apply congrArg List.flatten
   congr 1

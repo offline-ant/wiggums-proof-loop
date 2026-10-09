@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineReadClause
 
 namespace OAI
@@ -12,10 +13,6 @@ are preserved, and no additional finish instruction is assumed.
 namespace UniqueGamesTheorem.Foundations.PCP.RawInitialMachineCleanup
 
 open Turing Complexity RawInitialMachineModel RawInitialMachineReadClause
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : ℕ} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- The index increment is exactly the one push in the actual global program. -/
 theorem incrementIndexTrace (base : Tape → List Bool) (state : State) :
@@ -82,8 +79,7 @@ theorem cleanupTrace {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
     some ⟨some .incrementIndex, (incoming.1, none), t6⟩ at h6
   rw [hf6] at h6
   have last := incrementIndexTrace t6 (incoming.1, none)
-  have total := trace_trans _ (trace_trans _ (trace_trans _ (trace_trans _
-    (trace_trans _ (trace_trans _ h1 h2) h3) h4) h5) h6) last
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2) h3) h4) h5) h6) last
   have htime :
       ((((((encodeWord (fieldValue c 0)).length + 1 +
         ((encodeWord (fieldValue c 1)).length + 1)) +
@@ -108,18 +104,6 @@ theorem cleanupTrace {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
   rw [frame] at total
   exact total
 
-def cleanupInTime {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
-    (suffix : List Bool) (i : ℕ)
-    (hempty : ∀ j, base (.field j) = []) (hindex : base .index = encodeWord i)
-    (incoming : State) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (.cleanupField 0), incoming, recordTapes base c suffix⟩
-      (some ⟨some .guard, (incoming.1, none),
-        Function.update (Function.update base .input suffix) .index (encodeWord (i + 1))⟩)
-      ((encodeWords (Complexity.clauseWords c)).length + 7) where
-  steps := (encodeWords (Complexity.clauseWords c)).length + 7
-  evals_in_steps := cleanupTrace base c suffix i hempty hindex incoming
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineCleanup
 

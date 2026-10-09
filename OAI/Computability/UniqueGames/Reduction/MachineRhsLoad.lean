@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
@@ -126,17 +127,6 @@ def loadInTime (field : Fin k → K) (entry : Λ) (exit : Option Λ)
       loadStep field entry exit program atEntry state tapes values suffix encoded
   steps_le_m := Nat.le_refl _
 
-omit [DecidableEq K] in
-theorem peekChain_pushBound (field : Fin k → K) (exit : Option Λ) (cells : List (Fin k)) :
-    Runtime.statementPushBound (peekChain (σ := σ) field exit cells) = 0 := by
-  induction cells with
-  | nil => cases exit <;> rfl
-  | cons i rest ih => exact ih
-
-omit [DecidableEq K] in
-theorem statement_pushBound (field : Fin k → K) (exit : Option Λ) :
-    Runtime.statementPushBound (statement (σ := σ) field exit) = 0 :=
-  peekChain_pushBound field exit (List.finRange k)
 
 end Program
 

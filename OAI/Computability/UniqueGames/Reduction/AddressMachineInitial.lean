@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Reduction.AddressOdometerSchedule
 import OAI.Computability.UniqueGames.Reduction.AddressTuplePolynomialLemmas
 
@@ -76,17 +77,6 @@ theorem afterHeaders_empty (F : SourceEncoding.Input) (p : AddressMachineProgram
   exact (MachineAddressHeaders.resultTapes_source _ _ F.variables F.equations.length).trans
     (AddressMachineProgram.inputTapes_source k T _)
 
-@[simp] theorem afterHeaders_variables (F : SourceEncoding.Input) :
-    afterHeaders k T F (AddressMachineSpace.headerTape k s d T.vectors.length .variableCount) =
-      encodeWord F.variables := by
-  change MachineAddressHeaders.resultTapes _ _ _ _
-    (MachineAddressHeaders.Arithmetic.control
-      (MachineAddressHeaders.arithmeticSlots (AddressMachineSpace.fullHeaderSlots k s d T.vectors.length))
-      .variableCount) = _
-  rw [MachineAddressHeaders.resultTapes_n]
-  change encodeWord F.variables ++ AddressMachineProgram.inputTapes k T (SourceEncoding.inputBits F)
-    (AddressMachineSpace.headerTape k s d T.vectors.length .variableCount) = _
-  rw [input_header, List.append_nil]
 
 @[simp] theorem afterHeaders_occurrences (F : SourceEncoding.Input) :
     afterHeaders k T F (AddressMachineSpace.headerTape k s d T.vectors.length .occurrenceCount) =
@@ -105,10 +95,6 @@ theorem afterHeaders_empty (F : SourceEncoding.Input) (p : AddressMachineProgram
       encodeWord (MachineAddressHeaders.radix s d F.variables F.equations.length) :=
   MachineAddressHeaders.resultTapes_base _ _ _ _
 
-@[simp] theorem afterHeaders_capacity (F : SourceEncoding.Input) :
-    afterHeaders k T F (AddressMachineSpace.headerTape k s d T.vectors.length .capacity) =
-      encodeWord (MachineAddressHeaders.capacity k s d F.variables F.equations.length) :=
-  MachineAddressHeaders.resultTapes_capacity _ _ _ _
 
 @[simp] theorem afterHeaders_reversed (F : SourceEncoding.Input) :
     afterHeaders k T F (AddressMachineSpace.headerTape k s d T.vectors.length .reversed) =
@@ -160,20 +146,10 @@ theorem initialized_frame (F : SourceEncoding.Input) (p : AddressMachineProgram.
     (by intro j; simp [AddressMachineSpace.remaining])]
   exact afterHeaders_source k T F
 
-@[simp] theorem initialized_variables (F : SourceEncoding.Input) :
-    initialized k T F (AddressMachineSpace.headerTape k s d T.vectors.length .variableCount) =
-      encodeWord F.variables := by rw [initialized_header, afterHeaders_variables]
-@[simp] theorem initialized_occurrences (F : SourceEncoding.Input) :
-    initialized k T F (AddressMachineSpace.headerTape k s d T.vectors.length .occurrenceCount) =
-      encodeWord F.equations.length := by rw [initialized_header, afterHeaders_occurrences]
 @[simp] theorem initialized_base (F : SourceEncoding.Input) :
     initialized k T F (AddressMachineSpace.headerTape k s d T.vectors.length .baseValue) =
       encodeWord (MachineAddressHeaders.radix s d F.variables F.equations.length) := by
   rw [initialized_header, afterHeaders_base]
-@[simp] theorem initialized_capacity (F : SourceEncoding.Input) :
-    initialized k T F (AddressMachineSpace.headerTape k s d T.vectors.length .capacity) =
-      encodeWord (MachineAddressHeaders.capacity k s d F.variables F.equations.length) := by
-  rw [initialized_header, afterHeaders_capacity]
 @[simp] theorem initialized_reversed (F : SourceEncoding.Input) :
     initialized k T F (AddressMachineSpace.headerTape k s d T.vectors.length .reversed) =
       (MachineAddressHeaders.Arithmetic.headerBits k s d T.vectors.length
@@ -251,46 +227,6 @@ theorem initialized_empty (F : SourceEncoding.Input) (p : AddressMachineProgram.
     intro i
     simp [AddressMachineSpace.privateAddress, AddressMachineSpace.current, AddressMachineSpace.remaining]
 
-theorem initialized_edgeClean (F : SourceEncoding.Input) :
-    MachineAddressEdge.Clean (AddressMachineSpace.addressEdgeSlots k s d T.vectors.length)
-      (initialized k T F) := by
-  constructor
-  · constructor
-    · exact initialized_privateAddress k T F .reversed
-    · exact initialized_privateAddress k T F .forward
-    · exact initialized_privateAddress k T F .copyScratch
-    · exact initialized_privateAddress k T F .accA
-    · exact initialized_privateAddress k T F .accB
-    · exact initialized_privateAddress k T F .counter
-    · exact initialized_privateAddress k T F .hornerScratch
-    · intro j; exact initialized_privateAddress k T F (.digit j)
-  · exact initialized_privateAddress k T F .output
-
-/-- An exact equality with the checked schedule's initial digit configuration. -/
-theorem initialized_eq_setDigits_zero (F : SourceEncoding.Input) :
-    initialized k T F = AddressOdometerSchedule.setDigits F.equations.length
-      (fun _ : Fin k => 0) (afterHeaders k T F) := by
-  funext p
-  by_cases hc : ∃ j, p = AddressMachineSpace.current k s d T.vectors.length j
-  · obtain ⟨j, rfl⟩ := hc
-    rw [initialized_current]
-    symm
-    exact (AddressOdometerSchedule.setDigits_current F.equations.length
-      (fun _ : Fin k => 0) (afterHeaders k T F) j).trans (dite_eq_left j.isLt)
-  · by_cases hr : ∃ j, p = AddressMachineSpace.remaining k s d T.vectors.length j
-    · obtain ⟨j, rfl⟩ := hr
-      rw [initialized_remaining]
-      symm
-      simpa only [Nat.sub_zero, AddressOdometerSchedule.remaining] using
-        (AddressOdometerSchedule.setDigits_remaining F.equations.length
-          (fun _ : Fin k => 0) (afterHeaders k T F) j).trans (dite_eq_left j.isLt)
-    · have hc' : ∀ j, p ≠ AddressMachineSpace.current k s d T.vectors.length j :=
-        fun j h => hc ⟨j, h⟩
-      have hr' : ∀ j, p ≠ AddressMachineSpace.remaining k s d T.vectors.length j :=
-        fun j h => hr ⟨j, h⟩
-      exact (initialized_frame k T F p hc' hr').trans
-        (AddressOdometerSchedule.setDigits_other F.equations.length
-          (fun _ : Fin k => 0) (afterHeaders k T F) p hc' hr').symm
 
 /-- Actual two-phase initialization from the concrete machine input. -/
 def inTime (F : SourceEncoding.Input) :

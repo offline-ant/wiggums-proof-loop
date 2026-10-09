@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.PCP.GraphTables
 import OAI.Computability.UniqueGames.PCP.SourceMachine
@@ -21,18 +22,10 @@ inductive Label
   | copyFirst | copySecond | startVertices | readVertices | startDarts | readDarts
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.copyFirst, .copySecond, .startVertices,
-  .readVertices, .startDarts, .readDarts]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.copyFirst, .copySecond, .startVertices,
+  .readVertices, .startDarts, .readDarts}
+  complete x := by cases x <;> simp
 
 /-- Tape 0 is protected input, 1 is the working row stream, 2 is scratch,
 and 3 and 4 hold the extracted vertex and dart counts. -/
@@ -45,21 +38,6 @@ def initialTapes (input : List Bool) : Tape → List Bool := tapes input [] [] [
 def resultTapes (n m : Nat) (rowsBits : List Bool) : Tape → List Bool :=
   tapes (encodeWords [n, m] ++ rowsBits) rowsBits (encodeWord n) (encodeWord m)
 
-@[simp] theorem resultTapes_original (n m : Nat) (rowsBits : List Bool) :
-    resultTapes n m rowsBits 0 = encodeWords [n, m] ++ rowsBits := by
-  simp [resultTapes, tapes]
-
-@[simp] theorem resultTapes_work (n m : Nat) (rowsBits : List Bool) :
-    resultTapes n m rowsBits 1 = rowsBits := by simp [resultTapes, tapes]
-
-@[simp] theorem resultTapes_scratch (n m : Nat) (rowsBits : List Bool) :
-    resultTapes n m rowsBits 2 = [] := by simp [resultTapes, tapes]
-
-@[simp] theorem resultTapes_vertices (n m : Nat) (rowsBits : List Bool) :
-    resultTapes n m rowsBits 3 = encodeWord n := by simp [resultTapes, tapes]
-
-@[simp] theorem resultTapes_darts (n m : Nat) (rowsBits : List Bool) :
-    resultTapes n m rowsBits 4 = encodeWord m := by simp [resultTapes, tapes]
 
 /-- Six finite control labels, independent of all input sizes and contents. -/
 def program {σ : Type} : Label → TM2.Stmt (fun _ : Tape => Bool) Label (State σ)
@@ -155,15 +133,6 @@ theorem exactSteps_le (n m : Nat) (rowsBits : List Bool) :
     List.sum_nil, List.length_cons, List.length_nil]
   omega
 
-def splitInTime {σ : Type} (n m : Nat) (rowsBits : List Bool)
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program (σ := σ)))
-      ⟨some .copyFirst, (ambient, register), initialTapes (encodeWords [n, m] ++ rowsBits)⟩
-      (some ⟨none, (ambient, none), resultTapes n m rowsBits⟩)
-      (timePolynomial.eval (encodeWords [n, m] ++ rowsBits).length) where
-  steps := exactSteps n m rowsBits
-  evals_in_steps := splitTrace n m rowsBits ambient register
-  steps_le_m := exactSteps_le n m rowsBits
 
 def machine : FinTM2 where
   K := Tape
@@ -176,12 +145,6 @@ def machine : FinTM2 where
   initialState := ((), none)
   m := program
 
-theorem initial_configuration (input : List Bool) :
-    initList machine input = ⟨some .copyFirst, ((), none), initialTapes input⟩ := by
-  have ht : (initList machine input).stk = initialTapes input := by
-    let : Fintype machine.K := (inferInstance : Fintype Tape)
-    funext k; fin_cases k <;> simp [initList, machine, initialTapes, tapes]; rfl
-  exact congrArg (TM2.Cfg.mk _ _) ht
 
 def rowsBits (table : PCP.GraphTables.Table) : List Bool :=
   encodeWords ((PCP.GraphTables.rowList table).flatMap PCP.GraphTables.rowWords)
@@ -198,14 +161,6 @@ theorem tableTrace {σ : Type} (table : PCP.GraphTables.Table) (ambient : σ)
   rw [tableBits_header_rows]
   exact splitTrace table.vertices table.darts (rowsBits table) ambient register
 
-/-- The concrete machine starts at its genuine initial configuration on a full
-graph table and leaves every output field on the stated physical tape. -/
-def initializedTableInTime (table : PCP.GraphTables.Table) :
-    StateTransition.EvalsToInTime machine.step (initList machine (PCP.GraphTables.tableBits table))
-      (some ⟨none, ((), none), resultTapes table.vertices table.darts (rowsBits table)⟩)
-      (timePolynomial.eval (PCP.GraphTables.tableBits table).length) := by
-  rw [initial_configuration, tableBits_header_rows]
-  exact splitInTime table.vertices table.darts (rowsBits table) () none
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineTableSplit
 

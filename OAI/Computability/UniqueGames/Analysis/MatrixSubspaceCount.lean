@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.CompressionCountLemmas
 
 namespace OAI
@@ -43,13 +44,6 @@ private theorem finite_color_space : Finite C :=
   Finite.of_injective (Module.finBasis F2 C).equivFun
     (Module.finBasis F2 C).equivFun.injective
 
-private theorem finite_endomorphisms : Finite (C →ₗ[F2] C) := by
-  let : Finite C := finite_color_space
-  exact Finite.of_injective (fun f : C →ₗ[F2] C => (f : C → C)) DFunLike.coe_injective
-
-private theorem finite_subspaces : Finite (Submodule F2 C) := by
-  let : Finite (C →ₗ[F2] C) := finite_endomorphisms
-  exact Finite.of_surjective _ endomorphism_range_surjective
 
 theorem card_binary_subspaces_le :
     Nat.card (Submodule F2 C) ≤ 2 ^ (finrank F2 C * finrank F2 C) := by
@@ -63,26 +57,6 @@ theorem card_binary_subspaces_le_of_finrank_le (s : ℕ) (hs : finrank F2 C ≤ 
   exact card_binary_subspaces_le.trans
     (Nat.pow_le_pow_right (by decide) (Nat.mul_le_mul hs hs))
 
-theorem card_admissible_subspaces_le (P : Submodule F2 C → Prop) :
-    Nat.card {S : Submodule F2 C // P S} ≤ 2 ^ (finrank F2 C * finrank F2 C) := by
-  let : Finite (Submodule F2 C) := finite_subspaces
-  exact (Nat.card_le_card_of_injective Subtype.val Subtype.val_injective).trans
-    card_binary_subspaces_le
-
-/-- Counting fixed colors together with actual admissible subspaces gives
-precisely the `q * 2^(s*s)` denominator budget from (5.13). -/
-theorem card_color_admissible_subspaces_le (P : Submodule F2 C → Prop) :
-    Nat.card (C × {S : Submodule F2 C // P S}) ≤
-      Nat.card C * 2 ^ (finrank F2 C * finrank F2 C) := by
-  rw [Nat.card_prod]
-  exact Nat.mul_le_mul_left _ (card_admissible_subspaces_le P)
-
-theorem card_color_admissible_subspaces_le_of_finrank_le
-    (P : Submodule F2 C → Prop) (s : ℕ) (hs : finrank F2 C ≤ s) :
-    Nat.card (C × {S : Submodule F2 C // P S}) ≤ Nat.card C * 2 ^ (s * s) := by
-  exact (card_color_admissible_subspaces_le P).trans
-    (Nat.mul_le_mul_left _
-      (Nat.pow_le_pow_right (by decide) (Nat.mul_le_mul hs hs)))
 
 end BinaryField
 

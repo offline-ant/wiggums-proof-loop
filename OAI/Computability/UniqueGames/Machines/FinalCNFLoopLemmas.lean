@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.FinalCNFStream
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
 import OAI.Computability.UniqueGames.Machines.MachineDrain
@@ -42,20 +43,8 @@ theorem rowInvariant_succ (plan : Plan) (table : GraphTables.Table) (r : Nat)
     LoopInvariant table (r + 1)
       (rowResultTapes plan base table ⟨r, hr⟩
         (inputStream table (remainingEvents table (r + 1)))) := by
-  constructor
-  · exact rowResult_input _ _ _ _ _
-  · exact (rowResult_frame _ _ _ _ _ .archive (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide)).trans invariant.archive
-  · exact (rowResult_frame _ _ _ _ _ .vertices (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide)).trans invariant.vertices
-  · exact (rowResult_frame _ _ _ _ _ .darts (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide)).trans invariant.darts
-  · exact rowResult_index _ _ _ _ _
-  · exact rowResult_tail _ _ _ _ _
-  · exact rowResult_head _ _ _ _ _
-  · exact rowResult_reverse _ _ _ _ _
-  · exact (rowResult_frame _ _ _ _ _ .scratch (by decide) (by decide) (by decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide)).trans invariant.scratch
+  rcases invariant with ⟨hi, ha, hv, hd, hx, ht, hh, hr, hs⟩
+  constructor <;> simp_all [rowResult_frame]
 
 theorem rowWords_nonempty (table : GraphTables.Table) (e : Fin table.darts) :
     encodeWords (GraphTables.rowWords table.rows[e]) ≠ [] := by
@@ -122,11 +111,11 @@ end
 
 /-!
 The complete actual output-producing trace of the final CNF machine. Its
-terminal configuration still contains private work tapes; FinalCNFCleanup
+terminal configuration still contains private work tapes; MachineCanonicalOutput
 supplies the subsequent canonical halt required by the machine interface.
 -/
 
-open Turing PCP PCP.AlphabetTable FinalCNFTableAdapter
+open Turing PCP PCP.AlphabetTable
 
 def emittedBytes (plan : Plan) (table : GraphTables.Table) : List Bool :=
   encodeWords [6 * table.vertices + 36864 * table.darts, 40960 * table.darts] ++
@@ -147,11 +136,11 @@ structure RawRun (plan : Plan) (table : GraphTables.Table) where
 
 theorem header_loopInvariant (table : GraphTables.Table) :
     LoopInvariant table 0 (headerResultTapes table.vertices table.darts
-      (tableRowsBits (genericTable table))) := by
+      (tableRowsBits table)) := by
   constructor
   · rw [headerResultTapes_input, inputStream_remaining_zero]
   · rw [headerResultTapes_archive]
-    exact (tableBits_header_rows (genericTable table)).symm.trans (genericTable_tableBits table)
+    exact (tableBits_header_rows table).symm
   · rfl
   · rfl
   · exact headerResultTapes_rowIndex _ _ _
@@ -163,14 +152,13 @@ theorem header_loopInvariant (table : GraphTables.Table) :
 /-- The input is read from the genuine `initList` configuration. Header, every
 row, final guard, and reversal are all actual transitions of this one program. -/
 noncomputable def rawRun (plan : Plan) (table : GraphTables.Table) : RawRun plan table := by
-  let base := headerResultTapes table.vertices table.darts (tableRowsBits (genericTable table))
+  let base := headerResultTapes table.vertices table.darts (tableRowsBits table)
   let ambient : Ambient := ((), fun _ => false)
   have headerRun : StateTransition.EvalsToInTime (machine headerPlan plan).step
       (initList (machine headerPlan plan) (GraphTables.tableBits table))
       (some ⟨some .guard, ((ambient, ()), none), base⟩)
-      (headerTimePolynomial.eval (GraphTables.tableBits table).length) := by
-    simpa only [genericTable_tableBits, genericTable_vertices, genericTable_darts, base, ambient]
-      using initializedTableHeaderInTime plan (genericTable table)
+      (headerTimePolynomial.eval (GraphTables.tableBits table).length) :=
+    initializedTableHeaderInTime plan table
   let loop := loopInTime headerPlan plan table table.darts 0 (by omega)
     base ambient (header_loopInvariant table)
   have acc : loop.finalTapes .accumulator = (emittedBytes plan table).reverse := by
@@ -218,19 +206,11 @@ inductive Tape
   | quotientFirst | quotientSecond | remainderFirst | remainderSecond
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.inputVertex, .table, .output, .emitScratch,
-  .queryReverse, .queryIndex, .lookupOutput, .lookupWork, .lookupRestore, .quotientFirst,
-  .quotientSecond, .remainderFirst, .remainderSecond]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.inputVertex, .table, .output, .emitScratch,
+  .queryReverse, .queryIndex, .lookupOutput, .lookupWork, .lookupRestore, .quotientFirst,
+  .quotientSecond, .remainderFirst, .remainderSecond}
+  complete x := by cases x <;> simp
 
 inductive Label (d : Nat)
   | initialize

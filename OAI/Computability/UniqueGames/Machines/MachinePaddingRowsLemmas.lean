@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
 
@@ -11,17 +12,9 @@ inductive Control
   | initialize | guard | bump
   deriving DecidableEq
 
-protected abbrev Control.enumList : List Control := [.initialize, .guard, .bump]
-
-protected theorem Control.enumList_getElem?_ctorIdx_eq (x : Control) :
-    Control.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Control.enumList_nodup : Control.enumList.Nodup := by decide
-
 instance : Fintype Control where
-  elems := ⟨Control.enumList, Control.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.initialize, .guard, .bump}
+  complete x := by cases x <;> simp
 
 abbrev Tape := Fin 6 ⊕ Unit
 abbrev Label (d : Nat) := MachineDummyRows.Label d ⊕ Control

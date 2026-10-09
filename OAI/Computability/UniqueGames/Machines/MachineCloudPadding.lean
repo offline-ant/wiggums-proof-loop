@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCeilingPower
 import OAI.Computability.UniqueGames.Machines.MachineCloudCount
 
@@ -146,18 +147,10 @@ inductive Tape
   | table | query | count | work | scratch | spare | power | level | fuel | product
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.table, .query, .count, .work, .scratch, .spare,
-  .power, .level, .fuel, .product]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.table, .query, .count, .work, .scratch, .spare,
+  .power, .level, .fuel, .product}
+  complete x := by cases x <;> simp
 
 inductive Label
   | init | countCode (l : MachineCloudCount.Label)
@@ -245,15 +238,6 @@ theorem powerView_right (j : Tape) (k : MachineCeilingPower.Tape)
     (h : powerView j = some k) : powerTape k = j := by
   cases j <;> cases k <;> simp_all [powerView, powerTape]
 
-@[simp] theorem countMemory (a b c d e f g h i j : List Bool) :
-    Placement.tapes countView (MachineCloudCount.memory a d b e c f)
-      (memory a b c d e f g h i j) = memory a b c d e f g h i j := by
-  funext k; cases k <;> rfl
-
-@[simp] theorem powerMemory (a b c d e f g h i j : List Bool) :
-    Placement.tapes powerView (MachineCeilingPower.memory c d g e h i f j)
-      (memory a b c d e f g h i j) = memory a b c d e f g h i j := by
-  funext k; cases k <;> rfl
 
 theorem countTapes (a b c d e f : List Bool) (extra : Tape → List Bool) :
     Placement.tapes countView (MachineCloudCount.memory a d b e c f) extra =
@@ -289,10 +273,6 @@ def program : Label → TM2.Stmt Alphabet Label (State σ)
   | .subtract => subtractLoop
   | .restore => Reduction.MachineTransfer.loopAt
       .scratch .count id false .restore none
-
-private theorem appendTrace {α : Type} (f : α → α) {a b : Nat} {x y z : α}
-    (hs : f^[a] x = y) (ht : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm a b, Function.iterate_add_apply, hs, ht]
 
 theorem countTrace (t : GraphTables.Table) (v : Fin t.vertices)
     (suffix : List Bool) (ambient : σ) (register : Option Bool) :
@@ -387,7 +367,7 @@ theorem subtractTrace (table query level : List Bool) (k p : Nat) (hkp : k ≤ p
   simp only [mid, memory, List.length_replicate, List.reverse_replicate, List.map_id,
     Reduction.MachineTransfer.tapesAt, update_scratch, update_count] at hr
   rw [MachineCeilingPower.replicate_encodeWord, Nat.add_zero] at hr
-  have h := appendTrace _ hs hr
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hs hr
   simpa only [show (k + 1) + (k + 1) = 2 * k + 2 by omega, Nat.add_zero] using h
 
 theorem branchStep_zero (table query : List Bool) (ambient : σ) (register : Option Bool) :
@@ -438,7 +418,7 @@ theorem postTrace (table query : List Bool) (k : Nat) (ambient : σ)
     have hs := subtractTrace table query (encodeWord (PreprocessingLevels.boundedLevel (k + 1)))
       (k + 1) (PreprocessingLevels.paddedSize (k + 1))
       (PreprocessingLevels.le_paddedSize (k + 1)) ambient none
-    have h := appendTrace _ hb (appendTrace _ hp hs)
+    have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hb (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hp hs)
     simpa only [postTime, Nat.succ_ne_zero, ite_false, padding,
       PreprocessingLevels.cloudPaddedSize_of_pos (Nat.succ_pos k)] using h
 
@@ -473,7 +453,7 @@ theorem cloudPaddingTrace (t : GraphTables.Table) (v : Fin t.vertices)
         memory (GraphTables.tableBits t) (encodeWord v.val ++ suffix)
           (encodeWord 0) [] [] [] [] [] [] []⟩ :=
     initStep _ _ ambient register
-  exact appendTrace _ (appendTrace _ hi (countTrace t v suffix ambient register))
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hi (countTrace t v suffix ambient register))
     (postTrace _ _ (PreprocessingCloudIndex.cloudSize t v) ambient none)
 
 def inputLength (t : GraphTables.Table) (v : Fin t.vertices) (suffix : List Bool) : Nat :=
@@ -515,28 +495,6 @@ theorem totalTime_le (t : GraphTables.Table) (v : Fin t.vertices) (suffix : List
   unfold totalTime
   omega
 
-/-- The bound is quadratic in the combined actual graph/query tape length.
-All transitions are supplied by the concrete program and its phase traces. -/
-def cloudPaddingInTime (t : GraphTables.Table) (v : Fin t.vertices)
-    (suffix : List Bool) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some .init, ((ambient, false), register),
-        memory (GraphTables.tableBits t) (encodeWord v.val ++ suffix) [] [] [] [] [] [] [] []⟩
-      (some ⟨none, ((ambient, false), none),
-        memory (GraphTables.tableBits t) (encodeWord v.val ++ suffix)
-          (encodeWord (PreprocessingCloudIndex.cloudSize t v)) [] [] []
-          (encodeWord (padding (PreprocessingCloudIndex.cloudSize t v)))
-          (encodeWord (PreprocessingLevels.boundedLevel (PreprocessingCloudIndex.cloudSize t v)))
-          [] []⟩)
-      (timePolynomial.eval (inputLength t v suffix)) where
-  steps := totalTime t v
-  evals_in_steps := cloudPaddingTrace t v suffix ambient register
-  steps_le_m := totalTime_le t v suffix
-
-theorem count_add_padding (k : Nat) : k + padding k = PreprocessingLevels.cloudPaddedSize k := by
-  have h := (PreprocessingLevels.cloudPaddedSize_bounds k).1
-  unfold padding
-  omega
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCloudPadding
 

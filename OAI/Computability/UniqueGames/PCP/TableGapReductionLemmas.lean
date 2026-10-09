@@ -1,10 +1,11 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.GraphIterationBoundsLemmas
 import OAI.Computability.UniqueGames.PCP.LoopInitializationLemmas
 import OAI.Computability.UniqueGames.PCP.RawInitialTablesLemmas
 import OAI.Computability.UniqueGames.PCP.SourceGapLemmas
 import OAI.Computability.UniqueGames.PCP.TableIteration
 import OAI.Computability.UniqueGames.Reduction.ActualSourceLemmas
-import OAI.Computability.UniqueGames.Reduction.IncidenceProbabilityLemmas
+import OAI.Computability.UniqueGames.Reduction.SourceCounting
 
 namespace OAI
 
@@ -22,10 +23,6 @@ variable (H : BaseTable)
 
 include certificate
 
-theorem run_gap (n : Nat) (input : Input) :
-    min (2 ^ n * gap input) FinalConstants.cap ≤ gap (TableIteration.run H n input) :=
-  AmplificationIteration.run_gap (step H) gap FinalConstants.cap FinalConstants.cap_positive.le
-    (RoundTableGap.step_gap H certificate) n input
 
 theorem output_gap (F : Formula) (unsat : ¬ F.Satisfiable) :
     FinalConstants.cap ≤ gap (TableIteration.output H F) := by
@@ -85,7 +82,6 @@ theorem finalClauseGap_le_one : PCPIteration.finalClauseGap ≤ 1 := by
 end UniqueGamesTheorem.Foundations.PCP.TableGapReduction
 
 
-
 namespace UniqueGamesTheorem.Outer.HastadSource
 
 open UniqueGamesTheorem.Foundations Target Complexity PCP
@@ -103,7 +99,7 @@ def asSource (input : SourceEncoding.Input) : Source :=
 theorem failure_add_success (input : SourceEncoding.Input)
     (bits : Fin input.variables → Bool) :
     (asSource input).failure bits + success input bits = 1 := by
-  have h := SourceProbability.failure_add_satisfaction (asSource input) bits
+  have h := SourceCounting.failure_add_satisfaction (asSource input) bits
   rw [show (asSource input).sourceList = input.equations from
     Source.sourceList_ofList input.equations input.nonempty] at h
   exact h

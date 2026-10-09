@@ -1,7 +1,9 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Reduction.CanonicalBodyTemplateLemmas
 import OAI.Computability.UniqueGames.Reduction.FixedOutcomes
 import OAI.Computability.UniqueGames.Reduction.MachineAddressEdgeLemmas
 import OAI.Computability.UniqueGames.Reduction.OutputTranslationsLemmas
+import OAI.Computability.UniqueGames.Decoding.TableKeysAddressGameLemmas
 
 namespace OAI
 
@@ -42,9 +44,6 @@ def rows (k : Nat) {s d : Nat} (T : NoiseTables.Table s d) :
     (p : Parameter k T) (b : Fin k → Bool) : (row T p b).right.length = 1+9*k :=
   CanonicalBodyMachine.template_length _ _ _
 
-@[simp] theorem rows_length (k : Nat) {s d : Nat} (T : NoiseTables.Table s d) :
-    (rows k T).length = 2^((2*k+1)*(s+d+1)) * T.vectors.length := by
-  simp only [rows, List.length_map, FixedOutcomes.tableParams_length]
 
 @[simp] theorem selected_rows (k : Nat) {s d : Nat} (T : NoiseTables.Table s d)
     (b : Fin k → Bool) :
@@ -119,11 +118,12 @@ theorem correct_rows {k s d : Nat} (T : NoiseTables.Table s d)
 
 theorem payload_row {k s d : Nat} (T : NoiseTables.Table s d)
     (p : Parameter k T) (b : Fin k → Bool) (fields : Fin k → Fin 4 → Nat)
-    (B C : Nat) :
-    MachineOutcomeRows.payload B C (values fields) (row T p b) =
-      AddressByteSemantics.edgeBits B C fields p.1 (rightMap T p) (bitVector b) := by
+    (B : Nat) :
+    MachineOutcomeRows.payload B (values fields) (row T p b) =
+      AddressByteSemantics.edgeBits B 0 fields p.1 (rightMap T p) (bitVector b) := by
   unfold MachineOutcomeRows.payload MachineAddressEdge.edgeBits
   rw [values_row_left, values_row_right, AddressByteSemantics.edgeBits_split]
+  simp only [Nat.zero_add, AddressByteSemantics.queryRank]
   rfl
 
 def rhsBits (S : Source) {k : Nat} (U : ActualGame.Question S k) : Fin k → Bool :=
@@ -137,51 +137,73 @@ theorem rightMap_actual (S : Source) {k s d : Nat} (T : NoiseTables.Table s d)
     rightMap T p =
       (ActualGame.rightQuery S k (TableReduction.tableSkeleton T) (FixedOutcomes.assemble U p)).2 := rfl
 
+/-- A direct address is the radix rank of its canonical query words. -/
+theorem directQuery_rank (S : Source) {k s d : Nat} (q : ActualGame.Query S k s d) :
+    (Decoder.TableKeysAddressGame.queryAddress S k s d q).val =
+      AddressByteSemantics.queryRank (CanonicalAddress.base S.variables S.occurrences s d)
+        (CanonicalBodyTemplate.sourceFields q.1 (ActualGame.names S)) q.2
+        (fun j => ActualGame.rhs S (q.1 j)) := by
+  rw [AddressByteSemantics.queryRank, AddressByteSemantics.queryWords_actual]
+  rfl
+
+theorem directEdge_bits (S : Source) (k : Nat) {s d : Nat}
+    (g : SplitGadget s d) (omega : ActualGame.Outcome S k g) :
+    encodeWords (constraintWords (Decoder.TableKeysAddressGame.addressEdge S k g omega)) =
+      AddressByteSemantics.edgeBits (CanonicalAddress.base S.variables S.occurrences s d) 0
+        (CanonicalBodyTemplate.sourceFields omega.1.1 (ActualGame.names S))
+        omega.1.2 (ActualGame.rightQuery S k g omega).2
+        (fun j => ActualGame.rhs S (omega.1.1 j)) := by
+  congr 1
+  unfold constraintWords
+  change [(Decoder.TableKeysAddressGame.queryAddress S k s d
+    (ActualGame.leftQuery S k g omega)).val,
+    (Decoder.TableKeysAddressGame.queryAddress S k s d
+    (ActualGame.rightQuery S k g omega)).val] ++ _ = _
+  rw [directQuery_rank, directQuery_rank]
+  simp only [AddressByteSemantics.edgeWords, Nat.zero_add]
+  rfl
+
 /-- Each static row emits exactly the concrete game's constraint encoding. -/
 theorem payload_row_actual (S : Source) (k : Nat) {s d : Nat}
     (T : NoiseTables.Table s d) (U : ActualGame.Question S k) (p : Parameter k T) :
     MachineOutcomeRows.payload
-        (CanonicalAddress.base S.variables S.occurrences s d) (AddressGame.bodyCapacity S k s d)
+        (CanonicalAddress.base S.variables S.occurrences s d)
         (values (CanonicalBodyTemplate.sourceFields U (ActualGame.names S)))
         (row T p (rhsBits S U)) =
-      encodeWords (constraintWords (AddressGame.addressEdge S k (TableReduction.tableSkeleton T)
+      encodeWords (constraintWords (Decoder.TableKeysAddressGame.addressEdge S k (TableReduction.tableSkeleton T)
         (FixedOutcomes.assemble U p))) := by
   rw [payload_row, bitVector_rhsBits, rightMap_actual S T U p]
-  exact (AddressByteSemantics.addressEdge_bits S k (TableReduction.tableSkeleton T)
-    (FixedOutcomes.assemble U p)).symm
+  exact (directEdge_bits S k (TableReduction.tableSkeleton T) (FixedOutcomes.assemble U p)).symm
 
 def tupleBits (S : Source) (k : Nat) {s d : Nat} (T : NoiseTables.Table s d)
     (U : ActualGame.Question S k) : List Bool :=
   (FixedOutcomes.tableParams k T).flatMap (fun p =>
-    encodeWords (constraintWords (AddressGame.addressEdge S k (TableReduction.tableSkeleton T)
+    encodeWords (constraintWords (Decoder.TableKeysAddressGame.addressEdge S k (TableReduction.tableSkeleton T)
       (FixedOutcomes.assemble U p))))
 
 theorem tuplePayload_actual (S : Source) (k : Nat) {s d : Nat}
     (T : NoiseTables.Table s d) (U : ActualGame.Question S k) :
     (MachineOutcomeRows.selected (rows k T) (rhsBits S U)).flatMap
         (MachineOutcomeRows.payload
-          (CanonicalAddress.base S.variables S.occurrences s d) (AddressGame.bodyCapacity S k s d)
+          (CanonicalAddress.base S.variables S.occurrences s d)
           (values (CanonicalBodyTemplate.sourceFields U (ActualGame.names S)))) =
       tupleBits S k T U := by
   rw [selected_rows, List.flatMap_map]
   simp only [payload_row_actual, tupleBits]
   rfl
 
-private theorem encodeWords_flatMap {Item : Type*} (items : List Item)
-    (words : Item → List Nat) :
-    encodeWords (items.flatMap words) = items.flatMap (fun x => encodeWords (words x)) := by
-  induction items with
-  | nil => rfl
-  | cons x items ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 /-- Complete output-byte factorization used by the actual outer loop. -/
 theorem gameBits_factor (S : Source) (k : Nat) {s d : Nat} (T : NoiseTables.Table s d) :
-    gameBits (AddressGame.tableOutput S k T) =
-      encodeWords [(AddressGame.tableOutput S k T).vertices, 2^s,
-        (AddressGame.tableOutput S k T).constraints.length] ++
+    gameBits (Decoder.TableKeysAddressGame.tableOutput S k T) =
+      encodeWords [(Decoder.TableKeysAddressGame.tableOutput S k T).vertices, 2^s,
+        (Decoder.TableKeysAddressGame.tableOutput S k T).constraints.length] ++
       (FixedOutcomes.occurrenceTuples S.occurrences k).flatMap (tupleBits S k T) := by
-  rw [gameBits, gameWords, encodeWords_append, encodeWords_flatMap]
-  rw [FixedOutcomes.tableOutput_constraints]
+  rw [gameBits, gameWords, encodeWords_append, UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap]
+  change _ ++ ((ActualEnumeration.indexedOutcomes S.occurrences k s d
+    (List.finRange T.vectors.length)).map
+      (Decoder.TableKeysAddressGame.addressEdge S k (TableReduction.tableSkeleton T))).flatMap
+        (fun e => encodeWords (constraintWords e)) = _
+  erw [FixedOutcomes.indexedOutcomes_factor, List.flatMap_map]
   erw [List.flatMap_assoc]
   congr 1
   apply List.flatMap_congr

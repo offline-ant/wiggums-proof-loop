@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.FinRange
 import OAI.Computability.UniqueGames.PCP.RawInitialMachineStart
 import OAI.Computability.UniqueGames.PCP.RawInitialTablesLemmas
@@ -72,17 +73,6 @@ theorem startTapes_eq (n m : Nat) (input : List Bool) :
   funext tape
   cases tape <;> rfl
 
-theorem decrement_counter (n i remaining : Nat) (input reversed : List Bool) :
-    Function.update (loopTapes n i (remaining + 1) input reversed)
-      Tape.counter (encodeWord remaining) = loopTapes n i remaining input reversed := by
-  funext tape
-  cases tape <;> simp [loopTapes]
-
-theorem increment_index (n i remaining : Nat) (input reversed : List Bool) :
-    Function.update (loopTapes n i remaining input reversed)
-      Tape.index (true :: encodeWord i) = loopTapes n (i + 1) remaining input reversed := by
-  funext tape
-  cases tape <;> simp [loopTapes, encodeWord, List.replicate_succ]
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineLoopData
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.AlphabetGraphLemmas
 import OAI.Computability.UniqueGames.PCP.Emitter
 import OAI.Computability.UniqueGames.PCP.QueriesLemmas
@@ -52,9 +53,6 @@ theorem localCount_lt_bound (q : Nat) : localCount q < fieldBound q := by
   unfold fieldBound
   omega
 
-theorem local_add_pair_lt_bound (q : Nat) : localCount q + pairTapeCount q < fieldBound q := by
-  unfold fieldBound
-  omega
 
 theorem twelve_local_lt_bound (q : Nat) : 12 * localCount q < fieldBound q := by
   unfold fieldBound
@@ -190,14 +188,6 @@ theorem fieldForQueryEvent_eval (n m q : Nat) (edge : Fin m) (tail head : Fin n)
   rw [fieldForQueryEvent_eq_rawQueryField]
   exact rawQueryField_eval n m q edge tail head _
 
-theorem fieldForQueryEvent_eval_verifier (n m q : Nat)
-    (G : ConstraintGraph (Fin n) (Fin m) (Fin q)) (edge : Fin m)
-    (event : AlphabetGraph.LocalEvent (Fin q)) (slot : Fin 6) :
-    eval (fieldForQueryEvent q event slot (G.accepts edge))
-      (values n m edge.val (G.tail edge).val (G.head edge).val) =
-      (vertexEquiv n m q (.inr ((AlphabetGraph.verifier G).query (edge, event) slot))).val := by
-  rw [← Queries.globalize_query G edge event slot]
-  exact fieldForQueryEvent_eval n m q edge (G.tail edge) (G.head edge) event slot _
 
 def dartTailTerms (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
     (slot : Fin 6) (orientation : Bool) : Terms :=
@@ -223,58 +213,6 @@ theorem fieldForDartTail_eval (n m q : Nat) (edge : Fin m) (tail head : Fin n)
   | false => exact eventVertexField_eval n m q edge event tail.val head.val
   | true => exact fieldForQueryEvent_eval n m q edge tail head event slot P
 
-def CoefficientsBounded (q : Nat) (terms : Terms) : Prop :=
-  ∀ term ∈ terms, term.2 < fieldBound q
-
-theorem headerVertices_coefficients (q : Nat) : CoefficientsBounded q (headerVertices q).terms := by
-  simp only [CoefficientsBounded, headerVertices, List.mem_cons, List.not_mem_nil, or_false]
-  intro term h
-  rcases h with rfl | rfl
-  · exact tapeCount_lt_bound q
-  · exact local_add_pair_lt_bound q
-
-theorem headerDarts_coefficients (q : Nat) : CoefficientsBounded q (headerDarts q).terms := by
-  intro term h
-  have heq : term = (1, 12 * localCount q) := by simpa [headerDarts] using h
-  subst term
-  exact twelve_local_lt_bound q
-
-theorem eventVertexField_coefficients (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q)) :
-    CoefficientsBounded q (eventVertexField q event).terms := by
-  intro term h
-  have heq : term = (2, localCount q) := by simpa [eventVertexField] using h
-  subst term
-  exact localCount_lt_bound q
-
-theorem rawQueryTerms_coefficients (q : Nat) (query : Queries.RawQuery q) :
-    CoefficientsBounded q (rawQueryTerms q query) := by
-  cases query with
-  | inl query =>
-    rcases query with ⟨side, tape⟩
-    intro term h
-    simp only [rawQueryTerms, vertexQueryTerms, List.mem_cons, List.not_mem_nil, or_false] at h
-    rcases h with rfl | rfl
-    · exact localCount_lt_bound q
-    · exact tapeCount_lt_bound q
-  | inr tape =>
-    intro term h
-    simp only [rawQueryTerms, edgeQueryTerms, List.mem_cons, List.not_mem_nil, or_false] at h
-    rcases h with rfl | rfl | rfl
-    · exact localCount_lt_bound q
-    · exact tapeCount_lt_bound q
-    · exact pairTapeCount_lt_bound q
-
-theorem queryEventTerms_coefficients (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
-    (slot : Fin 6) : CoefficientsBounded q (queryEventTerms q event slot) :=
-  rawQueryTerms_coefficients q _
-
-theorem reverseDartField_coefficients (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
-    (slot : Fin 6) (orientation : Bool) :
-    CoefficientsBounded q (reverseDartField q event slot orientation).terms := by
-  intro term h
-  have heq : term = (2, 12 * localCount q) := by simpa [reverseDartField] using h
-  subst term
-  exact twelve_local_lt_bound q
 
 theorem rawQueryTerms_length_le (q : Nat) (query : Queries.RawQuery q) :
     (rawQueryTerms q query).length ≤ 3 := by
@@ -286,12 +224,6 @@ theorem queryEventTerms_length_le (q : Nat) (event : AlphabetGraph.LocalEvent (F
     (slot : Fin 6) : (queryEventTerms q event slot).length ≤ 3 :=
   rawQueryTerms_length_le q _
 
-theorem dartTailTerms_coefficients (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
-    (slot : Fin 6) (orientation : Bool) :
-    CoefficientsBounded q (dartTailTerms q event slot orientation) := by
-  cases orientation with
-  | false => exact eventVertexField_coefficients q event
-  | true => exact queryEventTerms_coefficients q event slot
 
 theorem dartTailTerms_length_le (q : Nat) (event : AlphabetGraph.LocalEvent (Fin q))
     (slot : Fin 6) (orientation : Bool) :
@@ -300,8 +232,6 @@ theorem dartTailTerms_length_le (q : Nat) (event : AlphabetGraph.LocalEvent (Fin
   | false => simp [dartTailTerms]
   | true => exact queryEventTerms_length_le q event slot
 
-theorem offset_lt {bound : Nat} (field : Field bound) : field.offset.val < bound :=
-  field.offset.isLt
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.Addresses
 

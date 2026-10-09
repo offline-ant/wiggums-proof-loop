@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.PoweringInitializeFrame
 import OAI.Computability.UniqueGames.Machines.PoweringMachineOuterLoopLemmas
 import OAI.Computability.UniqueGames.Machines.PoweringMachineVertex
@@ -115,19 +116,6 @@ theorem totalBudget_le_time (d n pushBound tapeCount vertices inputLength : Nat)
   rw [time_eval]
   exact totalBudget_mono_vertices d n pushBound tapeCount inputLength hvertices
 
-/-- Direct arithmetic interface for the global setup/loop and cleanup bounds. -/
-theorem setup_loop_finish_le_time (d n pushBound tapeCount vertices inputLength : Nat)
-    (hvertices : vertices ≤ inputLength) :
-    ((3 * vertices + 5) +
-        (vertices * (PoweringMachineVertex.budget d n inputLength + 2) + 1)) +
-      (2 * (vertices + (2 * d ^ (n + 1)) * vertices) + 6 +
-        tapeCount * (inputLength +
-          ((3 * vertices + 5) +
-            (vertices * (PoweringMachineVertex.budget d n inputLength + 2) + 1)) * pushBound +
-          vertices + (2 * d ^ (n + 1)) * vertices + 3)) ≤
-      (time d n pushBound tapeCount).eval inputLength := by
-  simpa only [totalBudget, preBudget, finishBudget, PoweringTableLayout.blockSize] using
-    totalBudget_le_time d n pushBound tapeCount vertices inputLength hvertices
 
 /-- Numerical bounds on two actual phases can use the same fixed polynomial. -/
 theorem execution_budget_le_time (d n pushBound tapeCount vertices inputLength : Nat)
@@ -143,13 +131,6 @@ theorem execution_budget_le_time (d n pushBound tapeCount vertices inputLength :
     _ ≤ (time d n pushBound tapeCount).eval inputLength :=
       totalBudget_le_time d n pushBound tapeCount vertices inputLength hvertices
 
-/-- Typed graph input supplies the required vertex-count bound itself. -/
-theorem graph_totalBudget_le_time {vertices d : Nat} (graph : PortTables.Table vertices d)
-    (n pushBound tapeCount : Nat) :
-    totalBudget d n pushBound tapeCount vertices (PortTables.tableBits graph).length ≤
-      (time d n pushBound tapeCount).eval (PortTables.tableBits graph).length :=
-  totalBudget_le_time d n pushBound tapeCount vertices (PortTables.tableBits graph).length
-    (PortTables.vertices_le_tableBits_length graph)
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringPolynomialBudget
 
@@ -209,19 +190,6 @@ theorem finish_steps_le_of_execution (d radius : Nat) (input : List Bool)
     (input.length + priorBudget * Runtime.programPushBound (PoweringMachineGlobal.machine d radius))
     (stackLength_le_from_input (PoweringMachineGlobal.machine d radius) input before priorBudget prior)
 
-/-- Total transitions of the actual prefix plus the exact finishing cost. -/
-theorem total_steps_le_of_execution (d radius : Nat) (input : List Bool)
-    (before : (PoweringMachineGlobal.machine d radius).Cfg)
-    (priorBudget vertices darts : Nat)
-    (prior : StateTransition.EvalsToInTime (PoweringMachineGlobal.machine d radius).step
-      (initList (PoweringMachineGlobal.machine d radius) input) (some before) priorBudget) :
-    prior.steps + PoweringMachineFinish.steps (PoweringMachineGlobal.enumeration radius)
-      (PoweringMachineGlobal.outputTape radius) before.stk vertices darts ≤
-      priorBudget + (2 * (vertices + darts) + 6 + tapeCount radius *
-        (input.length + priorBudget * Runtime.programPushBound
-          (PoweringMachineGlobal.machine d radius) + vertices + darts + 3)) :=
-  Nat.add_le_add prior.steps_le_m
-    (finish_steps_le_of_execution d radius input before priorBudget vertices darts prior)
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringRuntimeBudget
 

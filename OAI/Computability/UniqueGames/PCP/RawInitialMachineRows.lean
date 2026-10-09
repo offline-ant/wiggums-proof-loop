@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.RawInitialMachinePhases
 
 namespace OAI
@@ -21,9 +22,6 @@ def outputTapes (base : Tape → List Bool) (bits : List Bool) : Tape → List B
 @[simp] theorem outputTapes_reversed (base : Tape → List Bool) (bits : List Bool) :
     outputTapes base bits .reversed = bits ++ base .reversed := by simp [outputTapes]
 
-theorem outputTapes_other (base : Tape → List Bool) (bits : List Bool)
-    (tape : Tape) (h : tape ≠ .reversed) : outputTapes base bits tape = base tape := by
-  simp [outputTapes, h]
 
 @[simp] theorem outputTapes_twice (base : Tape → List Bool) (first second : List Bool) :
     outputTapes (outputTapes base first) second = outputTapes base (second ++ first) := by
@@ -31,10 +29,6 @@ theorem outputTapes_other (base : Tape → List Bool) (bits : List Bool)
   by_cases h : tape = .reversed
   · subst tape; simp [List.append_assoc]
   · simp [outputTapes, h]
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : ℕ} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 private theorem copyTrace (phase : CopyPhase) (base : Tape → List Bool)
     (n : ℕ) (hsource : base (copySource phase) = encodeWord n)
@@ -94,7 +88,7 @@ private theorem rowEndTrace (slot : Fin 3) (orientation : Bool) (base : Tape →
   change advance^[1] (some ⟨some (.relation slot orientation), (signs, none), third⟩) =
     some ⟨some (relationNext slot orientation), (signs, none),
       outputTapes third (relationOutput slot orientation (signs, none))⟩ at h4
-  have total := trace_trans _ (trace_trans _ (trace_trans _ h1 h2) h3) h4
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2) h3) h4
   have hout : outputTapes third (relationOutput slot orientation (signs, none)) =
       outputTapes base (rowEndBits slot orientation i signs) := by
     simp only [third, second, first, outputTapes_twice]
@@ -138,7 +132,7 @@ theorem falseRowTrace (slot : Fin 3) (base : Tape → List Bool) (n i : ℕ)
   have h3 := rowEndTrace slot false second i
     (by simpa [second, first, outputTapes] using hindex)
     (by simpa [second, first, outputTapes] using hscratch) signs
-  have total := trace_trans _ (trace_trans _ h1 h2) h3
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2) h3
   have hout : outputTapes second (rowEndBits slot false i signs) =
       outputTapes base (encodeWords (RawInitialRows.incidenceWords n i names signs
         (RawInitialTables.slotOrder.symm slot) false)).reverse := by
@@ -171,7 +165,7 @@ theorem trueRowTrace (slot : Fin 3) (base : Tape → List Bool) (n i : ℕ)
   have h2 := rowEndTrace slot true first i
     (by simpa [first, outputTapes] using hindex)
     (by simpa [first, outputTapes] using hscratch) signs
-  have total := trace_trans _ h1 h2
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2
   have hout : outputTapes first (rowEndBits slot true i signs) =
       outputTapes base (encodeWords (RawInitialRows.incidenceWords n i names signs
         (RawInitialTables.slotOrder.symm slot) true)).reverse := by
@@ -203,7 +197,7 @@ theorem pairTrace (slot : Fin 3) (base : Tape → List Bool) (n i : ℕ)
     (by simpa [first, outputTapes] using hname)
     (by simpa [first, outputTapes] using hindex)
     (by simpa [first, outputTapes] using hscratch)
-  have total := trace_trans _ h1 h2
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2
   simpa only [first, outputTapes_twice, pairWords, encodeWords_append, List.reverse_append,
     show (2 * n + 4 * i + 9) +
       (2 * RawInitialRows.nameWord names (RawInitialTables.slotOrder.symm slot) + 2 * i + 7) =
@@ -249,7 +243,7 @@ theorem rowsTrace (base : Tape → List Bool) (n i : ℕ)
     (some ⟨some (.scan (.tailVariables 2)), (signs, none), second⟩) =
     some ⟨some (.cleanupField 0), (signs, none),
       outputTapes second (encodeWords (pairWords 2 n i names signs)).reverse⟩ at h2
-  have total := trace_trans _ (trace_trans _ h0 h1) h2
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h0 h1) h2
   have hout : outputTapes second (encodeWords (pairWords 2 n i names signs)).reverse =
       outputTapes base (encodeWords (RawInitialRows.clauseWords n i names signs)).reverse := by
     simp only [second, first, outputTapes_twice, RawInitialRows.clauseWords,
@@ -260,21 +254,6 @@ theorem rowsTrace (base : Tape → List Bool) (n i : ℕ)
     (2 * n + 6 * i + 2 * names.2.1 + 16) + (2 * n + 6 * i + 2 * names.2.2 + 16) =
       6 * n + 18 * i + 2 * (names.1 + names.2.1 + names.2.2) + 48 by omega] using total
 
-def rowsInTime (base : Tape → List Bool) (n i : ℕ)
-    (names : RawInitialRows.Names) (signs : Signs)
-    (hvariables : base .variables = encodeWord n) (hindex : base .index = encodeWord i)
-    (hname0 : base (.field 0) = encodeWord names.1)
-    (hname2 : base (.field 2) = encodeWord names.2.1)
-    (hname4 : base (.field 4) = encodeWord names.2.2)
-    (hscratch : base .scratch = []) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (.scan (.tailVariables 0)), (signs, none), base⟩
-      (some ⟨some (.cleanupField 0), (signs, none),
-        outputTapes base (encodeWords (RawInitialRows.clauseWords n i names signs)).reverse⟩)
-      (6 * n + 18 * i + 2 * (names.1 + names.2.1 + names.2.2) + 48) where
-  steps := 6 * n + 18 * i + 2 * (names.1 + names.2.1 + names.2.2) + 48
-  evals_in_steps := rowsTrace base n i names signs hvariables hindex hname0 hname2 hname4 hscratch
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineRows
 

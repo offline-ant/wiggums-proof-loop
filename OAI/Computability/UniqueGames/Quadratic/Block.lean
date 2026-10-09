@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.CharP.Two
 import Mathlib.Data.Fin.VecNotation
 import Mathlib.Data.ZMod.Basic
@@ -36,31 +37,6 @@ theorem Q_add (x a : Vec F) : Q (x + a) = Q x + Q a + D x a := by
   ext i
   fin_cases i <;> simp [Q, D] <;> ring
 
-@[simp] theorem D_zero_left (a : Vec F) : D 0 a = 0 := by
-  ext i
-  fin_cases i <;> simp [D]
-
-@[simp] theorem D_zero_right (x : Vec F) : D x 0 = 0 := by
-  ext i
-  fin_cases i <;> simp [D]
-
-theorem D_comm (x a : Vec F) : D x a = D a x := by
-  ext i
-  fin_cases i <;> simp [D, add_comm]
-
-theorem D_add_left (x y a : Vec F) : D (x + y) a = D x a + D y a := by
-  ext i
-  fin_cases i <;> simp [D] <;> ring
-
-theorem D_add_right (x a b : Vec F) : D x (a + b) = D x a + D x b := by
-  rw [D_comm, D_add_left, D_comm a x, D_comm b x]
-
-theorem D_smul_left (t : F) (x a : Vec F) : D (t • x) a = t • D x a := by
-  ext i
-  fin_cases i <;> simp [D, smul_eq_mul] <;> ring
-
-theorem D_smul_right (t : F) (x a : Vec F) : D x (t • a) = t • D x a := by
-  rw [D_comm, D_smul_left, D_comm a x]
 
 @[simp] theorem dot_zero_right (v : Vec F) : dot v 0 = 0 := by simp [dot]
 @[simp] theorem dot_zero_left (y : Vec F) : dot 0 y = 0 := by simp [dot]
@@ -104,11 +80,6 @@ variable [CharP F 2]
   ext i
   exact CharTwo.add_self_eq_zero (x i)
 
-theorem D_eq_polar (x a : Vec F) : D x a = Q (x + a) + Q x + Q a := by
-  rw [Q_add]
-  have h : Q x + Q a + D x a + Q x + Q a =
-      D x a + (Q x + Q x) + (Q a + Q a) := by ac_rfl
-  rw [h, vec_add_self, vec_add_self, add_zero, add_zero]
 
 private theorem cross_self_zero (u w s t : F) :
     (t * u) * (s * w) + (s * u) * (t * w) = 0 := by

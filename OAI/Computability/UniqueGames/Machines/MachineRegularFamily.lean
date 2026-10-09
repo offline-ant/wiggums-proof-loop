@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachinePaddedExpanderFamilyBoundsLemmas
 
@@ -283,10 +284,6 @@ noncomputable def familyInTime (H : SmallTable) (k : Nat) (core : CoreTape → L
     source_initial_state, source_final_state, initial_placement k core hinput houtput,
     final_placement H k core hinput] using placed
 
-private theorem appendTrace {α : Type} (f : α → α) {a b : Nat} {x y z : α}
-    (hs : f^[a] x = y) (ht : f^[b] y = z) : f^[a+b] x = z := by
-  rw [Nat.add_comm a b, Function.iterate_add_apply, hs, ht]
-
 /-- Every retained private symbol is physically popped. -/
 theorem cleanupTrace (H : SmallTable) (m : Nat) (core : CoreTape → List Bool) :
     (advance (TM2.step (program H)))^[2*m+6]
@@ -305,7 +302,7 @@ theorem cleanupTrace (H : SmallTable) (m : Nat) (core : CoreTape → List Bool) 
   simp only [MachineDrain.drainInTime, working_power, working_size, working_level,
     encodeWord_length, update_working_power, update_working_size,
     update_working_level, working_empty] at first second third
-  have all := appendTrace _ (appendTrace _ first second) third
+  have all := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second) third
   have count : 2*m+6 = (m+1+1)+(m+1+1)+(0+1+1) := by omega
   rw [count]
   exact all
@@ -362,36 +359,11 @@ noncomputable def familyCleanInTime (H : SmallTable) (k : Nat)
   exact all.steps_le_m.trans
     (by simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using totalBudget_le k)
 
-@[simp] theorem result_output (H : SmallTable) (k : Nat) (core : CoreTape → List Bool) :
-    frame (resultCore H k core) (.inl 7) = rotor H k := by simp [frame, resultCore]
-
-theorem result_preserves_core (H : SmallTable) (k : Nat) (core : CoreTape → List Bool)
-    (i : CoreTape) (hi : i ≠ 7) : frame (resultCore H k core) (.inl i) = core i := by
-  simp [frame, resultCore, hi]
 
 @[simp] theorem result_private_empty (H : SmallTable) (k : Nat)
     (core : CoreTape → List Bool) (t : NativeTape) :
     frame (resultCore H k core) (.inr t) = [] := rfl
 
-/-- Direct embedding of the entire helper into another finite program. -/
-noncomputable def placedInTime {K Λ : Type} [DecidableEq K]
-    (tape : Tape → K) (view : K → Option Tape)
-    (left : ∀ t, view (tape t) = some t)
-    (right : ∀ j t, view j = some t → tape t = j)
-    (labels : Label → Λ) (exit : Option Λ) (extra : K → List Bool)
-    (H : SmallTable) (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ State)
-    (code : ∀ l, target (labels l) = Placement.statement tape labels exit (program H l))
-    (k : Nat) (core : CoreTape → List Bool) (hinput : core 4 = encodeWord k)
-    (houtput : core 7 = []) (state : State) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      (Placement.configuration view labels exit extra ⟨some .start, state, frame core⟩)
-      (some (Placement.configuration view labels exit extra
-        ⟨none, readyState H, frame (resultCore H k core)⟩))
-      (timePolynomial.eval (encodeWord k).length) :=
-  liftExecutionInTime (TM2.step (program H)) (TM2.step target)
-    (Placement.configuration view labels exit extra)
-    (Placement.step_simulation tape view left right labels exit extra (program H) target code)
-    (familyCleanInTime H k core hinput houtput state)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularFamily
 

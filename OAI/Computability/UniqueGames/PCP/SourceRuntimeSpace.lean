@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Polynomial.Eval.Defs
 import OAI.Computability.UniqueGames.Machines.Runtime
 import OAI.Computability.UniqueGames.PCP.SourceLoopInitLemmas
@@ -63,13 +64,6 @@ theorem spacePolynomial_eval (tm : FinTM2) (time : Polynomial Nat) (N : Nat) :
       time.eval N * (Fintype.card tm.K * Runtime.programPushBound tm) := by
   simp [spacePolynomial]
 
-theorem prefix_length_polynomial (tm : FinTM2) (input : List (tm.Γ tm.k₀))
-    (time : Polynomial Nat) {finish : tm.Cfg}
-    (run : StateTransition.EvalsToInTime tm.step (initList tm input) (some finish)
-      (time.eval input.length)) :
-    configurationLength tm finish ≤ (spacePolynomial tm time).eval input.length := by
-  rw [spacePolynomial_eval]
-  exact prefix_configurationLength tm input run
 
 /-- This equality only identifies the actual endpoint stacks with a Boolean
 finalizer's stacks. It makes no execution or time assumption. -/

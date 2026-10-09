@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRadixStepLemmas
 import OAI.Computability.UniqueGames.PCP.SourceFieldArrayLemmas
@@ -101,11 +102,6 @@ def instruction (tokens : List (MachineFieldTemplate.Token q)) (slots : Tape q w
   | .inr (.inr (.inr (.inr l))) => MachineDrainMany.instruction (chosen slots)
       (fun l => place (cleanupLabel l)) exit l
 
-def program (tokens : List (MachineFieldTemplate.Token q)) (slots : Tape q width ↪ K)
-    (exit : Option (Label tokens.length width (chosen slots))) :
-    Label tokens.length width (chosen slots) →
-      TM2.Stmt (Alphabet (K := K)) (Label tokens.length width (chosen slots)) (State σ) :=
-  instruction tokens slots id exit
 
 structure Clean (slots : Tape q width ↪ K) (base : K → List Bool) : Prop where
   reversed : base (slots .reversed) = []
@@ -146,9 +142,6 @@ def phaseSteps (tokens : List (MachineFieldTemplate.Token q)) (slots : Tape q wi
     resultTapes slots base value (slots .output) = encodeWord value ++ base (slots .output) := by
   simp [resultTapes]
 
-theorem resultTapes_other (slots : Tape q width ↪ K) (base : K → List Bool) (value : Nat)
-    (tape : K) (hne : tape ≠ slots .output) : resultTapes slots base value tape = base tape := by
-  simp [resultTapes, hne]
 
 /-- The numeric recurrence used by the checked Horner machine is the direct
 canonical-address radix, in the original template-word order. -/
@@ -314,18 +307,10 @@ theorem phaseTrace (base : K → List Bool) (B : Nat) (values : List Nat)
   have reverseResult : MachineTransfer.tapesAt (slots .reversed) (slots .forward) emitted []
       ((emitted (slots .reversed)).reverse.map id ++ emitted (slots .forward)) =
       forwardTapes slots base values := by
-    funext tape
-    by_cases hr : tape = slots .reversed
-    · subst tape
-      simp [emitted, MachineFieldTemplate.outputTapes, MachineTransfer.tapesAt, forwardTapes,
-        slots.injective.ne (show Tape.reversed ≠ Tape.forward by simp), clean.reversed]
-    · by_cases hf : tape = slots .forward
-      · subst tape
-        simp [emitted, MachineFieldTemplate.outputTapes, MachineTransfer.tapesAt, forwardTapes,
-          slots.injective.ne (show Tape.forward ≠ Tape.reversed by simp),
-          clean.reversed, clean.forward]
-      · simp [emitted, MachineFieldTemplate.outputTapes, MachineTransfer.tapesAt,
-          forwardTapes, hr, hf]
+    have cleared : Function.update base (slots .reversed) [] = base :=
+      Function.update_eq_self_iff.mpr clean.reversed.symm
+    simp [emitted, MachineFieldTemplate.outputTapes, MachineTransfer.tapesAt, forwardTapes,
+      slots.injective.eq_iff, clean.reversed, clean.forward, cleared]
   rw [reverseResult] at reverseRun
   have reverseLength : (emitted (slots .reversed)).length + 1 = (encodeWords values).length + 1 := by
     simp [emitted, MachineFieldTemplate.outputTapes, clean.reversed]
@@ -364,85 +349,29 @@ theorem phaseTrace (base : K → List Bool) (B : Nat) (values : List Nat)
   have cleanupRun := MachineDrainMany.trace (chosen slots) (fun l => place (cleanupLabel l)) exit
     P (fun l => atInstruction (cleanupLabel l)) (afterHorner slots base B values) (ambient, ()) none
   rw [MachineDrainMany.finalRegister_none, cleanup_result slots base B values hlen clean] at cleanupRun
-  rw [show phaseSteps tokens slots base B values =
-    MachineDrainMany.steps (chosen slots) (afterHorner slots base B values) +
-      (MachineHorner.steps B (digits values) width +
-      ((values.sum + 2 * values.length + 1) +
-      (((encodeWords values).length + 1) +
-      MachineFieldTemplate.templateSteps tokens (fun j => base (slots (.field j)))))) by
-        unfold phaseSteps; omega]
-  rw [Function.iterate_add_apply]
-  rw [Function.iterate_add_apply (m := MachineHorner.steps B (digits values) width)]
-  rw [Function.iterate_add_apply (m := values.sum + 2 * values.length + 1)]
-  rw [Function.iterate_add_apply (m := (encodeWords values).length + 1)]
-  rw [emitRun, reverseRun, parseRun, hornerRun]
-  exact cleanupRun
+  exact MachineComposition.iterate_trans
+    (MachineComposition.iterate_trans
+      (MachineComposition.iterate_trans
+        (MachineComposition.iterate_trans emitRun reverseRun) parseRun) hornerRun) cleanupRun
 
 end Execution
 
-/-- The emitted finite program discharges every instruction-placement premise. -/
-theorem programTrace (tokens : List (MachineFieldTemplate.Token q)) (slots : Tape q width ↪ K)
-    (exit : Option (Label tokens.length width (chosen slots)))
-    (base : K → List Bool) (B : Nat) (values : List Nat) (hlen : values.length = width)
-    (clean : Clean slots base) (baseField : base (slots .radix) = encodeWord B)
-    (wordCorrect : MachineFieldTemplate.templateOutput tokens (fun j => base (slots (.field j))) =
-      encodeWords values) (ambient : σ) (register : Option Bool) :
-    (MachineComposition.advance (TM2.step (program tokens slots exit)))^[phaseSteps tokens slots base B values]
-      (some ⟨some (emitLabel (MachineFieldTemplate.startAt tokens.length 0)),
-        ((ambient, ()), register), base⟩) =
-      some ⟨exit, ((ambient, ()), none), resultTapes slots base (CanonicalAddress.radix B values)⟩ :=
-  phaseTrace tokens slots id exit (program tokens slots exit) (fun _ => rfl)
-    base B values hlen clean baseField wordCorrect ambient register
-
-/-- Timed witness with the exact sum of the five concrete phase counts. -/
-def phaseInTime (tokens : List (MachineFieldTemplate.Token q)) (slots : Tape q width ↪ K)
-    (place : Label tokens.length width (chosen slots) → Λ) (exit : Option Λ)
-    (P : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atInstruction : ∀ l, P (place l) = instruction tokens slots place exit l)
-    (base : K → List Bool) (B : Nat) (values : List Nat) (hlen : values.length = width)
-    (clean : Clean slots base) (baseField : base (slots .radix) = encodeWord B)
-    (wordCorrect : MachineFieldTemplate.templateOutput tokens (fun j => base (slots (.field j))) =
-      encodeWords values) (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step P)
-      ⟨some (place (emitLabel (MachineFieldTemplate.startAt tokens.length 0))),
-        ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (CanonicalAddress.radix B values)⟩)
-      (phaseSteps tokens slots base B values) where
-  steps := phaseSteps tokens slots base B values
-  evals_in_steps := phaseTrace tokens slots place exit P atInstruction
-    base B values hlen clean baseField wordCorrect ambient register
-  steps_le_m := Nat.le_refl _
 
 omit [DecidableEq K] in
 private theorem copiedLength_le (tokens : List (MachineFieldTemplate.Token q))
     (fields : Fin q → List Bool) (M : Nat) (bounded : ∀ j, (fields j).length ≤ M) :
     MachineFieldTemplate.copiedLength tokens fields ≤ tokens.length * M := by
-  induction tokens with
-  | nil => simp [MachineFieldTemplate.copiedLength]
-  | cons token tokens ih =>
-    cases token with
-    | literal bits =>
-      simp only [MachineFieldTemplate.copiedLength, List.map_cons, List.sum_cons,
-        List.length_cons, Nat.zero_add] at *
-      nlinarith
-    | copy j =>
-      simp only [MachineFieldTemplate.copiedLength, List.map_cons, List.sum_cons,
-        List.length_cons] at *
-      have h := bounded j
-      nlinarith
+  apply (List.sum_le_sum (g := fun _ => M) (fun token _ => ?_)).trans_eq
+    (by simp [Nat.mul_comm])
+  cases token with
+  | literal bits => exact Nat.zero_le _
+  | copy j => exact bounded j
 
 omit [DecidableEq K] in
 private theorem lengthSum_le (selected : List K) (base : K → List Bool) (bound : Nat)
     (bounded : ∀ tape ∈ selected, (base tape).length ≤ bound) :
     MachineDrainMany.lengthSum selected base ≤ selected.length * bound := by
-  induction selected with
-  | nil => simp [MachineDrainMany.lengthSum]
-  | cons tape selected ih =>
-    have ht := bounded tape (by simp)
-    have hs := ih (fun t ht => bounded t (by simp [ht]))
-    simp only [MachineDrainMany.lengthSum, List.map_cons, List.sum_cons,
-      List.length_cons] at *
-    nlinarith
+  exact (List.sum_le_sum bounded).trans_eq (by simp [Nat.mul_comm])
 
 /-- A fixed polynomial in a magnitude bounding input fields, the serialized
 word list, the radix, and the digits. Width and token count are static. -/
@@ -491,27 +420,6 @@ theorem phaseSteps_le_timePolynomial (tokens : List (MachineFieldTemplate.Token 
   rw [hlen]
   nlinarith
 
-def phaseInPolynomialTime (tokens : List (MachineFieldTemplate.Token q))
-    (slots : Tape q width ↪ K) (place : Label tokens.length width (chosen slots) → Λ)
-    (exit : Option Λ) (P : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State σ))
-    (atInstruction : ∀ l, P (place l) = instruction tokens slots place exit l)
-    (base : K → List Bool) (B : Nat) (values : List Nat) (hlen : values.length = width)
-    (clean : Clean slots base) (baseField : base (slots .radix) = encodeWord B)
-    (wordCorrect : MachineFieldTemplate.templateOutput tokens (fun j => base (slots (.field j))) =
-      encodeWords values) (ambient : σ) (register : Option Bool) (M : Nat)
-    (fieldsBound : ∀ j, (base (slots (.field j))).length ≤ M)
-    (wordsBound : (encodeWords values).length ≤ M) (radixBound : B ≤ M)
-    (digitBound : ∀ i, i < width → digits values i ≤ M) :
-    StateTransition.EvalsToInTime (TM2.step P)
-      ⟨some (place (emitLabel (MachineFieldTemplate.startAt tokens.length 0))),
-        ((ambient, ()), register), base⟩
-      (some ⟨exit, ((ambient, ()), none), resultTapes slots base (CanonicalAddress.radix B values)⟩)
-      ((timePolynomial tokens.length width).eval M) where
-  steps := phaseSteps tokens slots base B values
-  evals_in_steps := phaseTrace tokens slots place exit P atInstruction
-    base B values hlen clean baseField wordCorrect ambient register
-  steps_le_m := phaseSteps_le_timePolynomial tokens slots base B values hlen clean M
-    fieldsBound wordsBound radixBound digitBound
 
 end UniqueGamesTheorem.Reduction.MachineTemplateAddress
 

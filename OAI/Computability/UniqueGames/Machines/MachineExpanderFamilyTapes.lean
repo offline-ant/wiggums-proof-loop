@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderTableProgramLemmas
 
 namespace OAI
@@ -81,15 +82,6 @@ theorem fromBoolTapes_eq_transport (base : Tape → List Bool) :
     simp [fromBoolTapes]
   · simp [fromBoolTapes, h]
 
-@[simp] theorem toBoolTapes_update (base : (tape : Tape) → List (Alphabet tape))
-    (tape : Tape) (word : List (Alphabet tape)) :
-    toBoolTapes (Function.update base tape word) =
-      Function.update (toBoolTapes base) tape (toBoolWord tape word) := by
-  funext k
-  by_cases h : k = tape
-  · subst k
-    simp [toBoolTapes]
-  · simp [toBoolTapes, h]
 
 theorem configuration_fromBool {ρ : Type} {d : Nat} (label : Option (Label d))
     (state : State ρ d) (base : Tape → List Bool) :

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Foundations.ValueLemmas
 import OAI.Computability.UniqueGames.PCP.SourceNoiseParameterLemmas
 
@@ -76,10 +77,6 @@ theorem response_expectation_nonnegative {K : Type*} [Fintype K]
     0 ≤ law.expectation H :=
   Finset.sum_nonneg fun k _ => mul_nonneg (law.nonnegative k) (hH k)
 
-def responseAgreement (π : J → I) (fallbackI : I) (fallbackJ : J)
-    (A : Cube I → Bool) (B : Cube J → Bool) : ℝ :=
-  (fourierResponse fallbackI A).expectation fun i =>
-    (fourierResponse fallbackJ B).expectation fun j => if π j = i then 1 else 0
 
 def validResponseAgreement (valid : J → Bool) (π : J → I)
     (fallbackI : I) (fallbackJ : J)
@@ -285,43 +282,6 @@ theorem conditionedOracle_response_bound (ε : ℝ) (π : J → I) (valid : J �
   | stored j₀ table =>
       exact conditioned_folded_response_bound ε π valid i₀ tableA j₀ table hε hε'
 
-theorem folded_game_decoder_bound
-    (questions : FiniteDistribution (Q₁ × Q₂))
-    (ε : ℝ) (π : Q₁ → Q₂ → J → I) (valid : Q₂ → J → Bool)
-    (i₀ : Q₁ → I) (tableA : ∀ q, HalfCube (i₀ q) → Bool)
-    (j₀ : ∀ q, {j : J // valid q j = true})
-    (tableB : ∀ q, HalfCube (j₀ q) → Bool)
-    (hε : 0 < ε) (hε' : ε ≤ 1 / 2) :
-    4 * ε * questions.expectation (questionBias ε π
-      (fun q => foldedAnswer (i₀ q) (tableA q))
-      (fun q => conditionedFoldedAnswer (valid q) (j₀ q) (tableB q))) ^ 2 ≤
-      (projectionGame questions π valid).value := by
-  let A := fun q => foldedAnswer (i₀ q) (tableA q)
-  let B := fun q => conditionedFoldedAnswer (valid q) (j₀ q) (tableB q)
-  let bias := questionBias ε π A B
-  calc
-    _ ≤ 4 * ε * questions.expectation (fun q => bias q ^ 2) :=
-      mul_le_mul_of_nonneg_left (distribution_sq_expectation_le questions bias) (by linarith)
-    _ = questions.expectation (fun q => 4 * ε * bias q ^ 2) := by
-      unfold FiniteDistribution.expectation
-      rw [Finset.mul_sum]
-      apply Finset.sum_congr rfl
-      intro q _
-      ring
-    _ ≤ questions.expectation (fun q =>
-        validResponseAgreement (valid q.2) (π q.1 q.2) (i₀ q.1) (j₀ q.2).val
-          (A q.1) (B q.2)) := by
-      unfold FiniteDistribution.expectation
-      apply Finset.sum_le_sum
-      intro q _
-      apply mul_le_mul_of_nonneg_left _ (questions.nonnegative q)
-      exact conditioned_folded_response_bound ε (π q.1 q.2) (valid q.2)
-        (i₀ q.1) (tableA q.1) (j₀ q.2) (tableB q.2) hε hε'
-    _ = (projectionGame questions π valid).stochasticSuccess
-        (fun q => fourierResponse (i₀ q) (A q))
-        (fun q => fourierResponse (j₀ q).val (B q)) := by
-      simp [Game.stochasticSuccess, projectionGame, validResponseAgreement]
-    _ ≤ _ := Game.stochasticSuccess_le_value _ _ _
 
 /-- The game bound includes inconsistent clause tuples, whose legal local
 domain is empty and whose implemented right oracle is constant. -/

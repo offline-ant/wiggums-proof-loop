@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Tactic.Linarith
@@ -109,17 +110,6 @@ section UniformFiber
 variable (A : K →ₗ[F2] R) (S : E →ₗ[F2] R)
   [Fintype (E →ₗ[F2] A.ker)]
 
-theorem rowFiber_card (M₀ : E →ₗ[F2] K) (h₀ : A.comp M₀ = S) :
-    Nat.card (RowFiber A S) = Fintype.card (E →ₗ[F2] A.ker) := by
-  rw [Nat.card_congr (rowFiberEquiv A S M₀ h₀).symm, Nat.card_eq_fintype_card]
-
-/-- Uniform private matrices push forward to uniform matrices in the fiber. -/
-theorem rowFiber_expect (M₀ : E →ₗ[F2] K) (h₀ : A.comp M₀ = S)
-    [Fintype (RowFiber A S)] (f : (E →ₗ[F2] K) → ℝ) :
-    (𝔼 M : RowFiber A S, f M.val) =
-      𝔼 N : E →ₗ[F2] A.ker, f (assemble A M₀ N) := by
-  exact (Fintype.expect_equiv (rowFiberEquiv A S M₀ h₀)
-    (fun N => f (assemble A M₀ N)) (fun M => f M.val) (fun _ => rfl)).symm
 
 end UniformFiber
 
@@ -177,23 +167,6 @@ section UniformObservation
 variable (A : K →ₗ[F2] R)
   [Fintype (E →ₗ[F2] K)] [Fintype (E →ₗ[F2] A.ker)] [Fintype (ObservedRow (E := E) A)]
 
-/-- The joint law is exactly the uniform product law. -/
-theorem observation_expect (f : ObservedRow (E := E) A → (E →ₗ[F2] A.ker) → ℝ) :
-    (𝔼 M : E →ₗ[F2] K, f (observe A M) (hiddenCoordinate A M)) =
-      𝔼 S : ObservedRow (E := E) A, 𝔼 N : E →ₗ[F2] A.ker, f S N := by
-  rw [Fintype.expect_equiv (observationEquiv A)
-    (fun M => f (observe A M) (hiddenCoordinate A M))
-    (fun p => f p.1 p.2) (fun _ => rfl)]
-  rw [← Finset.univ_product_univ, Finset.expect_product]
-
-/-- Exact factorization of every product of visible and private observables. -/
-theorem observed_hidden_independent (f : ObservedRow (E := E) A → ℝ)
-    (g : (E →ₗ[F2] A.ker) → ℝ) :
-    (𝔼 M : E →ₗ[F2] K, f (observe A M) * g (hiddenCoordinate A M)) =
-      (𝔼 S : ObservedRow (E := E) A, f S) * (𝔼 N : E →ₗ[F2] A.ker, g N) := by
-  rw [observation_expect A (fun S N => f S * g N)]
-  simp_rw [← Finset.mul_expect]
-  exact (Finset.expect_mul _ _ _).symm
 
 end UniformObservation
 
@@ -238,16 +211,6 @@ theorem samplerLaw_nonneg (noise : Noise → V) (v : V) :
   intro n _
   split_ifs <;> positivity
 
-omit [Fintype V] in
-/-- Literal counting formula; multiple sampler outcomes mapping to the same
-vector retain their multiplicity. -/
-theorem samplerLaw_eq_count (noise : Noise → V) (v : V) :
-    samplerLaw noise v =
-      ((Finset.univ.filter fun n => noise n = v).card : ℝ) / Fintype.card Noise := by
-  classical
-  unfold samplerLaw
-  rw [← Finset.sum_filter]
-  simp [div_eq_mul_inv]
 
 theorem samplerLaw_sum (noise : Noise → V) (f : V → ℝ) :
     (∑ v, samplerLaw noise v * f v) =
@@ -273,13 +236,6 @@ theorem rat_expect_cast (f : Noise → ℚ) :
     ((𝔼 n, f n : ℚ) : ℝ) = 𝔼 n, (f n : ℝ) := by
   simp only [Finset.expect_eq_sum_div_card, Rat.cast_div, Rat.cast_sum, Rat.cast_natCast]
 
-omit [Fintype V] in
-theorem samplerLaw_eq_rat_count (noise : Noise → V) (v : V) :
-    samplerLaw noise v =
-      ((((Finset.univ.filter fun n => noise n = v).card : ℚ) /
-        (Fintype.card Noise : ℚ) : ℚ) : ℝ) := by
-  rw [samplerLaw_eq_count]
-  simp only [Rat.cast_div, Rat.cast_natCast]
 
 end FiniteLaw
 
@@ -296,46 +252,6 @@ theorem sample_kernel_eq_eigenvalue (noise : Noise → V) (S : V →ₗ[F2] E) :
   classical
   exact sample_expect_eq noise (fun v => if S v = 0 then 1 else 0)
 
-/-- Detection plus annihilation is one for the same unconditional sampler. -/
-theorem detection_add_eigenvalue [Nonempty Noise]
-    (noise : Noise → V) (S : V →ₗ[F2] E) :
-    (𝔼 n, if S (noise n) ≠ 0 then (1 : ℝ) else 0) +
-      linearNoiseEigenvalue (samplerLaw noise) S = 1 := by
-  classical
-  rw [← sample_kernel_eq_eigenvalue, ← Finset.expect_add_distrib]
-  calc
-    _ = 𝔼 _n : Noise, (1 : ℝ) := by
-      apply Finset.expect_congr rfl
-      intro n _
-      by_cases h : S (noise n) = 0 <;> simp [h]
-    _ = 1 := Fintype.expect_const 1
-
-/-- The constant-detection input becomes the `7/8` multiplier bound. -/
-theorem detection_eigenvalue_le [Nonempty Noise]
-    (noise : Noise → V) (S : V →ₗ[F2] E)
-    (hdetect : (1 : ℝ) / 8 ≤ 𝔼 n, if S (noise n) ≠ 0 then (1 : ℝ) else 0) :
-    linearNoiseEigenvalue (samplerLaw noise) S ≤ 7 / 8 := by
-  have h := detection_add_eigenvalue noise S
-  linarith
-
-/-- A generic detection level bounds the annihilation multiplier. -/
-theorem detection_eigenvalue_le_complement [Nonempty Noise]
-    (noise : Noise → V) (S : V →ₗ[F2] E) (d : ℝ)
-    (hdetect : d ≤ 𝔼 n, if S (noise n) ≠ 0 then (1 : ℝ) else 0) :
-    linearNoiseEigenvalue (samplerLaw noise) S ≤ 1 - d := by
-  have h := detection_add_eigenvalue noise S
-  linarith
-
-/-- The gadget may keep its finite probabilities rational throughout. -/
-theorem rational_detection_eigenvalue_le [Nonempty Noise]
-    (noise : Noise → V) (S : V →ₗ[F2] E)
-    (hdetect : (1 : ℚ) / 8 ≤ 𝔼 n, if S (noise n) ≠ 0 then (1 : ℚ) else 0) :
-    linearNoiseEigenvalue (samplerLaw noise) S ≤ 7 / 8 := by
-  apply detection_eigenvalue_le noise S
-  have hcast := (Rat.cast_le (K := ℝ)).mpr hdetect
-  rw [rat_expect_cast] at hcast
-  simpa only [Rat.cast_div, Rat.cast_ofNat, Rat.cast_one, Rat.cast_zero,
-    apply_ite] using hcast
 
 end ActualMultiplier
 
@@ -556,34 +472,19 @@ variable {K V E : Type*}
 /-- Pushforward of uniform sampling in `K`.  For a subspace inclusion this
 is uniform sampling in that subspace; the definition also permits a linear
 map with nontrivial fibers without accidentally conditioning on nonzero vectors. -/
-def subspaceLaw (ι : K →ₗ[F2] V) (v : V) : ℝ := by
-  classical
-  exact ∑ k, if ι k = v then (Fintype.card K : ℝ)⁻¹ else 0
+def subspaceLaw (ι : K →ₗ[F2] V) (v : V) : ℝ :=
+  NoiseSampler.samplerLaw ι v
 
 omit [FiniteDimensional F2 K] [Fintype V] in
 theorem subspaceLaw_nonneg (ι : K →ₗ[F2] V) (v : V) :
-    0 ≤ subspaceLaw ι v := by
-  classical
-  unfold subspaceLaw
-  apply Finset.sum_nonneg
-  intro k _
-  split_ifs <;> positivity
+    0 ≤ subspaceLaw ι v :=
+  NoiseSampler.samplerLaw_nonneg ι v
 
 omit [FiniteDimensional F2 K] in
 theorem subspaceLaw_sum (ι : K →ₗ[F2] V) (f : V → ℝ) :
-    (∑ v, subspaceLaw ι v * f v) = (Fintype.card K : ℝ)⁻¹ * ∑ k, f (ι k) := by
-  classical
-  unfold subspaceLaw
-  simp_rw [Finset.sum_mul, ite_mul, zero_mul]
-  rw [Finset.sum_comm]
-  simp only [Finset.sum_ite_eq, Finset.mem_univ, ite_true]
-  exact (Finset.mul_sum _ _ _).symm
+    (∑ v, subspaceLaw ι v * f v) = (Fintype.card K : ℝ)⁻¹ * ∑ k, f (ι k) :=
+  NoiseSampler.samplerLaw_sum ι f
 
-omit [FiniteDimensional F2 K] in
-theorem subspaceLaw_normalized (ι : K →ₗ[F2] V) :
-    ∑ v, subspaceLaw ι v = 1 := by
-  have h := subspaceLaw_sum ι (fun _ => 1)
-  simpa [Fintype.card_ne_zero] using h
 
 theorem subspaceLaw_eigenvalue (ι : K →ₗ[F2] V) (S : V →ₗ[F2] E) :
     linearNoiseEigenvalue (subspaceLaw ι) S =
@@ -603,14 +504,7 @@ theorem subspaceLaw_eigenvalue (ι : K →ₗ[F2] V) (S : V →ₗ[F2] E) :
   unfold linearNoiseEigenvalue
   rw [subspaceLaw_sum, hs]
   apply mul_right_cancel₀ hp
-  calc
-    ((Fintype.card K : ℝ)⁻¹ * (k : ℝ)) * (2 : ℝ) ^ Module.finrank F2 (S.comp ι).range =
-        (Fintype.card K : ℝ)⁻¹ * ((k : ℝ) * (2 : ℝ) ^ Module.finrank F2 (S.comp ι).range) :=
-      mul_assoc _ _ _
-    _ = (Fintype.card K : ℝ)⁻¹ * (Fintype.card K : ℝ) := by rw [hc]
-    _ = 1 := inv_mul_cancel₀ hn
-    _ = ((2 : ℝ) ^ Module.finrank F2 (S.comp ι).range)⁻¹ *
-        (2 : ℝ) ^ Module.finrank F2 (S.comp ι).range := (inv_mul_cancel₀ hp).symm
+  rw [mul_assoc, hc, inv_mul_cancel₀ hn, inv_mul_cancel₀ hp]
 
 theorem subspaceLaw_eigenvalue_lower (ι : K →ₗ[F2] V) (S : V →ₗ[F2] E)
     (r : ℕ) (hr : Module.finrank F2 (S.comp ι).range < r) :
@@ -750,17 +644,6 @@ theorem trivial_restriction_probability [Fintype H] [Fintype (K →ₗ[F2] F2)]
       rw [heq]
     _ = _ := by simp
 
-theorem trivial_restriction_probability_pow [Fintype H]
-    [FiniteDimensional F2 H] [Fintype (K →ₗ[F2] F2)]
-    (ι : H →ₗ[F2] K) (hι : Function.Injective ι) :
-    (𝔼 σ : K →ₗ[F2] F2, if σ.comp ι = 0 then (1 : ℝ) else 0) =
-      1 / (2 : ℝ) ^ Module.finrank F2 H := by
-  rw [trivial_restriction_probability ι hι]
-  have hc : Fintype.card H = 2 ^ Module.finrank F2 H := by
-    simpa [F2, Integration.BinaryLinear.F2, ZMod.card] using
-      Module.card_fintype (Module.finBasis F2 H)
-  rw [hc]
-  norm_cast
 
 end CharacterAverages
 

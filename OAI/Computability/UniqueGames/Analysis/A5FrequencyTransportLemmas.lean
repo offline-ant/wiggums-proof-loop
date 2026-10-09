@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.A13IndexLemmas
 import OAI.Computability.UniqueGames.Analysis.A5IndexCount
 import OAI.Computability.UniqueGames.Analysis.A5ReverseIndex
@@ -162,45 +163,18 @@ abbrev Passage (X : F →ₗ[F2] E) (e : Nat) :=
   Σ s : OuterIndex X e, Pair X s
 
 theorem comap_mkQ_injective (P : Submodule F2 E) :
-    Function.Injective (fun A : Submodule F2 (E ⧸ P) => A.comap P.mkQ) := by
-  intro A B h
-  change A.comap P.mkQ = B.comap P.mkQ at h
-  ext z
-  obtain ⟨v, rfl⟩ := P.mkQ_surjective z
-  change v ∈ A.comap P.mkQ ↔ v ∈ B.comap P.mkQ
-  rw [h]
+    Function.Injective (fun A : Submodule F2 (E ⧸ P) => A.comap P.mkQ) :=
+  Submodule.comap_injective_of_surjective P.mkQ_surjective
 
 theorem map_subtype_injective (P : Submodule F2 E) :
-    Function.Injective (fun A : Submodule F2 P => A.map P.subtype) := by
-  intro A B h
-  change A.map P.subtype = B.map P.subtype at h
-  ext z
-  constructor
-  · intro hz
-    have hm : (z : E) ∈ A.map P.subtype :=
-      Submodule.mem_map.mpr ⟨z, hz, rfl⟩
-    rw [h] at hm
-    rcases Submodule.mem_map.mp hm with ⟨v, hv, he⟩
-    have hvz : v = z := Subtype.ext he
-    simpa only [hvz] using hv
-  · intro hz
-    have hm : (z : E) ∈ B.map P.subtype :=
-      Submodule.mem_map.mpr ⟨z, hz, rfl⟩
-    rw [← h] at hm
-    rcases Submodule.mem_map.mp hm with ⟨v, hv, he⟩
-    have hvz : v = z := Subtype.ext he
-    simpa only [hvz] using hv
+    Function.Injective (fun A : Submodule F2 P => A.map P.subtype) :=
+  Submodule.map_injective_of_injective P.subtype_injective
 
 theorem outer_eq_of_lifted (X : F →ₗ[F2] E) {e : Nat} (s t : OuterIndex X e)
     (hA : LiftedA X s = LiftedA X t) (hB : LiftedB X s = LiftedB X t) : s = t := by
   apply Subtype.ext
   exact Prod.ext (comap_mkQ_injective X.range hA) (map_subtype_injective X.ker hB)
 
-theorem recover_liftedA (X : F →ₗ[F2] E) {e : Nat} (q : Passage X e) :
-    LiftedA X q.1 = q.2.val.1 ⊔ X.range := q.2.property.2.1.symm
-
-theorem recover_liftedB (X : F →ₗ[F2] E) {e : Nat} (q : Passage X e) :
-    LiftedB X q.1 = q.2.val.2 ⊓ X.ker := q.2.property.2.2.2.symm
 
 def forget (X : F →ₗ[F2] E) (e : Nat) (q : Passage X e) :
     Submodule F2 E × Submodule F2 F := q.2.val
@@ -273,11 +247,6 @@ theorem pair_order (X : F →ₗ[F2] E) {e : Nat} (q : Passage X e) :
   unfold UniqueGamesTheorem.Fourier.MatrixRestrictions.order
   rw [dim_pairA X q, codim_pairB X q]
 
-omit [Finite E] [Finite F] [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] in
-theorem pair_order_le (X : F →ₗ[F2] E) {e : Nat} (q : Passage X e) :
-    UniqueGamesTheorem.Fourier.MatrixRestrictions.order q.2.val.1 q.2.val.2 ≤ e := by
-  rw [pair_order]
-  exact q.1.property
 
 omit [Finite E] [Finite F] [FiniteDimensional F2 E]
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] in
@@ -326,17 +295,6 @@ theorem effective_order_rank_le (A : Submodule F2 E) (B : Submodule F2 F)
     d - (UniqueGamesTheorem.Fourier.MatrixRestrictions.order A B + Module.finrank F2 X.range) at hq
   omega
 
-omit [Finite E] [Finite F] [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)] in
-theorem effective_order_rank_pos (A : Submodule F2 E) (B : Submodule F2 F)
-    (X : B →ₗ[F2] (E ⧸ A)) {e : Nat}
-    (h : 0 < UniqueGamesTheorem.Fourier.MatrixRestrictions.order A B + Module.finrank F2 X.range)
-    (q : Passage X e) :
-    0 < UniqueGamesTheorem.Fourier.MatrixRestrictions.order
-        (q.2.val.1.comap A.mkQ) (q.2.val.2.map B.subtype) +
-      Module.finrank F2 (NaturalTransport.dualFactor A B q.2.val.1 q.2.val.2
-        (LinearIdentities.compress X q.2.val.1 q.2.val.2)).range := by
-  rw [effective_order_rank]
-  omega
 
 def descendantSum (A : Submodule F2 E) (B : Submodule F2 F)
     (X : B →ₗ[F2] (E ⧸ A)) (e : Nat) (f : (E →ₗ[F2] F) → ℝ) : ℝ :=
@@ -346,11 +304,6 @@ def descendantSum (A : Submodule F2 E) (B : Submodule F2 F)
         (LinearIdentities.compress X q.2.val.1 q.2.val.2))
       (hybridDerivative (q.2.val.1.comap A.mkQ) (q.2.val.2.map B.subtype) U f) N ^ 2) ^ 2
 
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] in
-theorem descendantSum_nonneg (A : Submodule F2 E) (B : Submodule F2 F)
-    (X : B →ₗ[F2] (E ⧸ A)) (e : Nat) (f : (E →ₗ[F2] F) → ℝ) :
-    0 ≤ descendantSum A B X e f := by
-  exact Finset.sum_nonneg fun _ _ => Finset.expect_nonneg fun _ _ => sq_nonneg _
 
 end Appendix.A5Passage
 

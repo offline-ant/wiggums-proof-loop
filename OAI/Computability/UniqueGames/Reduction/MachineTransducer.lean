@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Finset.Lattice.Fold
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Reduction.MachineReverse
@@ -60,34 +61,6 @@ def machine (initial : Q) (transition : Q → Bool → Q) (emit : Q → Bool →
   initialState := (initial, none)
   m := program initial transition emit
 
-/-- A finite maximum depending only on the fixed emission table. -/
-noncomputable def maxEmission (emit : Q → Bool → List Bool) : Nat :=
-  Finset.univ.sup (fun pair : Q × Bool => (emit pair.1 pair.2).length)
-
-theorem emission_le (emit : Q → Bool → List Bool) (state : Q) (symbol : Bool) :
-    (emit state symbol).length ≤ maxEmission emit := by
-  exact Finset.le_sup (f := fun pair : Q × Bool => (emit pair.1 pair.2).length)
-    (Finset.mem_univ (state, symbol))
-
-theorem statementPushBound_le (initial : Q) (transition : Q → Bool → Q)
-    (emit : Q → Bool → List Bool) (label : Option (Q × Bool)) :
-    Runtime.statementPushBound (program initial transition emit label) ≤ maxEmission emit := by
-  cases label with
-  | none => simp [program, loop, Runtime.statementPushBound]
-  | some pair =>
-    simpa only [program, Runtime.statementPushBound, statementPushBound_pushWord,
-      Nat.add_zero] using emission_le emit pair.1 pair.2
-
-theorem programPushBound_le (initial : Q) (transition : Q → Bool → Q)
-    (emit : Q → Bool → List Bool) :
-    Runtime.programPushBound (machine initial transition emit) ≤ maxEmission emit := by
-  have allLabels (labels : List (Option (Q × Bool))) :
-      Runtime.maxLabelPushes (program initial transition emit) labels ≤ maxEmission emit := by
-    induction labels with
-    | nil => exact Nat.zero_le _
-    | cons label rest ih =>
-      exact max_le (statementPushBound_le initial transition emit label) ih
-  exact allLabels (machine initial transition emit).ΛFin.elems.toList
 
 def running (initial : Q) (transition : Q → Bool → Q) (emit : Q → Bool → List Bool)
     (state : Q) (input accumulator : List Bool) (register : Option Bool) :

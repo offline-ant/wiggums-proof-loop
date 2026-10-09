@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrain
 import OAI.Computability.UniqueGames.Machines.MachineFixedDivMod
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
@@ -57,26 +58,12 @@ def instruction (d : Nat) (positive : 0 < d) (c b : Nat)
 
 def steps (d j : Nat) : Nat := 3 * j + 3 * (j / d) + 11
 
-theorem steps_le (d j : Nat) : steps d j ≤ 6 * j + 11 := by
-  have h := Nat.div_le_self j d
-  unfold steps
-  omega
-
-theorem steps_le_encodedLength (d j : Nat) :
-    steps d j ≤ 6 * (encodeWord j).length + 5 := by
-  have h := steps_le d j
-  rw [encodeWord_length]
-  omega
 
 def value (d c b j : Nat) : Nat := c * (j / d) + (j % d) + b
 
 private def frame (tape : Fin 5 → K) (base : K → List Bool)
     (work quotient output : List Bool) : K → List Bool :=
   MachineCopy.forkTapes (tape 2) (tape 3) (tape 4) base work quotient output
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Exact execution in any caller containing these finite instructions. The
 only changed caller tape is the output; the input field and all three initially
@@ -228,8 +215,8 @@ theorem reindexTrace (d : Nat) (positive : 0 < d) (c b : Nat)
     change some (TM2.stepAux (program (labels .finish)) _ _) = _
     rw [atLabels]
     cases exit <;> simp [instruction, TM2.stepAux, exitAt, hw, encodeWord, finishOutput, clean]
-  have total := joinTrace (joinTrace (joinTrace (joinTrace (joinTrace
-    (joinTrace copyRun initRun) divideRun) emitRun) affineRun) drainRun) finishRun
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
+    (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans copyRun initRun) divideRun) emitRun) affineRun) drainRun) finishRun
   have hsteps : steps d j =
       (((((2 * (j + 1) + 1) + 1) + (j + 1)) + 1) + 2 * (q + 1)) + (q + 2) + 1 := by
     dsimp [steps, q]
@@ -237,24 +224,6 @@ theorem reindexTrace (d : Nat) (positive : 0 < d) (c b : Nat)
   rw [hsteps]
   exact total
 
-def reindexInTime (d : Nat) (positive : 0 < d) (c b : Nat)
-    (tape : Fin 5 → K) (distinct : Function.Injective tape)
-    (labels : Label d → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A d))
-    (atLabels : ∀ l, program (labels l) = instruction d positive c b tape labels exit l)
-    (base : K → List Bool) (j : Nat) (suffix : List Bool)
-    (sourceWord : base (tape 0) = encodeWord j ++ suffix)
-    (scratchEmpty : base (tape 1) = []) (workEmpty : base (tape 2) = [])
-    (quotientEmpty : base (tape 3) = []) (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .copySeed), clean d positive ambient, base⟩
-      (some ⟨exit, clean d positive ambient,
-        Function.update base (tape 4) (encodeWord (value d c b j) ++ base (tape 4))⟩)
-      (6 * j + 11) where
-  steps := steps d j
-  evals_in_steps := reindexTrace d positive c b tape distinct labels exit program atLabels
-    base j suffix sourceWord scratchEmpty workEmpty quotientEmpty ambient
-  steps_le_m := steps_le d j
 
 def machine (d : Nat) (positive : 0 < d) (c b : Nat) : FinTM2 where
   K := Fin 5
@@ -267,19 +236,6 @@ def machine (d : Nat) (positive : 0 < d) (c b : Nat) : FinTM2 where
   initialState := clean d positive ()
   m := instruction d positive c b id id none
 
-def machineInTime (d : Nat) (positive : 0 < d) (c b : Nat)
-    (base : Fin 5 → List Bool) (j : Nat) (suffix : List Bool)
-    (sourceWord : base 0 = encodeWord j ++ suffix)
-    (scratchEmpty : base 1 = []) (workEmpty : base 2 = [])
-    (quotientEmpty : base 3 = []) :
-    StateTransition.EvalsToInTime (machine d positive c b).step
-      ⟨some .copySeed, clean d positive (), base⟩
-      (some ⟨none, clean d positive (),
-        Function.update base (4 : Fin 5) (encodeWord (value d c b j) ++ base 4)⟩)
-      (6 * j + 11) :=
-  reindexInTime d positive c b id (fun _ _ h => h) id none
-    (instruction d positive c b id id none) (fun _ => rfl)
-    base j suffix sourceWord scratchEmpty workEmpty quotientEmpty ()
 
 theorem lazy_value (d j : Nat) : value d (2 * d) d j =
     2 * d * (j / d) + d + (j % d) := by

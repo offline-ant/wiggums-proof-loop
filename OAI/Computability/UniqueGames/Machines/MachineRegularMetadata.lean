@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineCloudPrefix
 import OAI.Computability.UniqueGames.Machines.MachineCloudRankLemmas
@@ -21,17 +22,9 @@ inductive Extra
   | padding | level
   deriving DecidableEq
 
-protected abbrev Extra.enumList : List Extra := [.padding, .level]
-
-protected theorem Extra.enumList_getElem?_ctorIdx_eq (x : Extra) :
-    Extra.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Extra.enumList_nodup : Extra.enumList.Nodup := by decide
-
 instance : Fintype Extra where
-  elems := ⟨Extra.enumList, Extra.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.padding, .level}
+  complete x := by cases x <;> simp
 
 abbrev Tape := Fin 27 ⊕ Extra
 abbrev Alphabet (_ : Tape) := Bool
@@ -271,10 +264,6 @@ theorem cloudTrace (t : GraphTables.Table) (v : Fin t.vertices) (data : Data)
   simpa only [MachineCloudPadding.Placement.configuration, MachineCloudPadding.Placement.label,
     hstart, hfinish, cfg] using placed
 
-private theorem join_trace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
-
 private theorem drainAt (source : Tape) (again : Label) (exit : Option Label)
     (code : program (σ := σ) again = MachineDrain.drain source again exit)
     (base : Tape → List Bool) (ambient : σ) (register : Option Bool) :
@@ -344,7 +333,7 @@ theorem prefixTrace (t : GraphTables.Table) (v : Fin t.vertices) (data : Data)
     | inr j => cases j <;> rfl
   rw [hquery] at first
   rw [hfuel, hfinish] at second
-  exact join_trace (join_trace phase first) second
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans phase first) second
 
 theorem selected_owner (t : GraphTables.Table) (e : Fin t.darts) :
     (GraphTables.tableWords t)[4098 * e.val + 2]? = some t.rows[e].tail.val := by
@@ -410,7 +399,7 @@ theorem ownerTrace (t : GraphTables.Table) (e : Fin t.darts) (data : Data)
     | inr j => cases j <;> rfl
   rw [hquery] at first
   rw [hwork, hfinish] at second
-  exact join_trace (join_trace phase first) second
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans phase first) second
 
 def rankQuery (v x : Nat) : List Bool := MachineCloudRank.queryWord v x []
 
@@ -457,7 +446,7 @@ theorem queryTrace (data : Data) (v x : Nat)
             MachineCloudRank.queryWord, encodeWord]
       | inr j => cases j <;> rfl
     simp only [Function.iterate_one, advance_some, TM2.step, program, TM2.stepAux, ht]
-  exact join_trace (join_trace firstRun secondRun) init
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans firstRun secondRun) init
 
 def rankData (t : GraphTables.Table) (v : Fin t.vertices)
     (e : DegreeReplacement.Cloud (GraphTables.semantics t) v) (data : Data) : Data :=
@@ -536,7 +525,7 @@ theorem rankTrace (t : GraphTables.Table) (v : Fin t.vertices)
   rw [hquery] at first
   rw [hwork] at second
   rw [hfuel, hfinish] at third
-  exact join_trace (join_trace (join_trace (join_trace query phase) first) second) third
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans query phase) first) second) third
 
 /-- Membership is a statement about the actual stored tail, used only to
 identify the numeric answer of the physical rank routine. -/
@@ -573,7 +562,7 @@ theorem originalTrace (t : GraphTables.Table) (e : Fin t.darts) (data : Data)
     (prefixData t t.rows[e].tail
       (rankData t t.rows[e].tail (originalMember t e) (ownerData t e data)))
     htable rfl hcount hpadding hlevel ambient none
-  exact join_trace (join_trace (join_trace own rank) pref) cloud
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans own rank) pref) cloud
 
 private theorem encodeWords_drop_length_le (values : List Nat) (n : Nat) :
     (encodeWords (values.drop n)).length ≤ (encodeWords values).length := by
@@ -660,35 +649,6 @@ theorem totalTime_le (t : GraphTables.Table) (e : Fin t.darts) :
     MachineCloudPadding.timePolynomial.eval (2*N) + 40*(N+1)
   omega
 
-/-- Concrete timed execution certificate, with no runtime premise. -/
-def originalInTime (t : GraphTables.Table) (e : Fin t.darts) (data : Data)
-    (htable : data.table = GraphTables.tableBits t)
-    (hindex : data.globalIndex = encodeWord e.val)
-    (howner : data.owner = []) (hrank : data.localRank = []) (hcount : data.count = [])
-    (hoffset : data.offset = []) (hpadding : data.padding = []) (hlevel : data.level = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      (cfg (some (.owner .seed)) data ambient register)
-      (some (cfg none (originalData t e data) ambient none))
-      (timePolynomial.eval (GraphTables.tableBits t).length) where
-  steps := totalTime t e
-  evals_in_steps := originalTrace t e data htable hindex howner hrank hcount hoffset
-    hpadding hlevel ambient register
-  steps_le_m := totalTime_le t e
-
-/-- The common dummy-owner path also carries the checked physical scan's
-polynomial certificate; the caller's existing rank, prefix, and rotor survive. -/
-def cloudInTime (t : GraphTables.Table) (v : Fin t.vertices) (data : Data)
-    (htable : data.table = GraphTables.tableBits t) (howner : data.owner = encodeWord v.val)
-    (hcount : data.count = []) (hpadding : data.padding = []) (hlevel : data.level = [])
-    (ambient : σ) (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      (cfg (some (.cloud .init)) data ambient register)
-      (some (cfg none (cloudData t v data) ambient none))
-      (MachineCloudPadding.timePolynomial.eval (MachineCloudPadding.inputLength t v [])) where
-  steps := MachineCloudPadding.totalTime t v
-  evals_in_steps := cloudTrace t v data htable howner hcount hpadding hlevel ambient register
-  steps_le_m := MachineCloudPadding.totalTime_le t v []
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularMetadata
 

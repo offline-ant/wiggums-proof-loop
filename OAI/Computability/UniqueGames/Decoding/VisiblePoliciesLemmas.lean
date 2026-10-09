@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.MatrixCoordinates
 import OAI.Computability.UniqueGames.Decoding.TableKeysLemmas
 import OAI.Computability.UniqueGames.Inverse.AffineWitnessLemmas
@@ -96,14 +97,6 @@ theorem rightPolicy_on_attainable (S : Source)
         q.rowMap.ker.subtype (TableKeys.visibleTau J) (TransferredDecoding.visibleFallback J) := by
   rw [rightPolicy, dite_eq_left h]
 
-theorem leftPolicy_changeHidden (S : Source)
-    (good : LeftInput S k s d R → ResponseWitness k → Prop)
-    (draw : AdviceExperiment.Draw k (Fin S.occurrences) (Alphabet s) (Vector d) R)
-    (N : RawPartnerTarget.RawPoint draw.singletons →ₗ[F2] draw.rowMap.ker) :
-    leftPolicy good (AdviceExperiment.leftObservation (ActualGame.rhs S)
-      (AdviceExperiment.changeHidden draw N)) =
-      leftPolicy good (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) := by
-  rw [AdviceExperiment.leftObservation_changeHidden]
 
 theorem rightPolicy_on_draw (S : Source)
     (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
@@ -300,35 +293,6 @@ theorem chosenWitness_eq_normalizedResponse (S : Source)
     ⟨normalizedResponse S labeling α hα hsmall q hgood, hgood, rfl⟩
   exact hw
 
-/-- The actual left kernel is uniform on the selected normalized affine coset
-intersected with the first-bit-one answer space. -/
-theorem leftPolicy_eq_candidateLaw (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (α : ℝ) (hα : 0 < α) (hsmall : 1 / (2 : ℝ) ^ (s - r) < α / 8)
-    (q : LeftInput S k s d (Vector r)) (hgood : GoodAdvice S labeling α q) :
-    leftPolicy (goodPredicate S labeling α hα hsmall) q =
-      let w := normalizedResponse S labeling α hα hsmall q hgood
-      PrivateStrategy.candidateLaw w.columns w.coefficient ActualHomogeneous.tau w.firstBit := by
-  unfold leftPolicy
-  rw [chosenWitness_eq_normalizedResponse S labeling α hα hsmall q hgood]
-
-/-- Every point of the selected matrix slice has exactly the observed row value
-when transported to the actual homogeneous domain. -/
-theorem normalized_point_row (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (α : ℝ) (hα : 0 < α) (hsmall : 1 / (2 : ℝ) ^ (s - r) < α / 8)
-    (q : LeftInput S k s d (Vector r)) (hgood : GoodAdvice S labeling α q)
-    (M : Shortcode.Mat s (1 + 2 * k))
-    (hM : M ∈ (RowErasureMatrix.family s (1 + 2 * k) r).points
-      (normalizedDescription S labeling α hα hsmall q hgood)) :
-    q.rowMap.comp ((mapEquiv k s).symm M) = q.rows := by
-  have hs := normalizedDescription_spec S labeling α hα hsmall q hgood
-  have hm := (RowErasureMatrix.family s (1 + 2 * k) r).points_row
-    (normalizedDescription S labeling α hα hsmall q hgood) M hM
-  rw [hs.1, hs.2.1] at hm
-  apply (mapEquiv k r).injective
-  rw [mapEquiv_rowAdvice, LinearEquiv.apply_symm_apply]
-  exact hm
 
 /-- Coordinate transport keeps the actual affine target, including its selected
 intercept; first-bit normalization never replaces it by a homogeneous target. -/
@@ -601,43 +565,6 @@ theorem contains_padded_iff
     exact ⟨Finset.mem_univ _, he.mpr ⟨hrows,
       (column_agreement_iff D.toSlice.columnSpan π M Mstar).mpr h⟩⟩
 
-/-- The subtype equivalence leaves the actual matrix untouched. -/
-def paddedSliceEquiv
-    (D : RowErasureDescriptions.Description s (1 + 2 * k) r)
-    (A : Alphabet s →ₗ[F2] Vector r)
-    (hDrow : (RowErasureMatrix.family s (1 + 2 * k) r).rowMap D = LinearMap.toMatrix' A)
-    (π : ActualHomogeneous.E k →ₗ[F2] V) (Mstar : V →ₗ[F2] Alphabet s)
-    (hstar : mapEquiv k s (Mstar.comp π) ∈ D.toSlice.points) :
-    {M : V →ₗ[F2] Alphabet s // A.comp M = A.comp Mstar ∧
-      mapEquiv k s (M.comp π) ∈ D.toSlice.points} ≃
-      RowErasureSliceQuotient.AffineSlice A
-        ((D.toSlice.columnSpan.map (domainCoordinates k).symm.toLinearMap).map π) Mstar where
-  toFun M := ⟨M.val, M.property.1,
-    (contains_padded_iff D A hDrow π Mstar hstar M.val M.property.1).mp M.property.2⟩
-  invFun M := ⟨M.val, M.property.1,
-    (contains_padded_iff D A hDrow π Mstar hstar M.val M.property.1).mpr M.property.2⟩
-  left_inv _ := rfl
-  right_inv _ := rfl
-
-/-- Uniform expectations agree exactly, because the subtype equivalence
-preserves the underlying matrix. -/
-theorem paddedSlice_expect
-    (D : RowErasureDescriptions.Description s (1 + 2 * k) r)
-    (A : Alphabet s →ₗ[F2] Vector r)
-    (hDrow : (RowErasureMatrix.family s (1 + 2 * k) r).rowMap D = LinearMap.toMatrix' A)
-    (π : ActualHomogeneous.E k →ₗ[F2] V) (Mstar : V →ₗ[F2] Alphabet s)
-    (hstar : mapEquiv k s (Mstar.comp π) ∈ D.toSlice.points)
-    [Fintype {M : V →ₗ[F2] Alphabet s // A.comp M = A.comp Mstar ∧
-      mapEquiv k s (M.comp π) ∈ D.toSlice.points}]
-    [Fintype (RowErasureSliceQuotient.AffineSlice A
-      ((D.toSlice.columnSpan.map (domainCoordinates k).symm.toLinearMap).map π) Mstar)]
-    (f : (V →ₗ[F2] Alphabet s) → ℝ) :
-    (𝔼 M : {M : V →ₗ[F2] Alphabet s // A.comp M = A.comp Mstar ∧
-      mapEquiv k s (M.comp π) ∈ D.toSlice.points}, f M.val) =
-      𝔼 M : RowErasureSliceQuotient.AffineSlice A
-        ((D.toSlice.columnSpan.map (domainCoordinates k).symm.toLinearMap).map π) Mstar,
-        f M.val := by
-  exact Fintype.expect_equiv (paddedSliceEquiv D A hDrow π Mstar hstar) _ _ (fun _ => rfl)
 
 end Algebra
 
@@ -656,47 +583,6 @@ theorem fullTable_padded (S : Source)
   rw [LinearEquiv.symm_apply_apply, TableKeysRestoration.projectedAnswer_pullback]
   rfl
 
-/-- The concrete normalized witness induces exactly the projected column span
-used by the private Fourier conditional bound. -/
-theorem normalized_contains_iff (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (α : ℝ) (hα : 0 < α) (hsmall : 1 / (2 : ℝ) ^ (s - r) < α / 8)
-    (draw : AdviceExperiment.Draw k (Fin S.occurrences) (Alphabet s) (Vector d) (Vector r))
-    (hgood : GoodAdvice S labeling α (AdviceExperiment.leftObservation (ActualGame.rhs S) draw))
-    (Mstar : RawPartnerTarget.RawPoint draw.singletons →ₗ[F2] Alphabet s)
-    (hstar : mapEquiv k s (Mstar.comp (AdviceExperiment.projection (ActualGame.rhs S) draw)) ∈
-      (normalizedDescription S labeling α hα hsmall
-        (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood).toSlice.points)
-    (M : RawPartnerTarget.RawPoint draw.singletons →ₗ[F2] Alphabet s)
-    (hrow : draw.rowMap.comp M = draw.rowMap.comp Mstar) :
-    mapEquiv k s (M.comp (AdviceExperiment.projection (ActualGame.rhs S) draw)) ∈
-        (normalizedDescription S labeling α hα hsmall
-          (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood).toSlice.points ↔
-      ∀ v ∈ (normalizedResponse S labeling α hα hsmall
-          (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood).columns.map
-            (AdviceExperiment.projection (ActualGame.rhs S) draw), M v = Mstar v := by
-  exact contains_padded_iff _ draw.rowMap
-    (normalizedDescription_spec S labeling α hα hsmall _ hgood).1
-    (AdviceExperiment.projection (ActualGame.rhs S) draw) Mstar hstar M hrow
-
-/-- The actual selected target retains its intercept after projection. -/
-theorem normalized_target_padded (S : Source)
-    (labeling : Fin (TableKeysGame.vertexCount S k s d) → Fin (2 ^ s))
-    (α : ℝ) (hα : 0 < α) (hsmall : 1 / (2 : ℝ) ^ (s - r) < α / 8)
-    (draw : AdviceExperiment.Draw k (Fin S.occurrences) (Alphabet s) (Vector d) (Vector r))
-    (hgood : GoodAdvice S labeling α (AdviceExperiment.leftObservation (ActualGame.rhs S) draw))
-    (M : RawPartnerTarget.RawPoint draw.singletons →ₗ[F2] Alphabet s) :
-    (RowErasureMatrix.family s (1 + 2 * k) r).target
-        (normalizedDescription S labeling α hα hsmall
-          (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood)
-        (mapEquiv k s (M.comp (AdviceExperiment.projection (ActualGame.rhs S) draw))) =
-      M (AdviceExperiment.projection (ActualGame.rhs S) draw
-          (normalizedResponse S labeling α hα hsmall
-            (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood).coefficient) +
-        (normalizedDescription S labeling α hα hsmall
-          (AdviceExperiment.leftObservation (ActualGame.rhs S) draw) hgood).intercept := by
-  rw [normalized_target, LinearEquiv.symm_apply_apply]
-  rfl
 
 end UniqueGamesTheorem.Decoder.ProjectedColumnSlice
 

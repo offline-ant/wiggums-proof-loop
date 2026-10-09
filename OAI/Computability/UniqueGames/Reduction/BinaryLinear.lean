@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.ZMod.Basic
 import Mathlib.LinearAlgebra.FiniteDimensional.Lemmas
 import OAI.Computability.UniqueGames.Model
@@ -38,39 +39,6 @@ def coordinatesEquiv (n : Nat) : BitVec n ≃ Vector n where
   left_inv := fromVector_toVector
   right_inv := toVector_fromVector
 
-theorem toVector_xor {n : Nat} (u v : BitVec n) :
-    toVector (u ^^^ v) = toVector u + toVector v := by
-  funext i
-  simp only [toVector, unpack_xor, ofBit_xor, Pi.add_apply]
-
-theorem fromVector_add {n : Nat} (u v : Vector n) :
-    fromVector (u + v) = fromVector u ^^^ fromVector v := by
-  simp only [fromVector, Pi.add_apply, toBit_add, pack_xor]
-
-@[simp] theorem toVector_zero {n : Nat} : toVector (0 : BitVec n) = 0 := by
-  unfold toVector
-  rw [unpack_zero]
-  rfl
-
-@[simp] theorem fromVector_zero {n : Nat} : fromVector (0 : Vector n) = 0 := by
-  simp [fromVector, toBit, pack_zero]
-
-/-- A zero-preserving XOR-additive map becomes a genuine binary linear map. -/
-def liftLinear {n m : Nat} (f : BitVec n → BitVec m)
-    (hzero : f 0 = 0) (hadd : ∀ x y, f (x ^^^ y) = f x ^^^ f y) :
-    Vector n →ₗ[F2] Vector m where
-  toFun x := toVector (f (fromVector x))
-  map_add' x y := by rw [fromVector_add, hadd, toVector_xor]
-  map_smul' c x := by
-    rcases scalar_cases c with rfl | rfl
-    · change toVector (f (fromVector (0 • x))) = 0 • toVector (f (fromVector x))
-      rw [zero_smul, fromVector_zero, hzero, toVector_zero, zero_smul]
-    · simp
-
-theorem liftLinear_apply {n m : Nat} (f : BitVec n → BitVec m)
-    (hzero : f 0 = 0) (hadd : ∀ x y, f (x ^^^ y) = f x ^^^ f y)
-    (x : Vector n) :
-    liftLinear f hzero hadd x = toVector (f (fromVector x)) := rfl
 
 theorem finrank_vector (n : Nat) : Module.finrank F2 (Vector n) = n := by
   simp [Vector]

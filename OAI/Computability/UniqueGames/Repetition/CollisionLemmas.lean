@@ -1,11 +1,11 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Data.Finset.Max
 import Mathlib.Tactic.FieldSimp
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.NormNum
 import Mathlib.Tactic.Ring
-import OAI.Computability.UniqueGames.Foundations.ValueLemmas
-import OAI.Computability.UniqueGames.Games.FactorizationLemmas
+import OAI.Computability.UniqueGames.Foundations.SamplingLemmas
 import OAI.Computability.UniqueGames.Repetition.AnalyticRateLemmas
 
 namespace OAI
@@ -46,8 +46,6 @@ def toGame (K : ProjectionKernel Q₁ Q₂ A₁ A₂) : Game Q₁ Q₂ A₁ A₂
         exact K.outer.normalized }
   accepts := K.accepts
 
-theorem toGame_isProjection (K : ProjectionKernel Q₁ Q₂ A₁ A₂) :
-    IsProjection K.toGame := K.projection
 
 /-- Apply the projection operator to an arbitrary real assignment table. -/
 def apply (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
@@ -107,28 +105,32 @@ theorem collisionValue_nonneg [Nonempty A₁]
   rw [← h]
   exact K.energy_nonneg _
 
+attribute [local instance] Classical.propDecidable
+
+/-- The operator on a single supported label, with arbitrary row amplitude. -/
+theorem apply_single_label (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
+    (labels : Q₁ → A₁) (f : Q₁ → ℝ) (y : Q₂) (b : A₂) :
+    K.apply (fun x a => if labels x = a then f x else 0) y b =
+      ∑ x, (K.inner y).weight x * (if K.accepts x y (labels x) b then f x else 0) := by
+  classical
+  unfold apply
+  apply Finset.sum_congr rfl
+  intro x _
+  congr 1
+  rw [Finset.sum_eq_single (labels x)]
+  · simp
+  · intro a _ ha
+    simp [Ne.symm ha]
+  · simp
+
 @[simp] theorem apply_assignment (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
     (labels : Q₁ → A₁) (y : Q₂) (b : A₂) :
     K.apply (assignment labels) y b =
       ∑ x, if K.accepts x y (labels x) b then (K.inner y).weight x else 0 := by
   classical
-  unfold apply assignment
-  apply Finset.sum_congr rfl
-  intro x _
-  have hsum : (∑ a, if K.accepts x y a b then
-      (if labels x = a then (1 : ℝ) else 0) else 0) =
-      if K.accepts x y (labels x) b then (1 : ℝ) else 0 := by
-    have hpoint (a : A₁) :
-        (if K.accepts x y a b then (if labels x = a then (1 : ℝ) else 0) else 0) =
-        (if a = labels x then (if K.accepts x y a b then (1 : ℝ) else 0) else 0) := by
-      by_cases h : a = labels x
-      · subst a
-        simp
-      · simp [h, Ne.symm h]
-    simp_rw [hpoint]
-    simp
-  rw [hsum]
-  by_cases h : K.accepts x y (labels x) b = true <;> simp [h]
+  unfold assignment
+  rw [apply_single_label]
+  simp only [mul_ite, mul_one, mul_zero]
 
 end ProjectionKernel
 end
@@ -173,9 +175,8 @@ def rightQuestionMarginal (G : Game Q₁ Q₂ A₁ A₂) : FiniteDistribution Q�
 /-- The fallback exists even when the question types were not supplied with
 `Nonempty` instances: it is a marginal of the game's actual probability law. -/
 def leftGivenRight (G : Game Q₁ Q₂ A₁ A₂) (y : Q₂) : FiniteDistribution Q₁ :=
-  UniqueGamesTheorem.Foundations.Repetition.normalizeOr
-    (fun x => G.questions.weight (x, y))
-    (fun x => G.questions.nonnegative (x, y)) (leftQuestionMarginal G)
+  Foundations.Information.gameConditionalKernel
+    (G.questions.transport (Equiv.prodComm Q₁ Q₂)) (leftQuestionMarginal G) y
 
 /-- Exact disintegration, including right questions of marginal probability
 zero. The conditional law is never assumed to reconstruct the question law. -/
@@ -183,9 +184,8 @@ theorem rightQuestionMarginal_mul_leftGivenRight
     (G : Game Q₁ Q₂ A₁ A₂) (x : Q₁) (y : Q₂) :
     (rightQuestionMarginal G).weight y * (leftGivenRight G y).weight x =
       G.questions.weight (x, y) :=
-  UniqueGamesTheorem.Foundations.Repetition.sum_mul_normalizeOr
-    (fun x => G.questions.weight (x, y))
-    (fun x => G.questions.nonnegative (x, y)) (leftQuestionMarginal G) x
+  Foundations.Information.gameConditionalKernel_recombine
+    (G.questions.transport (Equiv.prodComm Q₁ Q₂)) (leftQuestionMarginal G) y x
 
 /-- A projection game's predicate and actual question distribution determine
 the conditional kernel used by the collision argument. -/
@@ -204,20 +204,9 @@ def kernelOfGame (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G) :
 @[simp] theorem toGame_kernelOfGame
     (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G) :
     (kernelOfGame G hG).toGame = G := by
-  have hq : (kernelOfGame G hG).toGame.questions = G.questions :=
-    FiniteDistribution.eq_of_weight_eq (kernelOfGame_question_weight G hG)
-  calc
-    _ = { questions := G.questions, accepts := G.accepts } := by
-      change Game.mk (kernelOfGame G hG).toGame.questions G.accepts =
-        Game.mk G.questions G.accepts
-      rw [hq]
-    _ = G := by cases G; rfl
+  exact congrArg (fun questions => Game.mk questions G.accepts)
+    (FiniteDistribution.eq_of_weight_eq (kernelOfGame_question_weight G hG))
 
-@[simp] theorem kernelOfGame_success
-    (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G)
-    (strategy : Strategy Q₁ Q₂ A₁ A₂) :
-    (kernelOfGame G hG).toGame.success strategy = G.success strategy := by
-  rw [toGame_kernelOfGame]
 
 @[simp] theorem kernelOfGame_value [Nonempty A₁] [Nonempty A₂]
     (G : Game Q₁ Q₂ A₁ A₂) (hG : IsProjection G) :
@@ -305,17 +294,7 @@ theorem assignmentEnergy_reindex (K : ProjectionKernel Q₁ Q₂ A₁ A₂)
   rw [energy_reindex]
   congr 1
   funext x a
-  unfold assignment
-  have h : labels (eQ₁ x) = eA₁ a ↔ eA₁.symm (labels (eQ₁ x)) = a := by
-    constructor
-    · intro ha
-      rw [ha, Equiv.symm_apply_apply]
-    · intro ha
-      calc
-        labels (eQ₁ x) = eA₁ (eA₁.symm (labels (eQ₁ x))) :=
-          (eA₁.apply_symm_apply _).symm
-        _ = eA₁ a := congrArg eA₁ ha
-  rw [h]
+  simp only [assignment, Equiv.symm_apply_eq]
 
 /-- No strategy is lost under bijective question and answer encodings. -/
 theorem collisionValue_reindex [Nonempty A₁] [Nonempty B₁]
@@ -337,115 +316,6 @@ theorem collisionValue_reindex [Nonempty A₁] [Nonempty B₁]
 
 end
 end UniqueGamesTheorem.Repetition.ProjectionKernel
-
-end
-
-section
-
-/-! A conjunction product cannot have greater classical value than either
-factor. The proof freezes the other factor's question pair as a shared random
-seed, obtaining ordinary local strategies and then using finite derandomization.
-No assertion of independence of success events is used. -/
-
-namespace UniqueGamesTheorem.Repetition
-
-open UniqueGamesTheorem.Foundations.Games
-open scoped BigOperators
-noncomputable section
-
-namespace FiniteLaw
-
-variable {Ω Γ : Type*} [Fintype Ω] [Fintype Γ]
-
-theorem probability_product_eq_left_expectation
-    (μ : FiniteDistribution Ω) (ν : FiniteDistribution Γ) (event : Ω × Γ → Bool) :
-    (μ.product ν).probability event =
-      μ.expectation (fun x => ν.probability (fun y => event (x, y))) := by
-  simp only [FiniteDistribution.probability, FiniteDistribution.product,
-    FiniteDistribution.expectation, Fintype.sum_prod_type, Finset.mul_sum]
-  apply Finset.sum_congr rfl
-  intro x _
-  apply Finset.sum_congr rfl
-  intro y _
-  by_cases h : event (x, y) = true <;> simp [h]
-
-theorem probability_product_eq_right_expectation
-    (μ : FiniteDistribution Ω) (ν : FiniteDistribution Γ) (event : Ω × Γ → Bool) :
-    (μ.product ν).probability event =
-      ν.expectation (fun y => μ.probability (fun x => event (x, y))) := by
-  simp only [FiniteDistribution.probability, FiniteDistribution.product,
-    FiniteDistribution.expectation, Fintype.sum_prod_type, Finset.mul_sum]
-  rw [Finset.sum_comm]
-  apply Finset.sum_congr rfl
-  intro y _
-  apply Finset.sum_congr rfl
-  intro x _
-  by_cases h : event (x, y) = true <;> simp [h, mul_comm]
-
-theorem expectation_mono (μ : FiniteDistribution Ω) {f g : Ω → ℝ}
-    (h : ∀ x, f x ≤ g x) : μ.expectation f ≤ μ.expectation g := by
-  apply Finset.sum_le_sum
-  intro x _
-  exact mul_le_mul_of_nonneg_left (h x) (μ.nonnegative x)
-
-end FiniteLaw
-
-variable {Q₁ Q₂ A₁ A₂ R₁ R₂ B₁ B₂ : Type*}
-  [Fintype Q₁] [Fintype Q₂] [Fintype A₁] [Fintype A₂]
-  [Fintype R₁] [Fintype R₂] [Fintype B₁] [Fintype B₂]
-
-def leftFactorStrategy
-    (s : Strategy (Q₁ × R₁) (Q₂ × R₂) (A₁ × B₁) (A₂ × B₂))
-    (r : R₁ × R₂) : Strategy Q₁ Q₂ A₁ A₂ :=
-  (fun x => (s.1 (x, r.1)).1, fun y => (s.2 (y, r.2)).1)
-
-def rightFactorStrategy
-    (s : Strategy (Q₁ × R₁) (Q₂ × R₂) (A₁ × B₁) (A₂ × B₂))
-    (q : Q₁ × Q₂) : Strategy R₁ R₂ B₁ B₂ :=
-  (fun x => (s.1 (q.1, x)).2, fun y => (s.2 (q.2, y)).2)
-
-theorem success_product_le_left [Nonempty A₁] [Nonempty A₂]
-    (G : Game Q₁ Q₂ A₁ A₂) (H : Game R₁ R₂ B₁ B₂)
-    (s : Strategy (Q₁ × R₁) (Q₂ × R₂) (A₁ × B₁) (A₂ × B₂)) :
-    (product G H).success s ≤ G.value := by
-  change ((G.questions.product H.questions).transport productQuestionEquiv).probability _ ≤ _
-  rw [FiniteDistribution.probability_transport,
-    FiniteLaw.probability_product_eq_right_expectation]
-  calc
-    _ ≤ H.questions.expectation (fun r => G.success (leftFactorStrategy s r)) := by
-      apply FiniteLaw.expectation_mono
-      intro r
-      apply FiniteDistribution.probability_mono
-      intro q h
-      exact (Bool.and_eq_true_iff.mp h).1
-    _ ≤ G.value := G.randomized_success_le_value H.questions (leftFactorStrategy s)
-
-theorem success_product_le_right [Nonempty B₁] [Nonempty B₂]
-    (G : Game Q₁ Q₂ A₁ A₂) (H : Game R₁ R₂ B₁ B₂)
-    (s : Strategy (Q₁ × R₁) (Q₂ × R₂) (A₁ × B₁) (A₂ × B₂)) :
-    (product G H).success s ≤ H.value := by
-  change ((G.questions.product H.questions).transport productQuestionEquiv).probability _ ≤ _
-  rw [FiniteDistribution.probability_transport,
-    FiniteLaw.probability_product_eq_left_expectation]
-  calc
-    _ ≤ G.questions.expectation (fun q => H.success (rightFactorStrategy s q)) := by
-      apply FiniteLaw.expectation_mono
-      intro q
-      apply FiniteDistribution.probability_mono
-      intro r h
-      exact (Bool.and_eq_true_iff.mp h).2
-    _ ≤ H.value := H.randomized_success_le_value G.questions (rightFactorStrategy s)
-
-theorem product_value_le_min [Nonempty A₁] [Nonempty A₂]
-    [Nonempty B₁] [Nonempty B₂]
-    (G : Game Q₁ Q₂ A₁ A₂) (H : Game R₁ R₂ B₁ B₂) :
-    (product G H).value ≤ min G.value H.value := by
-  apply ((product G H).value_le_iff _).2
-  intro s
-  exact le_min (success_product_le_left G H s) (success_product_le_right G H s)
-
-end
-end UniqueGamesTheorem.Repetition
 
 end
 
@@ -551,16 +421,11 @@ theorem exists_best_response [Nonempty A₂]
     ∃ answers : Q₂ → A₂, ∀ y b,
       K.apply (assignment labels) y b ≤ K.apply (assignment labels) y (answers y) := by
   classical
-  have h : ∀ y, ∃ b : A₂, ∀ b',
+  have h (y : Q₂) : ∃ b, ∀ b',
       K.apply (assignment labels) y b' ≤ K.apply (assignment labels) y b := by
-    intro y
-    obtain ⟨b, _, hb⟩ := Finset.exists_mem_eq_sup'
-      (s := (Finset.univ : Finset A₂)) Finset.univ_nonempty
-      (fun b => K.apply (assignment labels) y b)
-    refine ⟨b, fun b' => ?_⟩
-    rw [← hb]
-    exact Finset.le_sup' _ (Finset.mem_univ b')
-  exact ⟨fun y => Classical.choose (h y), fun y b => Classical.choose_spec (h y) b⟩
+    simpa using Finset.exists_max_image Finset.univ
+      (K.apply (assignment labels) y) Finset.univ_nonempty
+  exact ⟨fun y => (h y).choose, fun y => (h y).choose_spec⟩
 
 theorem assignmentEnergy_le_value [Nonempty A₁] [Nonempty A₂]
     (K : ProjectionKernel Q₁ Q₂ A₁ A₂) (labels : Q₁ → A₁) :
@@ -694,34 +559,6 @@ theorem rowLaw_expectation_mul_mass [Nonempty A] (h : V → A → ℝ)
     intro a _
     field_simp [hz]
 
-/-- Finite Jensen for the square, proved by expanding nonnegative variance. -/
-theorem square_expectation_le {Ω : Type*} [Fintype Ω]
-    (law : FiniteDistribution Ω) (f : Ω → ℝ) :
-    law.expectation f ^ 2 ≤ law.expectation (fun x => f x ^ 2) := by
-  let m := law.expectation f
-  have h : 0 ≤ law.expectation (fun x => (f x - m) ^ 2) := by
-    apply Finset.sum_nonneg
-    intro x _
-    exact mul_nonneg (law.nonnegative x) (sq_nonneg _)
-  have he : law.expectation (fun x => (f x - m) ^ 2) =
-      law.expectation (fun x => f x ^ 2) - m ^ 2 := by
-    unfold FiniteDistribution.expectation
-    calc
-      _ = ∑ x, ((law.weight x * f x ^ 2 - 2 * m * (law.weight x * f x)) +
-          law.weight x * m ^ 2) := by
-        apply Finset.sum_congr rfl
-        intro x _
-        ring
-      _ = _ := by
-        rw [Finset.sum_add_distrib, Finset.sum_sub_distrib,
-          ← Finset.mul_sum, ← Finset.sum_mul, law.normalized]
-        change (law.expectation (fun x => f x ^ 2) - 2 * m * m) + 1 * m ^ 2 = _
-        simp only [FiniteDistribution.expectation]
-        ring
-  rw [he] at h
-  dsimp [m] at h
-  linarith
-
 theorem exists_expectation_le {Ω : Type*} [Fintype Ω] [Nonempty Ω]
     (law : FiniteDistribution Ω) (f : Ω → ℝ) :
     ∃ x, law.expectation f ≤ f x := by
@@ -768,7 +605,7 @@ theorem exists_deterministic_preserving_mass [Nonempty A]
   have hjensen (t : T) : (∑ v, ∑ a, c t v a * h v a) ^ 2 ≤
       law.expectation (fun labels => X t labels ^ 2) := by
     rw [← hmean]
-    exact square_expectation_le law (X t)
+    exact ProjectionKernel.sq_expectation_le_expectation_sq law (X t)
   have hsum : (∑ t, w t * (∑ v, ∑ a, c t v a * h v a) ^ 2) ≤
       ∑ t, w t * law.expectation (fun labels => X t labels ^ 2) := by
     apply Finset.sum_le_sum

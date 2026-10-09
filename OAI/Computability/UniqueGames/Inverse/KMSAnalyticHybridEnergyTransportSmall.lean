@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Analysis.HybridCompositionLemmas
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticHybridEnergyImageTransportCoreLemmas
 
@@ -45,18 +46,6 @@ theorem basisInvariant_pullback (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
   rw [h]
   exact hf ((a.symm.trans g).trans a) (LinearEquiv.arrowCongr a b X)
 
-private theorem surjective_comp_symm_iff (b : F ≃ₗ[F2] F') (T : F →ₗ[F2] I) :
-    Function.Surjective (T.comp b.symm.toLinearMap) ↔ Function.Surjective T := by
-  constructor
-  · intro h y
-    obtain ⟨x, hx⟩ := h y
-    exact ⟨b.symm x, hx⟩
-  · intro h y
-    obtain ⟨x, hx⟩ := h y
-    refine ⟨b x, ?_⟩
-    change T (b.symm (b x)) = y
-    rw [b.symm_apply_apply, hx]
-
 variable [FiniteDimensional F2 F] [FiniteDimensional F2 F']
   [Fintype (E →ₗ[F2] F)] [Fintype (E' →ₗ[F2] F')]
 
@@ -67,12 +56,10 @@ theorem smallCoeff_pullback (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
     (ι : I →ₗ[F2] E) (f : (E' →ₗ[F2] F') → ℝ) (T : F →ₗ[F2] I) :
     smallCoeff ι (fun M => f (LinearEquiv.arrowCongr a b M)) T =
       smallCoeff (a.toLinearMap.comp ι) f (T.comp b.symm.toLinearMap) := by
-  have hc : LinearEquiv.arrowCongr b a (ι.comp T) =
-      (a.toLinearMap.comp ι).comp (T.comp b.symm.toLinearMap) := by
-    ext y
-    rfl
   unfold smallCoeff
-  rw [surjective_comp_symm_iff, NaturalTransport.linearCoeff_pullback, hc]
+  rw [show Function.Surjective (T.comp b.symm.toLinearMap) ↔ Function.Surjective T from
+    b.symm.toEquiv.surjective_comp T, NaturalTransport.linearCoeff_pullback]
+  rfl
 
 variable [FiniteDimensional F2 I]
   [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)]
@@ -87,23 +74,9 @@ theorem smallComponent_pullback (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
   apply eq_of_coeff_eq
   intro T
   rw [coeff_smallComponent, smallCoeff_pullback]
-  have hp (X : I →ₗ[F2] F) :
-      LinearEquiv.arrowCongr (LinearEquiv.refl F2 I) b X = b.toLinearMap.comp X := by
-    ext x
-    rfl
-  have hd : LinearEquiv.arrowCongr b (LinearEquiv.refl F2 I) T =
-      T.comp b.symm.toLinearMap := by
-    ext x
-    rfl
-  simpa only [coeff_smallComponent, hp, hd] using
-    (NaturalTransport.linearCoeff_pullback (LinearEquiv.refl F2 I) b
-      (smallComponent (a.toLinearMap.comp ι) f) T).symm
-
-theorem smallComponent_pullback_apply (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
-    (ι : I →ₗ[F2] E) (f : (E' →ₗ[F2] F') → ℝ) (X : I →ₗ[F2] F) :
-    smallComponent ι (fun M => f (LinearEquiv.arrowCongr a b M)) X =
-      smallComponent (a.toLinearMap.comp ι) f (b.toLinearMap.comp X) :=
-  congrFun (smallComponent_pullback a b ι f) X
+  exact ((NaturalTransport.linearCoeff_pullback (LinearEquiv.refl F2 I) b
+    (smallComponent (a.toLinearMap.comp ι) f) T).trans
+      (coeff_smallComponent _ _ _)).symm
 
 end UniqueGamesTheorem.Inverse.KMSAnalyticHybridEnergy
 

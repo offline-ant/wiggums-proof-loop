@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.Basic
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryHeaderMachine
@@ -229,10 +230,6 @@ theorem loopTrace (formula : BinaryFormula.Formula) :
   simp only [updated, BinaryRenameWords.tokens_stream, outputBody_eq, List.append_nil, input] at run
   exact run
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 def steps (formula : BinaryFormula.Formula) : Nat :=
   2 * ((BinaryTokenMachine.tokens formula.clauses).length + 1) +
     BinaryRenameLoop.steps (BinaryRenameWords.tokens formula.clauses)
@@ -254,7 +251,7 @@ theorem renameTrace (formula : BinaryFormula.Formula) :
   have fifth := cleanupTrace (BinaryTokenMachine.tokens formula.clauses)
     (encodeWord (3 * formula.clauses.length) ++ encodeWord formula.clauses.length ++
       BinaryRenameWords.body formula)
-  have full := joinTrace (joinTrace (joinTrace (joinTrace first second) third) fourth) fifth
+  have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second) third) fourth) fifth
   have count : 3 * formula.clauses.length + formula.clauses.length + 4 =
       4 * formula.clauses.length + 4 := by omega
   simpa only [steps, initList_eq, haltList_eq, BinaryRenameWords.encoded_renamed, count] using full

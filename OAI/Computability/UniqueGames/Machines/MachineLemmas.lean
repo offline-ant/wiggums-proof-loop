@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Computability.TuringMachine.Computable
 import Mathlib.Logic.Function.Iterate
@@ -10,10 +11,6 @@ section
 
 namespace UniqueGamesTheorem.Foundations.Complexity
 
-def naturalWordsEncoding : Computability.Encoding (List Nat) Bool where
-  encode := encodeWords
-  decode := decodeWords
-  decode_encode := decodeWords_encodeWords
 
 def formulaEncoding : Computability.Encoding Target.Formula Bool where
   encode := formulaBits
@@ -26,67 +23,6 @@ def gameEncoding (alphabet : Nat) : Computability.Encoding (Target.Instance alph
   decode := decodeGameBits alphabet
   decode_encode := decodeGameBits_encoded
 
-/-- A fixed-bit prefixer uses one finite stack, one label, and one internal state.
-The bit is fixed in the program; it is not a second, freely accessible input. -/
-def prefixBitMachine (bit : Bool) : Turing.FinTM2 where
-  K := Unit
-  k₀ := ()
-  k₁ := ()
-  Γ _ := Bool
-  Λ := Unit
-  main := ()
-  σ := Unit
-  initialState := ()
-  m _ := .push () (fun _ => bit) .halt
-
-/-- A real machine certificate: one transition performs the push and halts.
-TM2 counts execution of one finite statement as one transition. Here that
-statement contains exactly one stack push. -/
-noncomputable def prefixBitPolyTime (bit : Bool) :
-    Turing.TM2ComputableInPolyTime (id : List Bool → List Bool) id (bit :: ·) where
-  tm := prefixBitMachine bit
-  inputAlphabet := Equiv.refl Bool
-  outputAlphabet := Equiv.refl Bool
-  time := 1
-  outputsFun bs := {
-    steps := 1
-    evals_in_steps := by
-      change some (Turing.TM2.stepAux (.push () (fun _ => bit) .halt) ()
-          (fun _ : Unit => bs.map id)) =
-        some { l := none, var := (), stk := fun _ : Unit => (bit :: bs).map id }
-      simp [Turing.TM2.stepAux]
-      funext k
-      cases k
-      rfl
-    steps_le_m := by simp
-  }
-
-/-- Increasing a polynomial bound preserves the actual execution witness. -/
-def enlargePolynomialBound {α β αΓ βΓ : Type}
-    {ea : α → List αΓ} {eb : β → List βΓ} {f : α → β}
-    (certificate : Turing.TM2ComputableInPolyTime ea eb f)
-    (bound : Polynomial Nat)
-    (larger : ∀ n, certificate.time.eval n ≤ bound.eval n) :
-    Turing.TM2ComputableInPolyTime ea eb f where
-  toTM2ComputableAux := certificate.toTM2ComputableAux
-  time := bound
-  outputsFun a := {
-    toEvalsTo := (certificate.outputsFun a).toEvalsTo
-    steps_le_m := Nat.le_trans (certificate.outputsFun a).steps_le_m (larger _)
-  }
-
-/-- Two verified phases of one transition system compose with added polynomial
-budgets, both measured in the original input length. This theorem preserves the
-actual sequence of transition steps, not merely the sizes of configurations. -/
-def composeMachinePhases {σ : Type} (step : σ → Option σ)
-    (start intermediate : σ) (finish : Option σ)
-    (p q : Polynomial Nat) (inputLength : Nat)
-    (first : StateTransition.EvalsToInTime step start (some intermediate) (p.eval inputLength))
-    (second : StateTransition.EvalsToInTime step intermediate finish (q.eval inputLength)) :
-    StateTransition.EvalsToInTime step start finish ((p + q).eval inputLength) := by
-  have composed := StateTransition.EvalsToInTime.trans step (p.eval inputLength)
-    (q.eval inputLength) start intermediate finish first second
-  simpa only [Polynomial.eval_add, Nat.add_comm] using composed
 
 open Target
 
@@ -116,45 +52,12 @@ namespace UniqueGamesTheorem.Foundations.Complexity.CookLevin
 def pairBits (input : List Bool × List Bool) : List Bool :=
   encodeWord input.1.length ++ input.1 ++ input.2
 
-def decodePairAux : Nat → List Bool → Option (List Bool × List Bool)
-  | _, [] => none
-  | read, true :: rest => decodePairAux (read + 1) rest
-  | read, false :: rest =>
-      if read ≤ rest.length then some (rest.take read, rest.drop read) else none
-
-def decodePair (bits : List Bool) : Option (List Bool × List Bool) :=
-  decodePairAux 0 bits
-
-theorem decodePairAux_frame (read count : Nat) (rest : List Bool) :
-    decodePairAux read (List.replicate count true ++ false :: rest) =
-      if read + count ≤ rest.length then
-        some (rest.take (read + count), rest.drop (read + count)) else none := by
-  induction count generalizing read with
-  | zero => simp [decodePairAux]
-  | succ count ih =>
-    simp only [List.replicate_succ, List.cons_append, decodePairAux, ih]
-    simp only [Nat.add_assoc, Nat.add_comm 1 count]
-
-@[simp] theorem decodePair_pairBits (input : List Bool × List Bool) :
-    decodePair (pairBits input) = some input := by
-  rcases input with ⟨x, witness⟩
-  simp [decodePair, pairBits, encodeWord, List.append_assoc,
-    decodePairAux_frame]
-
-theorem pairBits_injective : Function.Injective pairBits := by
-  intro first second same
-  have h := congrArg decodePair same
-  simpa only [decodePair_pairBits, Option.some.injEq] using h
 
 @[simp] theorem pairBits_length (input : List Bool × List Bool) :
     (pairBits input).length = 2 * input.1.length + input.2.length + 1 := by
   simp only [pairBits, List.length_append, encodeWord_length]
   omega
 
-def pairEncoding : Computability.Encoding (List Bool × List Bool) Bool where
-  encode := pairBits
-  decode := decodePair
-  decode_encode := decodePair_pairBits
 
 /-- A standard polynomial-time Boolean verifier. `FinTM2` already requires
 finitely many stacks, control labels, and internal states; this field also
@@ -176,8 +79,6 @@ verification, independently of any reduction or satisfiability problem. -/
 def InNP (language : List Bool → Prop) : Prop :=
   ∃ verifier : NPVerifier, ∀ input, language input ↔ verifier.Accepts input
 
-theorem NPVerifier.acceptedLanguage_inNP (verifier : NPVerifier) :
-    InNP verifier.Accepts := ⟨verifier, fun _ => Iff.rfl⟩
 
 /-- The demanded Cook–Levin endpoint: both the SAT equivalence and an actual
 machine producing the fixed existing unary-token 3CNF encoding. This structure
@@ -228,85 +129,6 @@ certificates. The connection to actual transitions is in `MachineLookup`.
 -/
 namespace UniqueGamesTheorem.Foundations.Complexity.MachineLookupSpec
 
-/-- Saturating removal of one zero-delimited word. -/
-def skipWord : List Bool → List Bool
-  | [] => []
-  | true :: bs => skipWord bs
-  | false :: bs => bs
-
-@[simp] theorem skipWord_encodeWord (n : Nat) (bs : List Bool) :
-    skipWord (encodeWord n ++ bs) = bs := by
-  induction n with
-  | zero => simp [encodeWord, skipWord]
-  | succ n ih =>
-    simpa [encodeWord, List.replicate_succ, skipWord] using ih
-
-/-- Iterated word removal agrees with zero-based list dropping, even after
-running past the end of the table. -/
-theorem skipWord_iterate_encodeWords (i : Nat) (values : List Nat) :
-    (skipWord^[i]) (encodeWords values) = encodeWords (values.drop i) := by
-  induction i generalizing values with
-  | zero => rfl
-  | succ i ih =>
-    rw [Function.iterate_succ_apply]
-    cases values with
-    | nil => simpa [encodeWords, skipWord] using ih []
-    | cons n ns =>
-      simpa only [encodeWords, skipWord_encodeWord, List.drop_succ_cons] using ih ns
-
-/-- Copy the next complete word, including its delimiter. Empty input and
-unterminated words fail explicitly. -/
-def headWord : List Bool → Option (List Bool)
-  | [] => none
-  | false :: _ => some [false]
-  | true :: bs => (headWord bs).map (true :: ·)
-
-@[simp] theorem headWord_encodeWord (n : Nat) (bs : List Bool) :
-    headWord (encodeWord n ++ bs) = some (encodeWord n) := by
-  induction n with
-  | zero => simp [encodeWord, headWord]
-  | succ n ih =>
-    simpa [encodeWord, List.replicate_succ, headWord] using
-      congrArg (Option.map (true :: ·)) ih
-
-@[simp] theorem headWord_encodeWords (values : List Nat) :
-    headWord (encodeWords values) = values.head?.map encodeWord := by
-  cases values with
-  | nil => rfl
-  | cons n ns => exact headWord_encodeWord n (encodeWords ns)
-
-def lookupBits (i : Nat) (table : List Bool) : Option (List Bool) :=
-  headWord ((skipWord^[i]) table)
-
-@[simp] theorem lookupBits_encodeWords (i : Nat) (values : List Nat) :
-    lookupBits i (encodeWords values) = values[i]?.map encodeWord := by
-  rw [lookupBits, skipWord_iterate_encodeWords, headWord_encodeWords,
-    List.head?_drop]
-
-/-- The index is on a separate tape and must decode to exactly one word. -/
-def lookupEncoded (index table : List Bool) : Option (List Bool) :=
-  match decodeWords index with
-  | some [i] => lookupBits i table
-  | _ => none
-
-@[simp] theorem decodeWords_encodeWord (i : Nat) :
-    decodeWords (encodeWord i) = some [i] := by
-  simpa [encodeWords] using decodeWords_encodeWords [i]
-
-@[simp] theorem lookupEncoded_encode (i : Nat) (values : List Nat) :
-    lookupEncoded (encodeWord i) (encodeWords values) =
-      values[i]?.map encodeWord := by
-  simp [lookupEncoded]
-
-theorem lookupEncoded_some (i value : Nat) (values : List Nat)
-    (h : values[i]? = some value) :
-    lookupEncoded (encodeWord i) (encodeWords values) = some (encodeWord value) := by
-  simp [h]
-
-theorem lookupEncoded_none (i : Nat) (values : List Nat)
-    (h : values.length ≤ i) :
-    lookupEncoded (encodeWord i) (encodeWords values) = none := by
-  simp [List.getElem?_eq_none h]
 
 /-- Literal split at the selected word. -/
 theorem encoded_selected_split (values : List Nat) (i value : Nat)
@@ -394,11 +216,6 @@ theorem steps_le_encoded_length_strong (values : List Nat) (i : Nat) :
       simp only [steps, encodeWords, List.length_append, encodeWord_length]
       omega
 
-/-- The requested recurrence bound with one further unit of slack. -/
-theorem steps_le_encoded_length (values : List Nat) (i : Nat) :
-    steps values i ≤ (encodeWords values).length + 2 * i + 3 := by
-  have h := steps_le_encoded_length_strong values i
-  omega
 
 /-- Successful lookup uses exactly the consumed table prefix, one guard per
 skipped word, and the two final control steps. -/
@@ -423,21 +240,6 @@ theorem steps_eq_scannedBits_of_some (values : List Nat) (i value : Nat)
   rcases List.getElem?_eq_some_iff.mp h with ⟨hi, _⟩
   exact steps_eq_scannedBits_of_lt values i hi
 
-/-- A subtraction-free exact failure formula: the whole table has been
-consumed, and every remaining unary index bit costs two steps. -/
-theorem steps_add_length_of_invalid (values : List Nat) (i : Nat)
-    (h : values.length ≤ i) :
-    steps values i + values.length = (encodeWords values).length + 2 * i + 2 := by
-  induction values generalizing i with
-  | nil => simp [steps, encodeWords]
-  | cons n ns ih =>
-    cases i with
-    | zero => simp at h
-    | succ i =>
-      have ht := ih i (by simpa using h)
-      simp only [steps, encodeWords, List.length_append, encodeWord_length,
-        List.length_cons]
-      omega
 
 /-- Linear in the combined encoded tape lengths. This is a bound for `steps`,
 not yet a theorem about a concrete machine's execution. -/
@@ -493,10 +295,6 @@ theorem counterTapes_other (counter other : K) (hne : other ≠ counter)
     counterTapes counter base n suffix other = base other := by
   simp [counterTapes, hne]
 
-omit [DecidableEq K] in
-theorem guardPushBound (counter : K) (bodyLabel exitLabel : Λ) :
-    Runtime.statementPushBound (guard (σ := σ) counter bodyLabel exitLabel) = 0 := by
-  rfl
 
 /-- Positive counters lose exactly one true bit; the delimiter and suffix
 remain. Ambient state, unrelated tapes, and labels are accounted for explicitly. -/
@@ -726,51 +524,6 @@ def loopInTime (counter : K) (guardLabel bodyLabel exitLabel : Λ)
       ambient register base cost n bodyTraces
   steps_le_m := totalSteps_le cost n B bodyBound
 
-omit [DecidableEq K] in
-/-- Chaining the caller's declared per-body frame equalities. -/
-theorem baseFrame (base : Nat → K → List Bool) (frame : K → Prop) (n : Nat)
-    (bodyFrame : ∀ r, r < n → ∀ k, frame k → base (r + 1) k = base r k) :
-    ∀ k, frame k → base n k = base 0 k := by
-  revert bodyFrame
-  induction n with
-  | zero => intro _ k _; rfl
-  | succ n ih =>
-      intro bodyFrame k hk
-      exact (bodyFrame n (Nat.lt_succ_self n) k hk).trans
-        (ih (fun r hr => bodyFrame r (Nat.lt_trans hr (Nat.lt_succ_self n))) k hk)
-
-/-- Protected tapes are unchanged by the complete loop, including its guard
-steps. The counter itself is explicitly excluded from this frame. -/
-theorem counterFrame (counter : K) (suffix : List Bool)
-    (base : Nat → K → List Bool) (frame : K → Prop) (n : Nat)
-    (counterOutside : ∀ k, frame k → k ≠ counter)
-    (bodyFrame : ∀ r, r < n → ∀ k, frame k → base (r + 1) k = base r k) :
-    ∀ k, frame k →
-      counterTapes counter (base n) n suffix k = counterTapes counter (base 0) 0 suffix k := by
-  intro k hk
-  rw [counterTapes_other counter k (counterOutside k hk),
-    counterTapes_other counter k (counterOutside k hk)]
-  exact baseFrame base frame n bodyFrame k hk
-
-/-- Actual loop execution and preservation of an arbitrary declared tape frame. -/
-theorem loopTrace_framed (counter : K) (guardLabel bodyLabel exitLabel : Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
-    (atGuard : program guardLabel = guard counter bodyLabel exitLabel)
-    (suffix : List Bool) (ambient : Nat → σ) (register : Nat → Option Bool)
-    (base : Nat → K → List Bool) (cost : Nat → Nat) (n : Nat)
-    (bodyTraces : BodyTraces counter guardLabel bodyLabel program suffix
-      ambient register base cost n)
-    (frame : K → Prop) (counterOutside : ∀ k, frame k → k ≠ counter)
-    (bodyFrame : ∀ r, r < n → ∀ k, frame k → base (r + 1) k = base r k) :
-    ((MachineComposition.advance (TM2.step program))^[totalSteps cost n]
-      (some (guardConfiguration counter guardLabel suffix ambient register base n)) =
-      some (exitConfiguration counter exitLabel suffix ambient base)) ∧
-    (∀ k, frame k →
-      (guardConfiguration counter guardLabel suffix ambient register base n).stk k =
-        (exitConfiguration counter exitLabel suffix ambient base).stk k) :=
-  ⟨loopTrace counter guardLabel bodyLabel exitLabel program atGuard suffix
-      ambient register base cost n bodyTraces,
-    counterFrame counter suffix base frame n counterOutside bodyFrame⟩
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineCountedLoop
 

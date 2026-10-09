@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineFixedCopiesLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryAffineAt
@@ -43,22 +44,10 @@ def tokens (identity : List Bool) : List (MachineFieldTemplate.Token 6) :=
 @[simp] theorem tokens_length (identity : List Bool) :
     (tokens identity).length = 12 := rfl
 
-def fields {n q : Nat} (vertices : Fin 5 → Fin n) (p : PermutationTable q) :
-    Fin 6 → List Bool :=
-  ![encodeWord (vertices 0).val, encodeWord (vertices 1).val,
-    encodeWord (vertices 2).val, encodeWord (vertices 3).val,
-    encodeWord (vertices 4).val, encodeWords (tableWords p)]
 
 def rowBits {n q : Nat} (vertices : Fin 5 → Fin n) (p : PermutationTable q) :
     List Bool := encodeWords ((rows vertices p).flatMap constraintWords)
 
-theorem templateOutput_rows {n q : Nat} (vertices : Fin 5 → Fin n)
-    (p : PermutationTable q) :
-    MachineFieldTemplate.templateOutput
-      (tokens (encodeWords (tableWords (identityTable q)))) (fields vertices p) =
-      rowBits vertices p := by
-  simp [MachineFieldTemplate.templateOutput, MachineFieldTemplate.tokenOutput,
-    tokens, fields, rowBits, rows, constraintWords, encodeWords]
 
 /-- Six preserved fields, scratch, and a reversed-output accumulator. -/
 def field (j : Fin 6) : Fin 8 := ⟨j.val, by omega⟩
@@ -66,19 +55,6 @@ def field (j : Fin 6) : Fin 8 := ⟨j.val, by omega⟩
 def scratch : Fin 8 := 6
 def output : Fin 8 := 7
 
-theorem field_ne_scratch (j : Fin 6) : field j ≠ scratch := by
-  intro h
-  have := congrArg Fin.val h
-  simp [field, scratch] at this
-  omega
-
-theorem field_ne_output (j : Fin 6) : field j ≠ output := by
-  intro h
-  have := congrArg Fin.val h
-  simp [field, output] at this
-  omega
-
-theorem scratch_ne_output : scratch ≠ output := by decide
 
 def machine (identity : List Bool) : FinTM2 where
   K := Fin 8
@@ -91,51 +67,6 @@ def machine (identity : List Bool) : FinTM2 where
   initialState := (((), ()), none)
   m := MachineFieldTemplate.program (tokens identity) field scratch output none
 
-theorem machine_finiteAlphabet (identity : List Bool) :
-    ∀ k, Finite ((machine identity).Γ k) := by
-  intro k
-  change Finite Bool
-  infer_instance
-
-/-- Literal execution of the fixed program; all six input fields are preserved. -/
-def phaseInTime (identity : List Bool) (base : Fin 8 → List Bool)
-    (emptyScratch : base scratch = []) (state : MachineFieldTemplate.State Unit) :
-    StateTransition.EvalsToInTime (machine identity).step
-      ⟨some (MachineFieldTemplate.startAt (tokens identity).length 0), state, base⟩
-      (some ⟨none, MachineFieldTemplate.reset state,
-        MachineFieldTemplate.outputTapes base output
-          (MachineFieldTemplate.templateOutput (tokens identity)
-            (fun j => base (field j)))⟩)
-      (3 * MachineFieldTemplate.copiedLength (tokens identity)
-        (fun j => base (field j)) + 37) := by
-  exact MachineFieldTemplate.phaseInTime (tokens identity) field scratch output
-    field_ne_scratch field_ne_output scratch_ne_output id none
-    (MachineFieldTemplate.program (tokens identity) field scratch output none)
-    (fun _ => rfl) base emptyScratch state
-
-/-- The variable permutation table is read once; vertex words are read according
-to their explicit occurrences in the four rows. -/
-theorem phase_budget (identity : List Bool) (base : Fin 8 → List Bool) :
-    3 * MachineFieldTemplate.copiedLength (tokens identity)
-        (fun j => base (field j)) + 37 =
-      3 * ((base (field 0)).length + 2 * (base (field 1)).length +
-        2 * (base (field 2)).length + 2 * (base (field 3)).length +
-        (base (field 4)).length + (base (field 5)).length) + 37 := by
-  simp [MachineFieldTemplate.copiedLength, tokens]
-  omega
-
-/-- The inverse table of a binary translation is literally the same table. -/
-theorem translation_inverse {s : Nat}
-    (a b : UniqueGamesTheorem.Integration.BinaryLinear.Vector s) :
-    inverseTable (Encoding.translationTable a b) = Encoding.translationTable a b := rfl
-
-/-- Therefore the dynamic emitter serializes the same left-to-right rows as
-the general subdivision emitter, including the reversed final edge. -/
-theorem translation_rows {n s : Nat} (vertices : Fin 5 → Fin n)
-    (a b : UniqueGamesTheorem.Integration.BinaryLinear.Vector s) :
-    rows vertices (Encoding.translationTable a b) =
-      MachineSubdivisionRows.rows vertices (Encoding.translationTable a b) := by
-  simp only [rows, MachineSubdivisionRows.rows, translation_inverse]
 
 end UniqueGamesTheorem.Explicit.MachineSubdivisionDynamicRows
 
@@ -153,19 +84,11 @@ inductive Tape
   | accumulator | output
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.input, .vertices, .alphabetHeader, .occurrences,
-  .remaining, .newVertices, .newEdges, .u, .v, .middle, .first, .last, .permutation,
-  .permutationReverse, .affineScratch, .copyScratch, .accumulator, .output]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .vertices, .alphabetHeader, .occurrences,
+  .remaining, .newVertices, .newEdges, .u, .v, .middle, .first, .last, .permutation,
+  .permutationReverse, .affineScratch, .copyScratch, .accumulator, .output}
+  complete x := by cases x <;> simp
 
 abbrev State := MachineFieldTemplate.State Unit
 
@@ -301,15 +224,6 @@ def machine (q : Nat) : FinTM2 where
   initialState := initialState
   m := program q
 
-theorem machine_finiteAlphabet (q : Nat) :
-    ∀ k, Finite ((machine q).Γ k) := by
-  intro k
-  change Finite Bool
-  infer_instance
-
-theorem rowField_injective : Function.Injective rowField := by
-  intro i j h
-  fin_cases i <;> fin_cases j <;> simp_all [rowField]
 
 theorem clearKeys_covers (k : Tape) :
     k ∈ clearKeys ∨ k = .accumulator ∨ k = .output := by
@@ -482,11 +396,6 @@ def headersInTime (q n Q : Nat) (body : List Bool) :
         (some ⟨some (.initialize 0 0), initialState, resultTapes n q Q body⟩)
         (n + q + Q + 6))
 
-theorem headers_budget (q n Q : Nat) (body : List Bool) :
-    n + q + Q + 6 ≤ (encodeWords [n, q, Q] ++ body).length + 3 := by
-  simp only [List.length_append, encodeWords_length, List.sum_cons, List.sum_nil,
-    List.length_cons, List.length_nil]
-  omega
 
 end UniqueGamesTheorem.Explicit.MachineSubdivisionHeaders
 

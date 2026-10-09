@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 
 namespace OAI
@@ -46,13 +47,6 @@ private theorem flatMap_word {α β : Type*} (f : α → List β)
 
 variable {n d : Nat}
 
-/-- The first header word is the number of vertices. -/
-theorem vertices_word (table : PortTables.Table n d) :
-    (PortTables.tableWords table)[0]? = some n := rfl
-
-/-- The second header word is the number of directed port occurrences. -/
-theorem darts_word (table : PortTables.Table n d) :
-    (PortTables.tableWords table)[1]? = some (n * d) := rfl
 
 private theorem row_word (table : PortTables.Table n d) (i : Fin (n * d))
     (j : Nat) (hj : j < 4098) :
@@ -102,13 +96,6 @@ theorem relation_word (table : PortTables.Table n d) (i : Fin (n * d))
     List.getElem?_map, Vector.getElem?_toList,
     Vector.getElem?_eq_getElem j.isLt, Option.map_some] using h
 
-/-- A lookup indexed by the two labels returns exactly the semantic predicate. -/
-theorem accepts_word (table : PortTables.Table n d) (e : Fin n × Fin d)
-    (a b : PortTables.Label) :
-    (PortTables.tableWords table)[4 + 4098 * (PortTables.rowIndex n d e).val +
-        (GraphTables.relationIndex (a, b)).val]? =
-      some (GraphTables.bitWord (PortTables.accepts table e a b)) :=
-  relation_word table (PortTables.rowIndex n d e) (GraphTables.relationIndex (a, b))
 
 /-- After the reverse-index lookup, the target row's tail is the rotor endpoint. -/
 theorem rotation_head_word (table : PortTables.Table n d) (e : Fin n × Fin d) :
@@ -116,13 +103,6 @@ theorem rotation_head_word (table : PortTables.Table n d) (e : Fin n × Fin d) :
       some ((PortTables.rotation table e).1.val) :=
   tail_word table (table.reverseIndex[PortTables.rowIndex n d e])
 
-/-- Both selections required by a concrete two-lookup rotor implementation. -/
-theorem rotor_lookups (table : PortTables.Table n d) (e : Fin n × Fin d) :
-    (PortTables.tableWords table)[3 + 4098 * (PortTables.rowIndex n d e).val]? =
-      some (table.reverseIndex[PortTables.rowIndex n d e].val) ∧
-    (PortTables.tableWords table)[2 + 4098 * (table.reverseIndex[PortTables.rowIndex n d e]).val]? =
-      some ((PortTables.rotation table e).1.val) :=
-  ⟨reverse_word table (PortTables.rowIndex n d e), rotation_head_word table e⟩
 
 end UniqueGamesTheorem.Foundations.PCP.PortTableLookup
 

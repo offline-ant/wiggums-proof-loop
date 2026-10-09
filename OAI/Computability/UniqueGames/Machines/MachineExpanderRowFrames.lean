@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderRowCleanup
 import OAI.Computability.UniqueGames.Machines.MachineExpanderRowDivision
 import OAI.Computability.UniqueGames.Machines.MachineExpanderRowEmitLemmas
@@ -11,8 +12,9 @@ section
 
 Only the five actual row inputs are stored. Every address, table return and
 finite control value below is computed from those inputs. The thirteen tape
-frames use the existing phase-output functions. These are data identities and
-size bounds, not assumed machine executions. Kernel-checked with Lean 4.33.1.
+frames use the existing phase-output functions, without a second normalized
+representation. Concrete tape reads reduce directly. These are data identities
+and size bounds, not assumed machine executions.
 -/
 
 namespace UniqueGamesTheorem.Foundations.Complexity.MachineExpanderRow
@@ -71,35 +73,6 @@ theorem secondReturn_eq_residue (positive : 0 < d) :
     r.secondReturn = MachineFixedDivMod.residue (degree d) (Nat.mul_pos positive positive)
       r.secondValue := Fin.ext rfl
 
-theorem receiveFirst_residue_eq_control1 (positive : 0 < d) :
-    receiveFirst r.control0 (MachineFixedDivMod.residue (degree d)
-      (Nat.mul_pos positive positive) r.firstValue) = r.control1 := by
-  rw [← r.firstReturn_eq_residue positive]
-  rfl
-
-theorem receiveSecond_residue_eq_control2 (positive : 0 < d) :
-    receiveSecond r.smallTable r.control1 (MachineFixedDivMod.residue (degree d)
-      (Nat.mul_pos positive positive) r.secondValue) = r.control2 := by
-  rw [← r.secondReturn_eq_residue positive]
-  rfl
-
-theorem firstSelected : (rotationWords r.oldTable)[r.query1]? = some r.firstValue := by
-  rw [query1_eq_firstRow]
-  exact rotationWords_getElem? r.oldTable r.firstRow
-
-theorem secondSelected : (rotationWords r.oldTable)[r.query2]? = some r.secondValue := by
-  rw [query2_eq_secondRow]
-  exact rotationWords_getElem? r.oldTable r.secondRow
-
-theorem evaluateRow_eq : evaluateRow r.oldTable r.smallTable r.inputVertex r.inputCloud r.inputPort =
-    (r.secondVertex, r.control2) := rfl
-
-theorem finalValue_eq_step_reverseIndex :
-    r.finalValue = (reverseIndex (step r.oldTable r.smallTable)
-      (rowIndex (v * cloudSize d) (degree d)
-        (rowIndex v (cloudSize d) (r.inputVertex, r.inputCloud), r.inputPort))).val := by
-  simpa only [evaluateRow_eq, finalValue] using outputAddress_eq_step_reverseIndex
-    r.oldTable r.smallTable r.inputVertex r.inputCloud r.inputPort
 
 theorem rows_le_tableLength : v * degree d ≤ r.tableLength := by
   simp only [tableLength, encodeWords_length, rotationWords_length]
@@ -144,23 +117,13 @@ end RowData
 
 variable {v d : Nat}
 
-/-- Complete explicit tape contents; all three scratch roles omitted here are empty. -/
-def frameContents (r : RowData v d) (output : List Bool)
-    (qr qi lo q1 q2 r1 r2 : List Bool) : Tape → List Bool
+/-- The row starts with its input, table and accumulator; all work tapes are empty. -/
+def frame0 (r : RowData v d) (output : List Bool) : Tape → List Bool
   | .inputVertex => encodeWord r.inputVertex.val
   | .table => encodeWords (rotationWords r.oldTable)
   | .output => output
-  | .queryReverse => qr
-  | .queryIndex => qi
-  | .lookupOutput => lo
-  | .quotientFirst => q1
-  | .quotientSecond => q2
-  | .remainderFirst => r1
-  | .remainderSecond => r2
   | _ => []
 
-def frame0 (r : RowData v d) (output : List Bool) : Tape → List Bool :=
-  frameContents r output [] [] [] [] [] [] []
 def frame1 (r : RowData v d) (output : List Bool) : Tape → List Bool :=
   initializedTapes id (frame0 r output)
 def frame2 (r : RowData v d) (output : List Bool) : Tape → List Bool :=
@@ -188,199 +151,10 @@ def frame11 (r : RowData v d) (output : List Bool) : Tape → List Bool :=
 def frame12 (r : RowData v d) (output : List Bool) : Tape → List Bool :=
   cleanupTapes id (frame11 r output)
 
-private theorem lookupResultTapes_id_eq (base : Tape → List Bool)
-    (value : Nat) (suffix : List Bool) :
-    lookupResultTapes id base value suffix =
-      Function.update
-        (Function.update (Function.update base .queryIndex (encodeWord 0 ++ suffix))
-          .lookupWork [])
-        .lookupOutput (encodeWord value ++ base .lookupOutput) := rfl
-
-@[simp] theorem frame1_eq (r : RowData v d) (output : List Bool) :
-    frame1 r output = frameContents r output [] [] []
-      (encodeWord 0) (encodeWord 0) (encodeWord 0) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame1, frame0, frameContents, initializedTapes, encodeWord]
-
-@[simp] theorem frame2_eq (r : RowData v d) (output : List Bool) :
-    frame2 r output = frameContents r output (encodeWord r.query1).reverse [] []
-      (encodeWord 0) (encodeWord 0) (encodeWord 0) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame2, frameContents, emittedWord]
-
-@[simp] theorem frame3_eq (r : RowData v d) (output : List Bool) :
-    frame3 r output = frameContents r output [] (encodeWord r.query1) []
-      (encodeWord 0) (encodeWord 0) (encodeWord 0) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame3, frameContents, Reduction.MachineTransfer.tapesAt]
-
-@[simp] theorem frame4_eq (r : RowData v d) (output : List Bool) :
-    frame4 r output = frameContents r output [] (encodeWord 0) (encodeWord r.firstValue)
-      (encodeWord 0) (encodeWord 0) (encodeWord 0) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame4, lookupResultTapes_id_eq, frameContents]
-
-@[simp] theorem frame5_eq (r : RowData v d) (output : List Bool) :
-    frame5 r output = frameContents r output [] (encodeWord 0) (encodeWord 0)
-      (encodeWord r.firstVertex.val) (encodeWord 0)
-      (encodeWord r.firstReturn.val) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame5, divisionOutput, MachineFixedDivMod.unaryTapes,
-    MachineFixedDivMod.tapes, MachineCopy.forkTapes, frameContents]
-
-@[simp] theorem frame6_eq (r : RowData v d) (output : List Bool) :
-    frame6 r output = frameContents r output [] [] [] (encodeWord r.firstVertex.val)
-      (encodeWord 0) (encodeWord r.firstReturn.val) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame6, clearedQueryTapes, frameContents, encodeWord]
-
-@[simp] theorem frame7_eq (r : RowData v d) (output : List Bool) :
-    frame7 r output = frameContents r output (encodeWord r.query2).reverse [] []
-      (encodeWord r.firstVertex.val) (encodeWord 0)
-      (encodeWord r.firstReturn.val) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame7, emittedWord, frameContents]
-
-@[simp] theorem frame8_eq (r : RowData v d) (output : List Bool) :
-    frame8 r output = frameContents r output [] (encodeWord r.query2) []
-      (encodeWord r.firstVertex.val) (encodeWord 0)
-      (encodeWord r.firstReturn.val) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame8, Reduction.MachineTransfer.tapesAt, frameContents]
-
-@[simp] theorem frame9_eq (r : RowData v d) (output : List Bool) :
-    frame9 r output = frameContents r output [] (encodeWord 0) (encodeWord r.secondValue)
-      (encodeWord r.firstVertex.val) (encodeWord 0)
-      (encodeWord r.firstReturn.val) (encodeWord 0) := by
-  funext tape
-  cases tape <;> simp [frame9, lookupResultTapes_id_eq, frameContents]
-
-@[simp] theorem frame10_eq (r : RowData v d) (output : List Bool) :
-    frame10 r output = frameContents r output [] (encodeWord 0) (encodeWord 0)
-      (encodeWord r.firstVertex.val) (encodeWord r.secondVertex.val)
-      (encodeWord r.firstReturn.val) (encodeWord r.secondReturn.val) := by
-  funext tape
-  cases tape <;> simp [frame10, divisionOutput, MachineFixedDivMod.unaryTapes,
-    MachineFixedDivMod.tapes, MachineCopy.forkTapes, frameContents]
-
-@[simp] theorem frame11_eq (r : RowData v d) (output : List Bool) :
-    frame11 r output = frameContents r ((encodeWord r.finalValue).reverse ++ output)
-      [] (encodeWord 0) (encodeWord 0)
-      (encodeWord r.firstVertex.val) (encodeWord r.secondVertex.val)
-      (encodeWord r.firstReturn.val) (encodeWord r.secondReturn.val) := by
-  funext tape
-  cases tape <;> simp [frame11, emittedWord, frameContents]
-
-@[simp] theorem frame12_eq (r : RowData v d) (output : List Bool) :
-    frame12 r output = frameContents r ((encodeWord r.finalValue).reverse ++ output)
-      [] [] [] [] [] [] [] := by
-  funext tape
-  cases tape <;> simp [frame12, cleanupTapes, frameContents]
-
 theorem final_frame_eq (r : RowData v d) (output : List Bool) :
     frame12 r output = emittedWord .output (frame0 r output) r.finalValue := by
   funext tape
-  cases tape <;> simp [frame0, emittedWord, frameContents]
-
-/-! Direct input facts for the individual checked phase traces. -/
-
-@[simp] theorem frame0_inputVertex (r : RowData v d) (output : List Bool) :
-    frame0 r output .inputVertex = encodeWord r.inputVertex.val := rfl
-
-@[simp] theorem frame0_table (r : RowData v d) (output : List Bool) :
-    frame0 r output .table = encodeWords (rotationWords r.oldTable) := rfl
-
-@[simp] theorem frame0_output (r : RowData v d) (output : List Bool) :
-    frame0 r output .output = output := rfl
-
-@[simp] theorem frame1_inputVertex (r : RowData v d) (output : List Bool) :
-    frame1 r output .inputVertex = encodeWord r.inputVertex.val := by simp [frameContents]
-
-@[simp] theorem frame1_emitScratch (r : RowData v d) (output : List Bool) :
-    frame1 r output .emitScratch = [] := by simp [frameContents]
-
-@[simp] theorem frame2_queryReverse (r : RowData v d) (output : List Bool) :
-    frame2 r output .queryReverse = (encodeWord r.query1).reverse := by simp [frameContents]
-
-@[simp] theorem frame2_queryIndex (r : RowData v d) (output : List Bool) :
-    frame2 r output .queryIndex = [] := by simp [frameContents]
-
-@[simp] theorem frame3_table (r : RowData v d) (output : List Bool) :
-    frame3 r output .table = encodeWords (rotationWords r.oldTable) := by simp [frameContents]
-
-@[simp] theorem frame3_lookupRestore (r : RowData v d) (output : List Bool) :
-    frame3 r output .lookupRestore = [] := by simp [frameContents]
-
-@[simp] theorem frame3_lookupWork (r : RowData v d) (output : List Bool) :
-    frame3 r output .lookupWork = [] := by simp [frameContents]
-
-@[simp] theorem frame3_lookupOutput (r : RowData v d) (output : List Bool) :
-    frame3 r output .lookupOutput = [] := by simp [frameContents]
-
-@[simp] theorem frame3_queryIndex (r : RowData v d) (output : List Bool) :
-    frame3 r output .queryIndex = encodeWord r.query1 := by simp [frameContents]
-
-@[simp] theorem frame4_lookupOutput (r : RowData v d) (output : List Bool) :
-    frame4 r output .lookupOutput = encodeWord r.firstValue := by simp [frameContents]
-
-@[simp] theorem frame4_quotientFirst (r : RowData v d) (output : List Bool) :
-    frame4 r output .quotientFirst = encodeWord 0 := by simp [frameContents]
-
-@[simp] theorem frame4_remainderFirst (r : RowData v d) (output : List Bool) :
-    frame4 r output .remainderFirst = encodeWord 0 := by simp [frameContents]
-
-@[simp] theorem frame6_quotientFirst (r : RowData v d) (output : List Bool) :
-    frame6 r output .quotientFirst = encodeWord r.firstVertex.val := by simp [frameContents]
-
-@[simp] theorem frame6_emitScratch (r : RowData v d) (output : List Bool) :
-    frame6 r output .emitScratch = [] := by simp [frameContents]
-
-@[simp] theorem frame7_queryReverse (r : RowData v d) (output : List Bool) :
-    frame7 r output .queryReverse = (encodeWord r.query2).reverse := by simp [frameContents]
-
-@[simp] theorem frame7_queryIndex (r : RowData v d) (output : List Bool) :
-    frame7 r output .queryIndex = [] := by simp [frameContents]
-
-@[simp] theorem frame8_table (r : RowData v d) (output : List Bool) :
-    frame8 r output .table = encodeWords (rotationWords r.oldTable) := by simp [frameContents]
-
-@[simp] theorem frame8_lookupRestore (r : RowData v d) (output : List Bool) :
-    frame8 r output .lookupRestore = [] := by simp [frameContents]
-
-@[simp] theorem frame8_lookupWork (r : RowData v d) (output : List Bool) :
-    frame8 r output .lookupWork = [] := by simp [frameContents]
-
-@[simp] theorem frame8_lookupOutput (r : RowData v d) (output : List Bool) :
-    frame8 r output .lookupOutput = [] := by simp [frameContents]
-
-@[simp] theorem frame8_queryIndex (r : RowData v d) (output : List Bool) :
-    frame8 r output .queryIndex = encodeWord r.query2 := by simp [frameContents]
-
-@[simp] theorem frame9_lookupOutput (r : RowData v d) (output : List Bool) :
-    frame9 r output .lookupOutput = encodeWord r.secondValue := by simp [frameContents]
-
-@[simp] theorem frame9_quotientSecond (r : RowData v d) (output : List Bool) :
-    frame9 r output .quotientSecond = encodeWord 0 := by simp [frameContents]
-
-@[simp] theorem frame9_remainderSecond (r : RowData v d) (output : List Bool) :
-    frame9 r output .remainderSecond = encodeWord 0 := by simp [frameContents]
-
-@[simp] theorem frame10_quotientSecond (r : RowData v d) (output : List Bool) :
-    frame10 r output .quotientSecond = encodeWord r.secondVertex.val := by simp [frameContents]
-
-@[simp] theorem frame10_emitScratch (r : RowData v d) (output : List Bool) :
-    frame10 r output .emitScratch = [] := by simp [frameContents]
-
-@[simp] theorem frame10_output (r : RowData v d) (output : List Bool) :
-    frame10 r output .output = output := by simp [frameContents]
-
-theorem final_dirty_word_length_le (r : RowData v d) (output : List Bool) (i : Fin 6) :
-    ((frame11 r output) (dirtyTape i)).length ≤ r.tableLength + 1 := by
-  have h1 := r.firstVertex_le_tableLength
-  have h2 := r.secondVertex_le_tableLength
-  have h3 := r.firstReturn_le_tableLength
-  have h4 := r.secondReturn_le_tableLength
-  fin_cases i <;> simp only [frame11_eq, dirtyTape, frameContents, encodeWord_length] <;> omega
+  cases tape <;> rfl
 
 theorem cleanupSteps_le_tableLength (r : RowData v d) (output : List Bool) :
     cleanupSteps id (frame11 r output) ≤ 6 * (r.tableLength + 1) + 6 := by
@@ -388,7 +162,10 @@ theorem cleanupSteps_le_tableLength (r : RowData v d) (output : List Bool) :
   have h2 := r.secondVertex_le_tableLength
   have h3 := r.firstReturn_le_tableLength
   have h4 := r.secondReturn_le_tableLength
-  simp only [cleanupSteps, frame11_eq, id_eq, frameContents, encodeWord_length]
+  simp [cleanupSteps, frame11, frame10, frame9, frame8, frame7, frame6, frame5,
+    emittedWord, divisionOutput, MachineFixedDivMod.unaryTapes, MachineFixedDivMod.tapes,
+    MachineCopy.forkTapes, lookupResultTapes, Reduction.MachineTransfer.tapesAt,
+    clearedQueryTapes, encodeWord_length]
   omega
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineExpanderRow

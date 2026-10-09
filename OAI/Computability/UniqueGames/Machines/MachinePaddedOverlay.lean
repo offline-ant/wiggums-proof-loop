@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineExpanderFamily
 import OAI.Computability.UniqueGames.Machines.MachineOverlayTable
 import OAI.Computability.UniqueGames.Machines.MachineVertexPadding
@@ -198,17 +199,6 @@ private def placeExecution {K Λ S : Type} [DecidableEq K]
   liftExecutionInTime _ _ _
     (Placement.step_simulation tape view left right labels exit extra source target atLabels) run
 
-theorem padding_initial_memory (input : List Bool) :
-    Placement.tapes paddingView (MachineVertexPadding.memory input [] [] [] [] [] [] []) (fun _ => []) =
-      memory input [] [] [] [] [] := by
-  funext k
-  rcases k with k | k
-  · rfl
-  · rcases k with k | k
-    · rcases k with k | k
-      · rcases k with k | k <;> cases k <;> rfl
-      · cases k <;> rfl
-    · simp [Placement.tapes, paddingView, memory]
 
 theorem padding_final_memory (input output level : List Bool) :
     Placement.tapes paddingView (MachineVertexPadding.memory input output [] [] [] level [] []) (fun _ => []) =
@@ -234,7 +224,7 @@ noncomputable def paddingInTime (H : BaseTable) {n d : Nat} (hd : 0 < d) (t : Po
   have run := placeExecution paddingTape paddingView paddingView_left paddingView_right
     paddingLabel (some familyEntry) (fun _ => []) (MachineVertexPadding.program d hd) (program H d hd)
     (fun _ => rfl) (MachineVertexPadding.vertexPaddingInTime hd t ambient none)
-  simpa only [Placement.configuration, Placement.label, padding_initial_memory,
+  simpa only [Placement.configuration, Placement.label,
     padding_final_memory, initialTapes, paddedTapes, padded, main, clean, ambient] using run
 
 theorem family_initial_memory (input output : List Bool) (level : Nat) :
@@ -504,11 +494,6 @@ def machine (H : BaseTable) (d : Nat) (hd : 0 < d) : FinTM2 where
   initialState := clean H d hd
   m := program H d hd
 
-theorem alphabet_finite (H : BaseTable) (d : Nat) (hd : 0 < d) :
-    ∀ k, Finite ((machine H d hd).Γ k) := by
-  intro k
-  change Finite Bool
-  infer_instance
 
 theorem initial_configuration (H : BaseTable) {n d : Nat} (hd : 0 < d)
     (t : PortTables.Table n d) :
@@ -533,8 +518,6 @@ theorem final_output (H : BaseTable) {n d : Nat} (hd : 0 < d)
       PortTables.inputBits (PreprocessingStageMaps.paddedOverlay H d ⟨n, t⟩) := by
   simp [finalTapes, machine, memory, PortTables.inputBits]
 
-theorem original_preserved (H : BaseTable) {n d : Nat} (t : PortTables.Table n d) :
-    finalTapes H t (.inl .original) = PortTables.tableBits t := rfl
 
 end UniqueGamesTheorem.Foundations.Complexity.MachinePaddedOverlay
 

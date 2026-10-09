@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryNameMachine
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCopy
@@ -17,6 +18,7 @@ namespace UniqueGamesTheorem.BinaryNameCompare
 open Turing
 open UniqueGamesTheorem.Foundations.Complexity
 open MachineComposition
+open UniqueGamesTheorem.Reduction.MachineTransfer
 
 variable {K Λ A : Type} [DecidableEq K]
 
@@ -41,17 +43,9 @@ inductive Label
   | scan | copyOut | copyBack | compare
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.scan, .copyOut, .copyBack, .compare]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.scan, .copyOut, .copyBack, .compare}
+  complete x := by cases x <;> simp
 
 /-- Tapes: candidate stream, preserved key, candidate payload, key copy, scratch. -/
 def instruction (tape : Fin 5 → K) (labels : Label → Λ)
@@ -75,9 +69,35 @@ theorem steps_le (payloadLength keyLength : Nat) :
   unfold steps
   omega
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
+/-- The shared canonical-name scan in the comparison/literal state layout. -/
+theorem scanTrace (source destination : K) (distinct : source ≠ destination)
+    (again : Λ) (accepted rejected : Option Λ)
+    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
+    (atScan : program again = MachineStateEquiv.statement (scanStateEquiv A)
+      (BinaryNameMachine.scan source destination again accepted rejected))
+    (base : K → List Bool) (ambient : A) (bits suffix : List Bool)
+    (canonical : BinaryNameMachine.canonical bits = true)
+    (sourceWord : base source = BinaryNameMachine.frame bits ++ suffix)
+    (empty : base destination = []) :
+    (advance (TM2.step program))^[bits.length + 1]
+      (some ⟨some again, clean ambient, base⟩) =
+      some ⟨accepted, clean ambient, tapesAt source destination base suffix bits.reverse⟩ := by
+  apply (MachineStateEquiv.trace_iff (scanStateEquiv A).symm program _ _ _).mp
+  have atBack : MachineStateEquiv.program (scanStateEquiv A).symm program again =
+      BinaryNameMachine.scan source destination again accepted rejected := by
+    change MachineStateEquiv.statement (scanStateEquiv A).symm (program again) = _
+    rw [atScan]
+    exact MachineStateEquiv.statement_symm_statement (scanStateEquiv A) _
+  have initial : tapesAt source destination base (BinaryNameMachine.frame bits ++ suffix) [] =
+      base := by
+    rw [← sourceWord, ← empty]
+    exact tapesAt_self _ _ _
+  have native := BinaryNameMachine.framedTrace source destination distinct again accepted rejected
+    (MachineStateEquiv.program (scanStateEquiv A).symm program) atBack base (ambient, false)
+    bits suffix [] none
+  simpa only [canonical, ↓reduceIte, initial, List.append_nil,
+    MachineStateEquiv.configuration, scanStateEquiv, Equiv.coe_fn_symm_mk, clean,
+    BinaryNameMachine.clean] using native
 
 /-- The name is actually scanned, the key actually copied, and the resulting
 payloads actually compared. Program premises are literal instruction equations. -/
@@ -100,35 +120,9 @@ theorem compareTrace (tape : Fin 5 → K) (distinct : Function.Injective tape)
   let finalBase := Function.update base (tape 0) suffix
   let afterScan := Function.update finalBase (tape 2) bits.reverse
   let afterCopy := Function.update afterScan (tape 3) key
-  have scanRun : (advance (TM2.step program))^[bits.length + 1]
-      (some ⟨some (labels .scan), clean ambient, base⟩) =
-      some ⟨some (labels .copyOut), clean ambient, afterScan⟩ := by
-    let back := MachineStateEquiv.program (scanStateEquiv A).symm program
-    have atScan : back (labels .scan) =
-        BinaryNameMachine.scan (tape 0) (tape 2) (labels .scan)
-          (some (labels .copyOut)) malformedExit := by
-      change MachineStateEquiv.statement (scanStateEquiv A).symm
-        (program (labels .scan)) = _
-      rw [atLabels .scan]
-      exact MachineStateEquiv.statement_symm_statement (scanStateEquiv A) _
-    have backForward : MachineStateEquiv.program (scanStateEquiv A) back = program := by
-      funext l
-      change MachineStateEquiv.statement (scanStateEquiv A)
-        (MachineStateEquiv.statement (scanStateEquiv A).symm (program l)) = _
-      simpa only [Equiv.symm_symm] using
-        MachineStateEquiv.statement_symm_statement (scanStateEquiv A).symm (program l)
-    have initialTapes : UniqueGamesTheorem.Reduction.MachineTransfer.tapesAt (tape 0) (tape 2)
-        base (BinaryNameMachine.frame bits ++ suffix) [] = base := by
-      rw [← sourceWord, ← candidateEmpty]
-      exact UniqueGamesTheorem.Reduction.MachineTransfer.tapesAt_self _ _ _
-    have native := BinaryNameMachine.framedTrace (tape 0) (tape 2) (hd 0 2 (by decide))
-      (labels .scan) (some (labels .copyOut)) malformedExit back atScan base (ambient, false)
-      bits suffix [] none
-    simp only [canonical, ↓reduceIte, initialTapes, List.append_nil] at native
-    have transported := MachineStateEquiv.trace (scanStateEquiv A) back _ _ _ native
-    rw [backForward] at transported
-    simpa only [MachineStateEquiv.configuration, scanStateEquiv, Equiv.coe_fn_mk, BinaryNameMachine.clean,
-      clean, afterScan, finalBase, UniqueGamesTheorem.Reduction.MachineTransfer.tapesAt] using transported
+  have scanRun := scanTrace (tape 0) (tape 2) (hd 0 2 (by decide))
+    (labels .scan) (some (labels .copyOut)) malformedExit program (atLabels .scan)
+    base ambient bits suffix canonical sourceWord candidateEmpty
   have afterScanKey : afterScan (tape 1) = key := by
     simpa [afterScan, finalBase, hd 1 2 (by decide), hd 1 0 (by decide)] using keyWord
   have afterScanCopy : afterScan (tape 3) = [] := by
@@ -170,61 +164,17 @@ theorem compareTrace (tape : Fin 5 → K) (distinct : Function.Injective tape)
         (program (labels .compare)) = _
       rw [atLabels .compare]
       exact MachineStateEquiv.statement_symm_statement (compareStateEquiv A) _
-    have backForward : MachineStateEquiv.program (compareStateEquiv A) back = program := by
-      funext l
-      change MachineStateEquiv.statement (compareStateEquiv A)
-        (MachineStateEquiv.statement (compareStateEquiv A).symm (program l)) = _
-      simpa only [Equiv.symm_symm] using
-        MachineStateEquiv.statement_symm_statement (compareStateEquiv A).symm (program l)
     have native := MachineCompare.compareTrace_fromTapes (tape 2) (tape 3)
       (hd 2 3 (by decide)) (labels .compare) equalExit differentExit back atCompare afterCopy
       ambient none none
     rw [candidateWord, copiedWord, restored, List.length_reverse] at native
     have transported := MachineStateEquiv.trace (compareStateEquiv A) back _ _ _ native
+    have backForward : MachineStateEquiv.program (compareStateEquiv A) back = program :=
+      MachineStateEquiv.program_symm_program (compareStateEquiv A).symm program
     rw [backForward] at transported
     simpa only [MachineStateEquiv.configuration, compareStateEquiv, Equiv.coe_fn_mk, clean] using transported
-  exact joinTrace (joinTrace scanRun copyRun) comparisonRun
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans scanRun copyRun) comparisonRun
 
-/-- Linear runtime in the extracted candidate and stored key lengths. -/
-def compareInTime (tape : Fin 5 → K) (distinct : Function.Injective tape)
-    (labels : Label → Λ) (equalExit differentExit malformedExit : Option Λ)
-    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (State A))
-    (atLabels : ∀ l, program (labels l) =
-      instruction tape labels equalExit differentExit malformedExit l)
-    (base : K → List Bool) (bits suffix key : List Bool)
-    (canonical : BinaryNameMachine.canonical bits = true)
-    (sourceWord : base (tape 0) = BinaryNameMachine.frame bits ++ suffix)
-    (keyWord : base (tape 1) = key)
-    (candidateEmpty : base (tape 2) = []) (copyEmpty : base (tape 3) = [])
-    (scratchEmpty : base (tape 4) = []) (ambient : A) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .scan), clean ambient, base⟩
-      (some ⟨if bits.reverse = key then equalExit else differentExit,
-        clean ambient, Function.update base (tape 0) suffix⟩)
-      (2 * bits.length + 3 * key.length + 4) where
-  steps := steps bits.length key.length
-  evals_in_steps := compareTrace tape distinct labels equalExit differentExit malformedExit
-    program atLabels base bits suffix key canonical sourceWord keyWord
-    candidateEmpty copyEmpty scratchEmpty ambient
-  steps_le_m := steps_le bits.length key.length
-
-/-- Concrete finite machine; exit labels 0, 1, 2 mean equal, different, malformed. -/
-def machine : FinTM2 where
-  K := Fin 5
-  k₀ := 0
-  k₁ := 1
-  Γ _ := Bool
-  Λ := Label ⊕ Fin 3
-  main := .inl .scan
-  σ := State Unit
-  initialState := clean ()
-  m label := match label with
-    | .inl l => instruction id Sum.inl (some (.inr 0)) (some (.inr 1)) (some (.inr 2)) l
-    | .inr _ => .halt
-
-theorem machine_finiteAlphabet (k : machine.K) : Finite (machine.Γ k) := by
-  change Finite Bool
-  infer_instance
 
 end UniqueGamesTheorem.BinaryNameCompare
 

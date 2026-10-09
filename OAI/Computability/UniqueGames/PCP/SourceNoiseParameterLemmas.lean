@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.Algebra.Order.BigOperators.Expect
 import Mathlib.Algebra.Order.Field.Basic
@@ -33,16 +34,6 @@ theorem noiseDenominator_ge_two (ξ : ℚ) : 2 ≤ noiseDenominator ξ := by
 theorem noiseDenominator_pos (ξ : ℚ) : 0 < noiseDenominator ξ :=
   lt_of_lt_of_le (by decide) (noiseDenominator_ge_two ξ)
 
-theorem noiseDenominator_inv_pos (ξ : ℚ) :
-    0 < (noiseDenominator ξ : ℚ)⁻¹ := by
-  apply inv_pos.mpr
-  exact_mod_cast noiseDenominator_pos ξ
-
-theorem noiseDenominator_inv_le_half (ξ : ℚ) :
-    (noiseDenominator ξ : ℚ)⁻¹ ≤ (1 / 2 : ℚ) := by
-  rw [inv_eq_one_div]
-  apply one_div_le_one_div_of_le (by norm_num)
-  exact_mod_cast noiseDenominator_ge_two ξ
 
 /-- The actual computed reciprocal noise is below every positive target. -/
 theorem noiseDenominator_inv_le {ξ : ℚ} (hξ : 0 < ξ) :
@@ -98,9 +89,6 @@ theorem walsh_symm {I : Type*} [Fintype I] [DecidableEq I] (s x : Cube I) :
     walsh s x = walsh x s := by
   simp [walsh, Bool.and_comm]
 
-@[simp] theorem walsh_sq {I : Type*} [Fintype I] [DecidableEq I] (s x : Cube I) :
-    walsh s x ^ 2 = 1 := by
-  simp [walsh, ← Finset.prod_pow]
 
 theorem walsh_xor {I : Type*} [Fintype I] [DecidableEq I] (s x y : Cube I) :
     walsh s (cubeXor x y) = walsh s x * walsh s y := by
@@ -161,20 +149,12 @@ theorem walsh_inversion {I : Type*} [Fintype I] [DecidableEq I] (f : Cube I → 
 
 theorem walsh_inner {I : Type*} [Fintype I] [DecidableEq I] (f g : Cube I → ℝ) :
     (∑ s, coefficient f s * coefficient g s) = 𝔼 x, f x * g x := by
-  classical
   unfold coefficient
-  simp_rw [Finset.mul_expect]
+  simp_rw [Finset.mul_expect, mul_left_comm _ (g _)]
   rw [← Finset.expect_sum_comm]
-  apply Finset.expect_congr rfl
-  intro x _
-  have h : (∑ s, (𝔼 y, f y * walsh s y) * (g x * walsh s x)) =
-      g x * (∑ s, coefficient f s * walsh s x) := by
-    simp only [Finset.mul_sum, coefficient]
-    apply Finset.sum_congr rfl
-    intro s _
-    ring
-  rw [h, walsh_inversion]
-  ring
+  simp_rw [← Finset.mul_sum]
+  change (𝔼 x, g x * ∑ s, coefficient f s * walsh s x) = _
+  simp_rw [walsh_inversion, mul_comm (g _)]
 
 theorem walsh_parseval {I : Type*} [Fintype I] [DecidableEq I] (f : Cube I → ℝ) :
     (∑ s, coefficient f s ^ 2) = 𝔼 x, f x ^ 2 := by
@@ -207,12 +187,6 @@ def support (s : Cube I) : Finset I := Finset.univ.filter fun i => s i = true
 def noiseWeight (ε : ℝ) (μ : Cube I) : ℝ :=
   ∏ i, if μ i then ε else 1 - ε
 
-omit [DecidableEq I] in
-theorem noiseWeight_nonneg {ε : ℝ} (hε : 0 ≤ ε) (hε' : ε ≤ 1) (μ : Cube I) :
-    0 ≤ noiseWeight ε μ := by
-  apply Finset.prod_nonneg
-  intro i _
-  split <;> linarith
 
 theorem noiseWeight_sum (ε : ℝ) : (∑ μ : Cube I, noiseWeight ε μ) = 1 := by
   unfold noiseWeight
@@ -352,16 +326,7 @@ omit [Fintype I] [DecidableEq I] in
   cases b <;> norm_num [bitSign]
 
 theorem sum_cubeFlip (F : Cube I → ℝ) : (∑ f, F (cubeFlip f)) = ∑ f, F f := by
-  refine Finset.sum_bij (fun f _ => cubeFlip f) ?_ ?_ ?_ ?_
-  · intro f _
-    exact Finset.mem_univ _
-  · intro f _ g _ h
-    have h' := congrArg cubeFlip h
-    simpa only [cubeFlip_cubeFlip] using h'
-  · intro g _
-    exact ⟨cubeFlip g, Finset.mem_univ _, cubeFlip_cubeFlip g⟩
-  · intro f _
-    rfl
+  exact (Function.Involutive.bijective cubeFlip_cubeFlip).sum_comp F
 
 theorem coefficient_zero_of_odd (F : Cube I → ℝ)
     (hF : ∀ f, F (cubeFlip f) = -F f) :
@@ -455,16 +420,7 @@ theorem walsh_cubeToggle (s : Cube I) (i : I) (f : Cube I) (hs : s i = true) :
 
 theorem sum_cubeToggle (i : I) (F : Cube I → ℝ) :
     (∑ f, F (cubeToggle i f)) = ∑ f, F f := by
-  refine Finset.sum_bij (fun f _ => cubeToggle i f) ?_ ?_ ?_ ?_
-  · intro f _
-    exact Finset.mem_univ _
-  · intro f _ g _ h
-    have h' := congrArg (cubeToggle i) h
-    simpa only [cubeToggle_twice] using h'
-  · intro g _
-    exact ⟨cubeToggle i g, Finset.mem_univ _, cubeToggle_twice i g⟩
-  · intro f _
-    rfl
+  exact (Function.Involutive.bijective (cubeToggle_twice i)).sum_comp F
 
 def restrictQuery (valid : I → Bool) (f : Cube I) :
     Cube {i : I // valid i = true} := fun i => f i.val
@@ -507,19 +463,6 @@ def conditionedFoldedAnswer (valid : I → Bool) (i₀ : {i : I // valid i = tru
     (table : HalfCube i₀ → Bool) (f : Cube I) : Bool :=
   foldedAnswer i₀ table (restrictQuery valid f)
 
-omit [Fintype I] [DecidableEq I] in
-theorem conditionedFoldedAnswer_flip (valid : I → Bool)
-    (i₀ : {i : I // valid i = true}) (table : HalfCube i₀ → Bool) (f : Cube I) :
-    conditionedFoldedAnswer valid i₀ table (cubeFlip f) =
-      !(conditionedFoldedAnswer valid i₀ table f) := by
-  change foldedAnswer i₀ table (cubeFlip (restrictQuery valid f)) = _
-  exact foldedAnswer_flip i₀ table (restrictQuery valid f)
-
-theorem conditionedFoldedAnswer_zero_coefficient (valid : I → Bool)
-    (i₀ : {i : I // valid i = true}) (table : HalfCube i₀ → Bool) :
-    coefficient (fun f => bitSign (conditionedFoldedAnswer valid i₀ table f))
-      (fun _ => false) = 0 :=
-  coefficient_sign_zero_of_folded _ (conditionedFoldedAnswer_flip valid i₀ table)
 
 omit [Fintype I] [DecidableEq I] in
 theorem conditionedFoldedAnswer_dictator (valid : I → Bool)

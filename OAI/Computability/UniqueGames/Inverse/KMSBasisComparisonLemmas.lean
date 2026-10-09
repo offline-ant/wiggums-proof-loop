@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Expect
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.Dual.Lemmas
@@ -153,16 +154,6 @@ theorem expect_eq_of_uniform_fibers [Fintype X] [Fintype Y] [Fintype G]
         (Finset.expect_product (Finset.univ : Finset Y) (Finset.univ : Finset G)
           (fun z : Y × G => g z.1))
 
-/-- Exact rational finite-set density transfer; no asymptotic or probability
-normalization is hidden in the fiber comparison. -/
-theorem density_eq_of_uniform_fibers [Fintype X] [Fintype Y] [Fintype G]
-    [Nonempty G] (f : X → Y) (e : ∀ y, {x : X // f x = y} ≃ G)
-    (S : Finset Y) :
-    (((Finset.univ.filter fun x => f x ∈ S).card : ℚ) / Fintype.card X) =
-      (S.card : ℚ) / Fintype.card Y := by
-  have h := expect_eq_of_uniform_fibers f e (fun y => if y ∈ S then (1 : ℚ) else 0)
-  simpa [Finset.expect_eq_sum_div_card, Finset.sum_boole,
-    Finset.filter_mem_eq_inter] using h
 
 end UniformFibers
 
@@ -177,23 +168,11 @@ def RangeFiber (L : Submodule K F) :=
 
 /-- A range fiber is the set of linear equivalences onto that range. -/
 def rangeFiberEquiv (L : Submodule K F) : RangeFiber (E := E) L ≃ (E ≃ₗ[K] L) where
-  toFun X := LinearEquiv.ofBijective
-    (X.val.codRestrict L (fun x =>
-      X.property.2.le (LinearMap.mem_range_self X.val x)))
-    ⟨fun _ _ h => X.property.1 (congrArg Subtype.val h), by
-      intro y
-      have hy : (y : F) ∈ LinearMap.range X.val := X.property.2.ge y.property
-      obtain ⟨x, hx⟩ := hy
-      exact ⟨x, Subtype.ext hx⟩⟩
+  toFun X := (LinearEquiv.ofInjective X.val X.property.1).trans
+    (LinearEquiv.ofEq _ _ X.property.2)
   invFun e := ⟨L.subtype.comp e.toLinearMap,
     (Submodule.subtype_injective L).comp e.injective, by
-      ext y
-      constructor
-      · rintro ⟨x, rfl⟩
-        exact (e x).property
-      · intro hy
-        obtain ⟨x, hx⟩ := e.surjective ⟨y, hy⟩
-        exact ⟨x, congrArg Subtype.val hx⟩⟩
+      rw [LinearMap.range_comp_of_range_eq_top _ e.range, Submodule.range_subtype]⟩
   left_inv X := by
     apply Subtype.ext
     ext x
@@ -212,10 +191,6 @@ def rangeFiberEquivAut {L : Submodule K F} (e : E ≃ₗ[K] L) :
       left_inv := by intro a; ext x; simp
       right_inv := by intro a; ext x; simp }
 
-/-- The size of a range fiber is independent of the selected subspace. -/
-theorem rangeFiber_card {L : Submodule K F} (e : E ≃ₗ[K] L) :
-    Nat.card (RangeFiber (E := E) L) = Nat.card (E ≃ₗ[K] E) :=
-  Nat.card_congr (rangeFiberEquivAut e)
 
 end LinearFibers
 
@@ -224,12 +199,6 @@ def vertexBasis {n ell : ℕ} (L : KMS.Vertex n ell) :
     KMS.Ambient ell ≃ₗ[KMS.F2] L.val :=
   LinearEquiv.ofFinrankEq _ _ (by simpa [KMS.Ambient] using L.property.symm)
 
-/-- The concrete binary Grassmann range fiber has exactly as many elements as
-the automorphism group of the fixed `ell`-dimensional domain. -/
-theorem vertex_rangeFiber_card {n ell : ℕ} (L : KMS.Vertex n ell) :
-    Nat.card (RangeFiber (E := KMS.Ambient ell) L.val) =
-      Nat.card (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) :=
-  rangeFiber_card (vertexBasis L)
 
 /-- The sample space after explicitly conditioning on full column rank. -/
 abbrev InjectiveBasisMap (n ell : ℕ) :=
@@ -247,41 +216,6 @@ instance basisAutomorphismFinite (ell : ℕ) :
 instance basisAutomorphismFintype (ell : ℕ) :
     Fintype (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) := Fintype.ofFinite _
 
-def injectiveRange {n ell : ℕ} (X : InjectiveBasisMap n ell) : KMS.Vertex n ell :=
-  rangeVertex X.val X.property
-
-/-- The fiber of the actual range-vertex map is the injective range fiber
-defined above. Both injectivity and the subspace equality are preserved. -/
-def injectiveRangeFiberEquiv {n ell : ℕ} (L : KMS.Vertex n ell) :
-    {X : InjectiveBasisMap n ell // injectiveRange X = L} ≃
-      RangeFiber (E := KMS.Ambient ell) L.val where
-  toFun X := ⟨X.val.val, X.val.property, congrArg Subtype.val X.property⟩
-  invFun X := ⟨⟨X.val, X.property.1⟩, Subtype.ext X.property.2⟩
-  left_inv _ := rfl
-  right_inv _ := rfl
-
-def injectiveRangeFiberAut {n ell : ℕ} (L : KMS.Vertex n ell) :
-    {X : InjectiveBasisMap n ell // injectiveRange X = L} ≃
-      (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) :=
-  (injectiveRangeFiberEquiv L).trans (rangeFiberEquivAut (vertexBasis L))
-
-/-- Exact uniform pushforward from injective binary maps to Grassmann
-vertices. The statement holds also at an empty Grassmannian. -/
-theorem injectiveRange_expect {n ell : ℕ} {M : Type*}
-    [AddCommMonoid M] [Module ℚ≥0 M] (g : KMS.Vertex n ell → M) :
-    (𝔼 X : InjectiveBasisMap n ell, g (injectiveRange X)) = 𝔼 L, g L := by
-  let : Nonempty (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) :=
-    ⟨LinearEquiv.refl _ _⟩
-  exact expect_eq_of_uniform_fibers injectiveRange injectiveRangeFiberAut g
-
-/-- Rational density transfer with the injective-map denominator made explicit. -/
-theorem injectiveRange_density {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) :
-    (((Finset.univ.filter fun X : InjectiveBasisMap n ell => injectiveRange X ∈ S).card : ℚ) /
-      Fintype.card (InjectiveBasisMap n ell)) =
-      (S.card : ℚ) / Fintype.card (KMS.Vertex n ell) := by
-  let : Nonempty (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) :=
-    ⟨LinearEquiv.refl _ _⟩
-  exact density_eq_of_uniform_fibers injectiveRange injectiveRangeFiberAut S
 
 theorem lift_nonempty_iff {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) :
     (lift S).Nonempty ↔ S.Nonempty := by
@@ -315,35 +249,6 @@ def liftRangeFiberAut {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) (L : S) :
       (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) :=
   (liftRangeFiberEquiv S L).trans (rangeFiberEquivAut (vertexBasis L.val))
 
-/-- Every selected Grassmann vertex contributes exactly the same number of
-ordered bases to the full matrix-space lift. -/
-theorem lift_card {n ell : ℕ} (S : Finset (KMS.Vertex n ell)) :
-    (lift S).card = S.card *
-      Fintype.card (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) := by
-  have h := Fintype.card_congr (fiberProductEquiv (liftRange S) (liftRangeFiberAut S))
-  simpa only [Fintype.card_coe, Fintype.card_prod] using h
-
-theorem injectiveBasisMap_card (n ell : ℕ) :
-    Fintype.card (InjectiveBasisMap n ell) = Fintype.card (KMS.Vertex n ell) *
-      Fintype.card (KMS.Ambient ell ≃ₗ[KMS.F2] KMS.Ambient ell) := by
-  have h := Fintype.card_congr
-    (fiberProductEquiv (@injectiveRange n ell) injectiveRangeFiberAut)
-  simpa only [Fintype.card_prod] using h
-
-/-- The density within all maps is the Grassmann density times the full-rank
-probability. In particular the full-rank factor must not be dropped when the
-lift is used as a function on the ambient Fourier space. -/
-theorem lift_density_factor {n ell : ℕ} (S : Finset (KMS.Vertex n ell))
-    (hS : S.Nonempty) :
-    ((lift S).card : ℚ) / Fintype.card (BasisMap n ell) =
-      ((Fintype.card (InjectiveBasisMap n ell) : ℚ) / Fintype.card (BasisMap n ell)) *
-        ((S.card : ℚ) / Fintype.card (KMS.Vertex n ell)) := by
-  let : Nonempty (KMS.Vertex n ell) := ⟨hS.choose⟩
-  have hV : (Fintype.card (KMS.Vertex n ell) : ℚ) ≠ 0 := by
-    exact_mod_cast Fintype.card_ne_zero
-  rw [lift_card, injectiveBasisMap_card]
-  push_cast
-  field_simp
 
 end
 end UniqueGamesTheorem.Inverse.KMSBasisComparison

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.AlphabetTableBoundsLemmas
 
 namespace OAI
@@ -60,8 +61,6 @@ def literalAt (accepted : Bool) (bits : Fin 12 → Bool)
     (clause : Fin 10) (slot : Fin 3) : LiteralTemplate :=
   (blockTemplates accepted bits)[clause][slot]
 
-@[simp] theorem templates_length (accepted : Bool) (bits : Fin 12 → Bool) :
-    (templates accepted bits).length = 10 := Vector.length_toList
 
 theorem templates_true (bits : Fin 12 → Bool) :
     templates true bits = List.replicate 10 tautologyTemplate := by rfl
@@ -69,13 +68,6 @@ theorem templates_true (bits : Fin 12 → Bool) :
 theorem templates_false (bits : Fin 12 → Bool) :
     templates false bits = (chainTemplates bits).toList := by rfl
 
-def literalTemplates (accepted : Bool) (bits : Fin 12 → Bool) : List LiteralTemplate :=
-  (templates accepted bits).flatMap fun clause => [clause[0], clause[1], clause[2]]
-
-theorem literalTemplates_length (accepted : Bool) (bits : Fin 12 → Bool) :
-    (literalTemplates accepted bits).length = 30 := by
-  unfold literalTemplates
-  rw [VerifierToCNF.length_flatMap_constant _ _ 3 (by intro c hc; rfl), templates_length]
 
 def literalWords (index : Reference → Nat) (literal : LiteralTemplate) : List Nat :=
   [index literal.reference, if literal.positive then 1 else 0]
@@ -86,11 +78,6 @@ def clauseWords (index : Reference → Nat) (clause : ClauseTemplate) : List Nat
 def words (accepted : Bool) (bits : Fin 12 → Bool) (index : Reference → Nat) : List Nat :=
   (templates accepted bits).flatMap (clauseWords index)
 
-theorem words_length (accepted : Bool) (bits : Fin 12 → Bool) (index : Reference → Nat) :
-    (words accepted bits index).length = 60 := by
-  unfold words
-  rw [VerifierToCNF.length_flatMap_constant _ _ 6
-    (by intro c hc; simp [clauseWords, literalWords]), templates_length]
 
 variable (V : VerifierToCNF.FiniteVerifier 12) (e : Fin V.events)
   (p : VerifierToCNF.PatternIndex 12)
@@ -118,22 +105,6 @@ def instantiateClause (clause : ClauseTemplate) : Clause (VerifierToCNF.outputVa
   #v[instantiateLiteral V e p clause[0], instantiateLiteral V e p clause[1],
     instantiateLiteral V e p clause[2]]
 
-/-- A symbolic twelve-input chain expands to exactly these ten clauses. -/
-theorem splitLong_twelve {n : Nat} (ls : Fin 12 → Literal n) (ys : Fin 9 → Fin n) :
-    VerifierToCNF.splitLong (List.ofFn ls) (List.ofFn ys) =
-      [#v[ls 0, ls 1, ⟨ys 0, true⟩],
-       #v[⟨ys 0, false⟩, ls 2, ⟨ys 1, true⟩],
-       #v[⟨ys 1, false⟩, ls 3, ⟨ys 2, true⟩],
-       #v[⟨ys 2, false⟩, ls 4, ⟨ys 3, true⟩],
-       #v[⟨ys 3, false⟩, ls 5, ⟨ys 4, true⟩],
-       #v[⟨ys 4, false⟩, ls 6, ⟨ys 5, true⟩],
-       #v[⟨ys 5, false⟩, ls 7, ⟨ys 6, true⟩],
-       #v[⟨ys 6, false⟩, ls 8, ⟨ys 7, true⟩],
-       #v[⟨ys 7, false⟩, ls 9, ⟨ys 8, true⟩],
-       #v[⟨ys 8, false⟩, ls 10, ls 11]] := by
-  simp only [List.ofFn_succ, List.ofFn_zero, VerifierToCNF.splitLong]
-  rfl
-
 /-- Instantiating the fixed plan reproduces the actual converter's entire block. -/
 theorem instantiate_templates :
     (templates (V.accepts e (VerifierToCNF.patternAt 12 p))
@@ -143,18 +114,12 @@ theorem instantiate_templates :
   | false =>
       simp only [h, templates_false, VerifierToCNF.block, Bool.false_eq_true, ↓reduceIte,
         VerifierToCNF.forbiddenClause, VerifierToCNF.auxiliaryNames]
-      rw [splitLong_twelve]
+      simp only [List.ofFn_succ, List.ofFn_zero, VerifierToCNF.splitLong]
       rfl
   | true =>
       simp only [h, templates_true, VerifierToCNF.block, ↓reduceIte, List.map_replicate]
       rfl
 
-theorem instantiate_templates_of_acceptance (accepted : Bool)
-    (h : V.accepts e (VerifierToCNF.patternAt 12 p) = accepted) :
-    (templates accepted (VerifierToCNF.patternAt 12 p)).map (instantiateClause V e p) =
-      VerifierToCNF.block V (by decide) e p := by
-  rw [← h]
-  exact instantiate_templates V e p
 
 theorem instantiateClause_words (clause : ClauseTemplate) :
     Complexity.clauseWords (instantiateClause V e p clause) =
@@ -169,10 +134,6 @@ theorem words_eq_block :
   simp only [List.flatMap_map, instantiateClause_words]
   rfl
 
-theorem block_words_length :
-    ((VerifierToCNF.block V (by decide) e p).flatMap Complexity.clauseWords).length = 60 := by
-  rw [← words_eq_block V e p]
-  exact words_length _ _ _
 
 end UniqueGamesTheorem.Foundations.Complexity.FinalCNFTemplate
 

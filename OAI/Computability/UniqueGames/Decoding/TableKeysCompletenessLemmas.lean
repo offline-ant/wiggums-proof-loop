@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.TableKeysAddressGameLemmas
 import OAI.Computability.UniqueGames.Decoding.TableKeysGame
 import OAI.Computability.UniqueGames.Reduction.ActualCompleteness
@@ -60,24 +61,6 @@ theorem diagonal_honestLabeling (S : Source) (k : Nat) {s d : Nat}
   simp only [diagonalLabeling, honestLabeling, vertexLabel_labelingOf,
     ActualCompleteness.honestLabeling]
 
-/-- The removed affine intercept is recovered by gadget equivariance. -/
-theorem honest_unfolded (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) (q : Query S k s d) :
-    unfolded S k s d (honestLabeling S k g A) q =
-      g.f (ActualCompleteness.evaluate (ActualGame.names S) (fun n => ofBit (A n))
-        (canonical S k s d q)) := by
-  rw [← diagonal_unfolded S k s d _ false q, diagonal_honestLabeling]
-  exact ActualCompleteness.honest_unfolded S k g A false q
-
-/-- On a satisfied tuple, every sampled table evaluates the same homogeneous
-answer with first coordinate one. -/
-theorem honest_unfolded_valid (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) (q : Query S k s d)
-    (hgood : ∀ j, S.satisfied A (q.1 j) = true) :
-    unfolded S k s d (honestLabeling S k g A) q =
-      g.f (q.2 (ActualCompleteness.sourcePoint S k A q.1)) := by
-  rw [← diagonal_unfolded S k s d _ false q, diagonal_honestLabeling]
-  exact ActualCompleteness.honest_unfolded_valid S k g A false q hgood
 
 theorem honest_acceptance_bound (S : Source) (k : Nat) {s d : Nat}
     (g : SplitGadget s d) (A : Fin S.variables → Bool) :
@@ -95,38 +78,6 @@ theorem honest_acceptance_of_bounds (S : Source) (k : Nat) {s d : Nat}
   have hactual := honest_acceptance_bound S k g A
   linarith
 
-/-- Completeness is measured on the generated single-orbit edge occurrences. -/
-theorem honest_satisfied_fraction_bound (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) :
-    1 - (k : ℚ) * S.failure A - g.stabilityError / 2 ≤
-      (countSatisfied (honestLabeling S k g A)
-        (outputInstance S k g).constraints : ℚ) /
-        (outputInstance S k g).constraints.length := by
-  rw [← acceptanceProbability_eq_count]
-  exact honest_acceptance_bound S k g A
-
-theorem completeAt (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (A : Fin S.variables → Bool) (error : RationalError)
-    (hbudget : (k : ℚ) * S.failure A + g.stabilityError / 2 ≤
-      Integration.GapSemantics.errorValue error) :
-    CompleteAt error (outputInstance S k g) := by
-  apply (Integration.GapSemantics.completeAt_iff error _).2
-  refine ⟨honestLabeling S k g A, ?_⟩
-  change 1 - Integration.GapSemantics.errorValue error ≤
-    (countSatisfied (honestLabeling S k g A)
-      (outputInstance S k g).constraints : ℚ) /
-      (outputInstance S k g).constraints.length
-  have h := honest_satisfied_fraction_bound S k g A
-  linarith
-
-theorem completeAt_withEnumeration (S : Source) (k : Nat) {s d : Nat}
-    (g : SplitGadget s d) (en : NoiseEnumeration g)
-    (A : Fin S.variables → Bool) (error : RationalError)
-    (hbudget : (k : ℚ) * S.failure A + g.stabilityError / 2 ≤
-      Integration.GapSemantics.errorValue error) :
-    CompleteAt error (outputInstanceWithEnumeration S k g en) := by
-  apply (completeAt_outputInstanceWithEnumeration_iff error S k g en).2
-  exact completeAt S k g A error hbudget
 
 end
 

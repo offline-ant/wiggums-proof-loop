@@ -1,5 +1,7 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Lean.Elab.Tactic.Omega
 import Mathlib.Algebra.Field.ZMod
+import Mathlib.Algebra.Module.LinearMap.DivisionRing
 import Mathlib.Algebra.Module.Submodule.RestrictScalars
 import Mathlib.LinearAlgebra.Dimension.Constructions
 import Mathlib.LinearAlgebra.Dimension.Free
@@ -87,21 +89,12 @@ theorem dotLinear_ker (v : Vec F) : LinearMap.ker (dotLinear v) = hyperplane v :
 omit [CharP F 2] [Algebra (ZMod 2) F] in
 theorem dotLinear_surjective (v : Vec F) (hv : v ≠ 0) :
     Function.Surjective (dotLinear v) := by
-  classical
-  have hi : ∃ i : Fin 3, v i ≠ 0 := by
-    by_cases h : ∀ i, v i = 0
-    · exact False.elim (hv (funext h))
-    · exact not_forall.mp h
-  obtain ⟨i, hi⟩ := hi
-  intro z
-  refine ⟨Pi.single i (z / v i), ?_⟩
-  have hsingle (j : Fin 3) (a : F) : dot v (Pi.single j a) = v j * a := by
-    fin_cases j <;> simp [dot]
-  change dot v (Pi.single i (z / v i)) = z
-  rw [hsingle]
-  calc
-    v i * (z / v i) = (v i * (v i)⁻¹) * z := by ring
-    _ = z := by rw [mul_inv_cancel₀ hi, one_mul]
+  apply LinearMap.surjective_iff_ne_zero.mpr
+  intro h
+  apply hv
+  ext i
+  have hi := LinearMap.congr_fun h (Pi.single i 1)
+  fin_cases i <;> simpa [dotLinear, dot] using hi
 
 omit [CharP F 2] [Algebra (ZMod 2) F] in
 theorem finrank_hyperplane (v : Vec F) (hv : v ≠ 0) :

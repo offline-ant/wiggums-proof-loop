@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fin.VecNotation
 import Mathlib.Data.Fintype.CardEmbedding
 import Mathlib.Tactic.FinCases
@@ -54,8 +55,6 @@ theorem card_goodTriple : Fintype.card GoodTriple = 970200 := by
   rw [Fintype.card_congr embeddingEquiv, Fintype.card_embedding_eq]
   norm_num [Nat.descFactorial_succ]
 
-theorem card_triple : Fintype.card Triple = 1000000 := by
-  norm_num [Fintype.card_prod, Fintype.card_fin]
 
 instance : Nonempty GoodTriple :=
   ⟨⟨(0, 1, 2), by decide⟩⟩

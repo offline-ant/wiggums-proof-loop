@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRegularDummyRow
 import OAI.Computability.UniqueGames.Machines.MachineRegularInternalRow
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalClean
@@ -64,10 +65,6 @@ def portSteps (t : GraphTables.Table) (padding : Fin t.vertices → Nat) {q : Na
       if h : k < q then coreSteps t padding tables v x ⟨k, h⟩
         (outputLength + (portBits (rowBits t padding tables v x) k).length) else 0
 
-private theorem joinTrace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
-
 /-- Every body is an actual invocation of `coreTrace`; the code hypothesis only
 states the fixed placement into the caller's program. -/
 theorem portPrefixTrace (q : Nat) (positive : 0 < q)
@@ -95,7 +92,7 @@ theorem portPrefixTrace (q : Nat) (positive : 0 < q)
     have he : portEntry q labels exit k = some (labels (⟨k, h⟩, coreEntry q)) := by
       simp only [portEntry, dite_eq_left h]
     rw [he] at first
-    have total := joinTrace first second
+    have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
     simpa only [portSteps, dite_eq_left h, List.length_append, portBits, rowBits,
       List.append_assoc] using total
 
@@ -299,12 +296,6 @@ theorem originalRowSteps_eq (q : Nat) (t : GraphTables.Table) (e : Fin t.darts)
   simp only [MachineRegularOriginalRow.steps, MachineRegularOriginalRow.rowSteps,
     originalMemory, Matrix.cons_val, List.length_replicate]
 
-private theorem encodeWords_flatMap {A : Type*} (xs : List A) (words : A → List Nat) :
-    encodeWords (xs.flatMap words) = xs.flatMap (fun x => encodeWords (words x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 private theorem encodeWords_pair (a b : Nat) (rest : List Nat) :
     encodeWords ([a, b] ++ rest) = encodeWord a ++ (encodeWord b ++ encodeWords rest) := rfl
 
@@ -318,7 +309,7 @@ theorem vertexBits_split (t : GraphTables.Table) (padding : Fin t.vertices → N
   unfold PreprocessingRegularWords.vertexBits PreprocessingRegularWords.vertexRows
   rw [List.flatMap_append, encodeWords_append]
   simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil]
-  rw [encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
   rfl
 
 def originalSteps (t : GraphTables.Table) (padding : Fin t.vertices → Nat) {q : Nat}
@@ -360,7 +351,7 @@ theorem originalTraceAt (q : Nat) (positive : 0 < q)
     some ⟨exit, coreInitialState q positive ambient,
       coreInputTapes t padding tables t.rows[e].tail x
         ((output ++ bits) ++ encodeWords (MachineRegularOriginalRow.emittedWords q t e))⟩ at inherited
-  have total := joinTrace ports inherited
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans ports inherited
   have hbits : PreprocessingRegularWords.originalVertexBits t padding tables e =
       bits ++ encodeWords (MachineRegularOriginalRow.emittedWords q t e) := by
     have h := vertexBits_split t padding tables t.rows[e].tail x
@@ -403,7 +394,7 @@ theorem dummyTraceAt (q : Nat) (positive : 0 < q)
     (paddedCloudRank t padding v x).val (cloudSize t v)
     (PreprocessingPaddingOffsets.offset padding v.val) t.darts
     (encodeWords (ExpanderTableWords.rotationWords (tables v))) (output ++ bits) ambient
-  have total := joinTrace ports inherited
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans ports inherited
   have hbits : PreprocessingRegularWords.dummyVertexBits t padding tables v j =
       bits ++ MachineRegularDummyRow.emittedBits q (vertexOrder t padding x.val).val := by
     have h := vertexBits_split t padding tables v x
@@ -423,7 +414,7 @@ theorem dummyTraceAt (q : Nat) (positive : 0 < q)
   convert total using 1 <;> rfl
 
 /-- Uniform bound on a serialized row in the actual output table. -/
-def rowSizeBound (q vertices : Nat) : Nat := vertices + vertices * (q + 1) + 8192
+def rowSizeBound {R : Type*} [Semiring R] (q vertices : R) : R := vertices + vertices * (q + 1) + 8192
 
 theorem rowBits_length_le (t : GraphTables.Table) (padding : Fin t.vertices → Nat) {q : Nat}
     (tables : ∀ v, ExpanderTables.Table (cloudSize t v + padding v) q)
@@ -453,7 +444,7 @@ theorem allRowBits_length_le (t : GraphTables.Table) (padding : Fin t.vertices �
   rw [← portBits_all]
   exact portBits_length_le _ _ (rowBits_length_le t padding tables v x) q
 
-def portTimeBound (q graphLength rotorLength x v i k o m outputLength vertices : Nat) : Nat :=
+def portTimeBound {R : Type*} [Semiring R] (q graphLength rotorLength x v i k o m outputLength vertices : R) : R :=
   q * coreTimeBound q graphLength rotorLength x v i k o m
     (outputLength + q * rowSizeBound q vertices)
 
@@ -489,12 +480,12 @@ theorem portSteps_le (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
     rw [portSteps, dite_eq_left h, Nat.succ_mul]
     exact Nat.add_le_add first hcost
 
-def originalTimeBound (q graphLength rotorLength x v i k o m outputLength vertices : Nat) : Nat :=
+def originalTimeBound {R : Type*} [Semiring R] (q graphLength rotorLength x v i k o m outputLength vertices : R) : R :=
   portTimeBound q graphLength rotorLength x v i k o m outputLength vertices +
     MachineRegularOriginalClean.timeBound q graphLength
       (outputLength + q * rowSizeBound q vertices)
 
-def dummyTimeBound (q graphLength rotorLength x v i k o m outputLength vertices : Nat) : Nat :=
+def dummyTimeBound {R : Type*} [Semiring R] (q graphLength rotorLength x v i k o m outputLength vertices : R) : R :=
   portTimeBound q graphLength rotorLength x v i k o m outputLength vertices +
     MachineRegularDummyRow.timeBound q x (outputLength + q * rowSizeBound q vertices)
 
@@ -546,70 +537,6 @@ theorem dummySteps_le (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
   rw [hx] at hp
   omega
 
-/-- A concrete finite program for original vertex blocks. -/
-def originalMachine (q : Nat) (positive : 0 < q) : FinTM2 where
-  K := CoreTape
-  k₀ := 0
-  k₁ := 8
-  Γ _ := Bool
-  Λ := Label q
-  main := originalEntry q positive
-  σ := CoreState Unit q
-  initialState := coreInitialState q positive ()
-  m := instruction q positive id none
-
-/-- The same fixed instructions, entered at the dummy-vertex port loop. -/
-def dummyMachine (q : Nat) (positive : 0 < q) : FinTM2 where
-  K := CoreTape
-  k₀ := 0
-  k₁ := 8
-  Γ _ := Bool
-  Λ := Label q
-  main := dummyEntry q positive
-  σ := CoreState Unit q
-  initialState := coreInitialState q positive ()
-  m := instruction q positive id none
-
-def originalMachineInTime (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
-    (padding : Fin t.vertices → Nat)
-    (tables : ∀ v, ExpanderTables.Table (cloudSize t v + padding v) q)
-    (e : Fin t.darts) (output : List Bool) :
-    StateTransition.EvalsToInTime (originalMachine q positive).step
-      ⟨some (originalEntry q positive), coreInitialState q positive (),
-        coreInputTapes t padding tables t.rows[e].tail (oldCloud t padding e) output⟩
-      (some ⟨none, coreInitialState q positive (),
-        coreInputTapes t padding tables t.rows[e].tail (oldCloud t padding e)
-          (output ++ PreprocessingRegularWords.originalVertexBits t padding tables e)⟩)
-      (originalTimeBound q (GraphTables.tableBits t).length
-        (encodeWords (ExpanderTableWords.rotationWords (tables t.rows[e].tail))).length
-        e.val t.rows[e].tail.val (paddedCloudRank t padding t.rows[e].tail (oldCloud t padding e)).val
-        (cloudSize t t.rows[e].tail) (PreprocessingPaddingOffsets.offset padding t.rows[e].tail.val)
-        t.darts output.length (vertexCount t padding)) where
-  steps := originalSteps t padding tables e output.length
-  evals_in_steps := originalTraceAt q positive id none (instruction q positive id none)
-    (fun _ => rfl) t padding tables e output ()
-  steps_le_m := originalSteps_le q positive t padding tables e output.length
-
-def dummyMachineInTime (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
-    (padding : Fin t.vertices → Nat)
-    (tables : ∀ v, ExpanderTables.Table (cloudSize t v + padding v) q)
-    (v : Fin t.vertices) (j : Fin (padding v)) (output : List Bool) :
-    StateTransition.EvalsToInTime (dummyMachine q positive).step
-      ⟨some (dummyEntry q positive), coreInitialState q positive (),
-        coreInputTapes t padding tables v (paddedNew t padding v j) output⟩
-      (some ⟨none, coreInitialState q positive (),
-        coreInputTapes t padding tables v (paddedNew t padding v j)
-          (output ++ PreprocessingRegularWords.dummyVertexBits t padding tables v j)⟩)
-      (dummyTimeBound q (GraphTables.tableBits t).length
-        (encodeWords (ExpanderTableWords.rotationWords (tables v))).length
-        (vertexOrder t padding (.inr ⟨v, j⟩)).val v.val
-        (paddedCloudRank t padding v (paddedNew t padding v j)).val
-        (cloudSize t v) (PreprocessingPaddingOffsets.offset padding v.val)
-        t.darts output.length (vertexCount t padding)) where
-  steps := dummySteps t padding tables v j output.length
-  evals_in_steps := dummyTraceAt q positive id none (instruction q positive id none)
-    (fun _ => rfl) t padding tables v j output ()
-  steps_le_m := dummySteps_le q positive t padding tables v j output.length
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularVertexBlock
 

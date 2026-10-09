@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.FinalCNFPattern
 import OAI.Computability.UniqueGames.PCP.InputLemmas
 import OAI.Computability.UniqueGames.PCP.SourceGapLemmas
@@ -45,7 +46,8 @@ theorem tableGraph_rejectionCount (table : GraphTables.Table)
   have h := (GraphTables.semantics table).reindex_rejectionCount
     (Equiv.refl _) (Equiv.refl _) FinalCNFPattern.labelEquiv.symm
     (fun v => FinalCNFPattern.labelEquiv (labeling v))
-  simpa [FinalCNFPattern.tableGraph, ConstraintGraph.labelingEquiv] using h
+  simpa [FinalCNFPattern.tableGraph, ConstraintGraph.labelingEquiv,
+    Equiv.arrowCongr, Function.comp_def] using h
 
 /-- A uniform numeric-label count bound transfers to the machine's Boolean-label graph. -/
 theorem tableGraph_count_lower (table : GraphTables.Table) (walkLength : Nat)
@@ -67,12 +69,6 @@ theorem clauseGap (table : GraphTables.Table) (hd : 0 < table.darts)
     (Equiv.refl _) (Equiv.refl _) FinalConstants.walkLength
     FinalConstants.walkLength_positive (tableGraph_count_lower table _ hgap)
 
-theorem total_size_le (table : GraphTables.Table) :
-    (output table).variables + (output table).clauses.length ≤
-      77824 * (table.vertices + table.darts) := by
-  have hv := variable_count table
-  have hc := clause_count table
-  omega
 
 /-- A fixed quadratic in the full serialized input length. -/
 noncomputable def sizePolynomial : Polynomial Nat :=

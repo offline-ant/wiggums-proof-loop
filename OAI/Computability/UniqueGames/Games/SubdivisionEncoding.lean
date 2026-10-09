@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.Games.SubdivisionTarget
 import OAI.Computability.UniqueGames.Reduction.GameEncodingSizeLemmas
@@ -69,20 +70,6 @@ theorem subdivide_gameBits {q : Nat} (H : Instance q) :
   rw [gameBits, subdivide_gameWords, encodeWords_append, encodeWords_flatMap]
   rfl
 
-theorem subdivide_gameWords_length {q : Nat} (H : Instance q) :
-    (gameWords (subdivide H)).length = 3 + 4 * H.constraints.length * (q + 2) := by
-  rw [gameWords_length, subdivide_length]
-
-/-- A polynomial output-size bound in the numeric parameters `n,Q,q`; the
-controller separately supplies its raw-input execution-time bound. -/
-theorem subdivide_gameBits_length_le {q : Nat} (H : Instance q) :
-    (gameBits (subdivide H)).length ≤
-      H.vertices + 3 * H.constraints.length + q + 4 * H.constraints.length + 3 +
-        (4 * H.constraints.length) *
-          (2 * (H.vertices + 3 * H.constraints.length) + q * (q + 1)) := by
-  have h := UniqueGamesTheorem.Reduction.GameEncodingSize.gameBits_length_le (subdivide H)
-  rw [subdivide_length] at h
-  exact h
 
 end UniqueGamesTheorem.Explicit.SubdivisionEncoding
 

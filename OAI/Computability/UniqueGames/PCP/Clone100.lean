@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.PCP.Clone100Triples
 import OAI.Computability.UniqueGames.PCP.FoldedEquationLemmas
@@ -32,8 +33,6 @@ theorem clone_distinct {N : Type} (e : Equation N) (t : GoodTriple) :
     fun h => t.property.2.1 (congrArg Prod.snd h),
     fun h => t.property.2.2 (congrArg Prod.snd h)⟩
 
-theorem clone_lift {N : Type} (e : Equation N) (t : GoodTriple) (a : N → Bool) :
-    satisfied (clone e t) (fun z => a z.1) = satisfied e a := rfl
 
 def nameEquiv (n : Nat) : Fin n × Fin 100 ≃ Fin (n * 100) := finProdFinEquiv
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.ActualSeedSamplingLemmas
 import OAI.Computability.UniqueGames.Machines.MachineSingleOrbitBridgeLemmas
 import OAI.Computability.UniqueGames.PCP.BinaryParityReduction
@@ -51,8 +52,8 @@ def reduction {ε δ : ℝ} (P : ParameterSelection.OuterParameters ε δ)
       Outer.BinaryParityReduction.failure_completeness R input yes
     have h := M.completeness (Outer.HastadSource.asSource (R.reduce input))
       assignment ξ hfailure
-    simpa only [matrix, MachineSingleOrbitBridge.output,
-      MachineSingleOrbitBridge.SingleAddress.tableOutput, Outer.HastadSource.asSource,
+    simpa only [matrix, MachineSingleOrbitBridge.output, MachineAddressGame.output,
+      Outer.HastadSource.asSource,
       Rat.cast_add, Rat.cast_mul, Rat.cast_natCast,
       Rat.cast_div, Rat.cast_ofNat] using h
   · intro input no

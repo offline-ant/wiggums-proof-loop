@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.CoefficientSampling
 import OAI.Computability.UniqueGames.Decoding.Experiment
 
@@ -90,19 +91,7 @@ theorem success_eq_flat (k : ℕ) (μ : FiniteDistribution (O × Fin 3))
       intro mask
       apply FiniteDistribution.expectation_congr
       intro single
-      have hgamma : coefficients extra (fun i => (mask i, single i)) =
-          CoefficientSampling.selectCoefficients (maskSet mask) extra single := by
-        funext slot
-        cases slot with
-        | none => rfl
-        | some slot =>
-          cases slot with
-          | inl pair => rfl
-          | inr i => rfl
-      change UpperBound.fixedAdviceSuccess μ (maskSet mask) g
-        (coefficients extra (fun i => (mask i, single i)))
-        (strategy mask (coefficients extra (fun i => (mask i, single i)))) = _
-      rw [hgamma]
+      rfl
     _ = ((bernoulli β hβ₀ hβ₁).iid k).expectation (fun mask =>
         (FiniteDistribution.uniform (Additional k R)).expectation fun extra =>
           (FiniteDistribution.uniform (Fin k → Coefficient R)).expectation fun single =>

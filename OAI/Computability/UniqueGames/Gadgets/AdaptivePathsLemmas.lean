@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.FieldTheory.Finiteness
@@ -45,73 +46,6 @@ def run {S : Type*} (step : S → C → S) (s₀ : S) : (n : ℕ) → Path C n �
 
 variable [Fintype C] [Nonempty C]
 
-omit [Nonempty C] in
-theorem average_run_succ {S : Type*} (step : S → C → S) (s₀ : S)
-    (n : ℕ) (f : S → ℚ) :
-    average (fun p : Path C (n + 1) => f (run step s₀ (n + 1) p)) =
-      average (fun p : Path C n => average (fun c => f (step (run step s₀ n p) c))) := by
-  unfold average
-  change Finset.univ.expect (fun p : Path C n × C => f (step (run step s₀ n p.1) p.2)) = _
-  rw [← Finset.univ_product_univ, Finset.expect_product]
-
-theorem probability_bad_succ {S : Type*} (step : S → C → S) (s₀ : S)
-    (bad : S → Prop) [DecidablePred bad] (ε : ℚ)
-    (hfresh : ∀ s, probability (fun c => bad (step s c)) ≤ ε) (n : ℕ) :
-    probability (fun p : Path C (n + 1) => bad (run step s₀ (n + 1) p)) ≤ ε := by
-  unfold probability
-  change average (fun p : Path C (n + 1) =>
-    (fun s : S => if bad s then (1 : ℚ) else 0) (run step s₀ (n + 1) p)) ≤ ε
-  rw [average_run_succ step s₀ n (fun s => if bad s then (1 : ℚ) else 0)]
-  calc
-    _ ≤ average (fun _ : Path C n => ε) := average_mono (fun p => hfresh _)
-    _ = ε := average_const _
-
-/-- No measurability or independence premise about the state's lift is needed:
-the finite product itself supplies the conditioning identity. -/
-theorem expected_drop_le {S : Type*} (step : S → C → S) (s₀ : S)
-    (potential : S → ℚ) (bad : S → Prop) [DecidablePred bad]
-    (A θ ε : ℚ) (hA : 0 ≤ A) (hθ : 0 ≤ θ) (hε : 0 ≤ ε)
-    (hsmall : A * ε ≤ 1) (hinitial : ¬ bad s₀)
-    (hfresh : ∀ s, probability (fun c => bad (step s c)) ≤ ε)
-    (hstep : ∀ s, average (fun c => potential s - potential (step s c)) ≤
-      3 * θ + A * θ * if bad s then 1 else 0) (n : ℕ) :
-    average (fun p : Path C n => potential (run step s₀ n p)) -
-      average (fun p : Path C (n + 1) => potential (run step s₀ (n + 1) p)) ≤
-      4 * θ := by
-  have hbad : probability (fun p : Path C n => bad (run step s₀ n p)) ≤ ε := by
-    cases n with
-    | zero => simpa [run, probability, hinitial] using hε
-    | succ n => exact probability_bad_succ step s₀ bad ε hfresh n
-  have hmean :
-      average (fun p : Path C n => potential (run step s₀ n p)) -
-        average (fun p : Path C (n + 1) => potential (run step s₀ (n + 1) p)) =
-      average (fun p : Path C n =>
-        average (fun c => potential (run step s₀ n p) - potential (step (run step s₀ n p) c))) := by
-    rw [average_run_succ, ← average_sub]
-    apply Finset.expect_congr rfl
-    intro p hp
-    rw [average_sub, average_const]
-  rw [hmean]
-  exact expected_drop_le_four_theta _ _ A θ ε hA hθ
-    (fun p => hstep _) hbad hsmall
-
-/-- Harmonic loss bound on the actual adaptive path sample space. -/
-theorem expected_total_drop_le {S : Type*} (step : S → C → S) (s₀ : S)
-    (potential : S → ℚ) (bad : S → Prop) [DecidablePred bad]
-    (A θ ε : ℚ) (hA : 0 ≤ A) (hθ : 0 ≤ θ) (hε : 0 ≤ ε)
-    (hsmall : A * ε ≤ 1) (hinitial : ¬ bad s₀)
-    (hfresh : ∀ s, probability (fun c => bad (step s c)) ≤ ε)
-    (hstep : ∀ s, average (fun c => potential s - potential (step s c)) ≤
-      3 * θ + A * θ * if bad s then 1 else 0) (n : ℕ) :
-    potential s₀ - average (fun p : Path C n => potential (run step s₀ n p)) ≤
-      4 * n * θ := by
-  induction n with
-  | zero => simp [run]
-  | succ n ih =>
-    have hd := expected_drop_le step s₀ potential bad A θ ε hA hθ hε hsmall
-      hinitial hfresh hstep n
-    push_cast
-    linarith
 
 end UniqueGamesTheorem.Gadget.AdaptivePaths
 
@@ -184,24 +118,6 @@ theorem target_detection_of_full_lift_bound [DecidableEq E]
       change z (l (T (noise ω))) = 0
       simp [hzero]
 
-/-- Equivalent useful interface when the recursive calculation already gives
-detection of every vector-valued linear retraction of the logical inclusion. -/
-theorem target_detection_of_retraction_bound [DecidableEq B] [DecidableEq E]
-    (noise : Ω → V) (ι : B →ₗ[K] V) (T : V →ₗ[K] E) (q : ℚ)
-    (hretract : ∀ L : V →ₗ[K] B, L.comp ι = LinearMap.id →
-      q ≤ probability (fun ω => L (noise ω) ≠ 0))
-    (hinjective : Function.Injective (T.comp ι)) :
-    q ≤ probability (fun ω => T (noise ω) ≠ 0) := by
-  obtain ⟨l, hl⟩ := exists_leftInverse_of_logical_injective ι T hinjective
-  have hcomp : (l.comp T).comp ι = LinearMap.id := by
-    simpa only [LinearMap.comp_assoc] using hl
-  calc
-    q ≤ probability (fun ω => (l.comp T) (noise ω) ≠ 0) := hretract _ hcomp
-    _ ≤ probability (fun ω => T (noise ω) ≠ 0) := by
-      apply probability_mono
-      intro ω h hzero
-      apply h
-      simp [hzero]
 
 end UniqueGamesTheorem.Gadget.DetectionBridge
 
@@ -271,19 +187,6 @@ theorem common_parent_factorization
   change ψ z t - ζ z (b t) = γ z (a t) at h
   exact (sub_eq_iff_eq_add).mp h
 
-/-- Evaluating the single parent factor on any child embedding gives the
-child restriction formula. The same `γ` works for every child, so its choice
-cannot depend on the fresh orientation subsequently sampled at that child. -/
-theorem common_child_factorization
-    {ι P : Type*} [AddCommGroup P] [Module k P]
-    (a : T →ₗ[k] X) (b : T →ₗ[k] B) (ha : Function.Surjective a)
-    (ψ : S →ₗ[k] (T →ₗ[k] k)) (ζ : S →ₗ[k] (B →ₗ[k] k))
-    (hlift : ∀ z t, a t = 0 → ψ z t = ζ z (b t))
-    (child : ι → P →ₗ[k] T) :
-    ∃ γ : S →ₗ[k] (X →ₗ[k] k),
-      ∀ i z p, ψ z (child i p) = γ z (a (child i p)) + ζ z (b (child i p)) := by
-  obtain ⟨γ, hγ⟩ := common_parent_factorization a b ha ψ ζ hlift
-  exact ⟨γ, fun i z p => hγ z (child i p)⟩
 
 /-- For a surjective aggregate, its first coordinate is surjective. -/
 theorem aggregate_fst_surjective (A : T →ₗ[k] X × B)
@@ -370,18 +273,6 @@ theorem parent_lift_common_child
       ζ z (shiftAggregate J lam (Pi.single i h)).2 at heq
   simpa only [tupleEmbed_single, shiftAggregate_single] using heq
 
-/-- In particular, every child restriction annihilates the child's logical
-kernel. This proves that a child logical character exists for every lift. -/
-theorem parent_lift_child_kernel
-    (J : I → B →ₗ[k] X × B) (hJ : Function.Surjective (aggregate J))
-    (e : R →ₗ[k] P) (lam : R →ₗ[k] B) (hlam : Function.Surjective lam)
-    (ψ : S →ₗ[k] ((I → P) →ₗ[k] k)) (ζ : S →ₗ[k] (B →ₗ[k] k))
-    (hlift : ∀ z (h : parentShifts J lam),
-      ψ z (parentEmbed J lam e h) = ζ z (parentLogical J lam h))
-    (i : I) (z : S) (h : R) (hh : lam h = 0) :
-    ψ z (Pi.single i (e h)) = 0 := by
-  obtain ⟨γ, hγ⟩ := parent_lift_common_child J hJ e lam hlam ψ ζ hlift
-  simpa [hh] using hγ i z h
 
 end UniqueGamesTheorem.Gadget
 
@@ -425,29 +316,12 @@ theorem card_source_pos : 0 < Nat.card V := by
   rw [card_binary_space]
   exact Nat.pow_pos (by decide)
 
-/-- The kernel size itself is the familiar power of the nullity. -/
-theorem kernel_card_eq_pow_sub_rank (f : V →ₗ[ZMod 2] P) :
-    Nat.card f.ker =
-      2 ^ (Module.finrank (ZMod 2) V - Module.finrank (ZMod 2) f.range) := by
-  rw [card_binary_space (V := f.ker)]
-  congr 1
-  have h := f.finrank_range_add_finrank_ker
-  omega
 
 /-- The kernel formula expressed directly as the cardinality of the zero event. -/
 theorem zero_event_card_mul_pow_rank (f : V →ₗ[ZMod 2] P) :
     Nat.card {x : V // f x = 0} * 2 ^ Module.finrank (ZMod 2) f.range = Nat.card V :=
   kernel_card_mul_pow_rank f
 
-/-- A rank threshold gives the exact cleared-denominator bound used on a good leaf. -/
-theorem zero_event_card_mul_pow_le (f : V →ₗ[ZMod 2] P) (r : Nat)
-    (hr : r ≤ Module.finrank (ZMod 2) f.range) :
-    Nat.card {x : V // f x = 0} * 2 ^ r ≤ Nat.card V := by
-  calc
-    Nat.card {x : V // f x = 0} * 2 ^ r ≤
-        Nat.card {x : V // f x = 0} * 2 ^ Module.finrank (ZMod 2) f.range :=
-      Nat.mul_le_mul_left _ (Nat.pow_le_pow_right (by decide) hr)
-    _ = Nat.card V := zero_event_card_mul_pow_rank f
 
 /-- The same exact probability identity for a direct count over a finite universe. -/
 theorem zero_event_finset_count_mul_pow_rank [Fintype V] [DecidableEq P]
@@ -457,13 +331,6 @@ theorem zero_event_finset_count_mul_pow_rank [Fintype V] [DecidableEq P]
   have h := zero_event_card_mul_pow_rank f
   simpa only [Nat.card_eq_fintype_card, Fintype.card_subtype] using h
 
-/-- A rank-r lower bound yields a `2⁻ʳ` bound on the actual finite zero-event count. -/
-theorem zero_event_finset_count_mul_pow_le [Fintype V] [DecidableEq P]
-    (f : V →ₗ[ZMod 2] P) (r : Nat)
-    (hr : r ≤ Module.finrank (ZMod 2) f.range) :
-    (Finset.univ.filter (fun x : V => f x = 0)).card * 2 ^ r ≤ Fintype.card V := by
-  have h := zero_event_card_mul_pow_le f r hr
-  simpa only [Nat.card_eq_fintype_card, Fintype.card_subtype] using h
 
 end UniqueGamesTheorem.Gadget.LinearKernelCount
 
@@ -557,11 +424,6 @@ theorem exists_map_eq_of_finrank_eq (E F : Submodule K V)
     refine ⟨u, u.property, ?_⟩
     exact (ha u).symm.trans (congrArg Subtype.val hu)
 
-omit [FiniteDimensional K V] in
-/-- Rank does not depend on the fresh orientation. -/
-theorem rank_map (E : Submodule K V) (a : V ≃ₗ[K] V) :
-    finrank K (E.map a.toLinearMap) = finrank K E :=
-  a.finrank_map_eq E
 
 /-- The finite Grassmannian at a rank chosen before orientation. -/
 def RankSpace (K V : Type*) [Field K] [AddCommGroup V] [Module K V] (r : ℕ) :=
@@ -594,11 +456,6 @@ theorem mean_oriented_subspace {r : ℕ} [Fintype (V ≃ₗ[K] V)]
 variable {B U : Type*} [AddCommGroup B] [Module K B]
     [AddCommGroup U] [Module K U]
 
-/-- Pullback of a fixed character space by an isomorphism preserves rank.
-The character space is an argument preceding the newly chosen orientation. -/
-theorem rank_dual_pullback (E : Submodule K (Module.Dual K U)) (J : B ≃ₗ[K] U) :
-    finrank K (E.map J.dualMap.toLinearMap) = finrank K E :=
-  J.dualMap.finrank_map_eq E
 
 /-- Choosing a reference isomorphism identifies all orientations with the
 automorphism group of the target. -/
@@ -811,9 +668,6 @@ theorem le_harmonic_rankFor (level : ℚ) : level ≤ harmonic (rankFor level) :
   change level ≤ harmonic (2 ^ ⌈2 * level⌉₊)
   linarith
 
-theorem harmonic_unbounded (level : ℚ) :
-    ∃ r₀ : ℕ, 0 < r₀ ∧ level ≤ harmonic r₀ :=
-  ⟨rankFor level, rankFor_pos level, le_harmonic_rankFor level⟩
 
 /-- Strictly positive genericity error meeting the harmonic bad-rank budget. -/
 def genericityError (r₀ : ℕ) : ℚ := 1 / (2 * (badRankCoefficient r₀ + 1))

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRegularFamily
 import OAI.Computability.UniqueGames.Machines.MachineRegularLift
 import OAI.Computability.UniqueGames.Machines.MachineRegularMetadata
@@ -171,10 +172,6 @@ def emittedData (H : BaseTable) (t : GraphTables.Table) (e : Fin t.darts)
     (output : List Bool) : Data :=
   { familyData H t e output with output := output ++ emittedBits H t e }
 
-private theorem joinTrace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
-
 theorem metadataPlacement (data extra : Data) :
     MachineCloudPadding.Placement.tapes metadataView (MachineRegularMetadata.frame data)
       (frame extra) = frame data := by
@@ -293,7 +290,7 @@ theorem clearPrefixTrace (H : BaseTable) (base : Tape → List Bool)
     have second := drainTrace H ⟨k, h⟩ (clearMemory base k)
     have atEntry : clearEntry k = some (.clear ⟨k, h⟩) := by simp only [clearEntry, dite_eq_left h]
     rw [atEntry] at first
-    simpa only [clearSteps, clearMemory, dite_eq_left h] using joinTrace first second
+    simpa only [clearSteps, clearMemory, dite_eq_left h] using UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
 
 theorem clearTrace (H : BaseTable) (base : Tape → List Bool) :
     (advance (TM2.step (program H)))^[clearSteps base 7]
@@ -400,19 +397,8 @@ theorem originalTrace (H : BaseTable) (t : GraphTables.Table) (e : Fin t.darts)
     rw [clearFrame]
     rfl
   rw [final] at cleanup
-  exact joinTrace (joinTrace (joinTrace metadata family) vertex) cleanup
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans metadata family) vertex) cleanup
 
-/-- Exact execution witness. Its stored count is derived from the four actual
-phases; a polynomial estimate is supplied separately. -/
-noncomputable def originalExecution (H : BaseTable) (t : GraphTables.Table) (e : Fin t.darts)
-    (output : List Bool) :
-    StateTransition.EvalsToInTime (TM2.step (program H))
-      (cfg H (some entry) (initialData t e output))
-      (some (cfg H none (initialData t e (output ++ emittedBits H t e))))
-      (totalSteps H t e output) where
-  steps := totalSteps H t e output
-  evals_in_steps := originalTrace H t e output
-  steps_le_m := le_rfl
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOriginalBody
 

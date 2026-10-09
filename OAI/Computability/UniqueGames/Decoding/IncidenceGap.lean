@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Field
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Tactic.FinCases
@@ -118,31 +119,6 @@ theorem game_success_eq_slot_average (g : Incidence O N) (ω : FiniteDistributio
     Incidence.namedAccepts_iff_accepts g distinct]
   by_cases h : g.accepts o i (a o) (b (g.name o i)) <;> simp [h, div_eq_mul_inv]
 
-/-- The assignment itself supplies both local answer functions. Its incidence
-success equals its parity satisfaction probability exactly. -/
-theorem game_success_honest_eq_paritySuccess
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (b : N → Bool) :
-    (game g ω).success ((fun o i => b (g.name o i)), b) = paritySuccess g ω b := by
-  classical
-  rw [game_success_eq_slot_average g ω distinct]
-  unfold paritySuccess FiniteDistribution.probability
-  apply Finset.sum_congr rfl
-  intro o _
-  by_cases h : xorTriple (fun i => b (g.name o i)) = g.rhs o <;>
-    simp [Incidence.accepts, h]
-
-theorem parityValue_le_game_value
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    parityValue g ω ≤ (game g ω).value := by
-  classical
-  unfold parityValue
-  apply Finset.sup'_le
-  intro b _
-  rw [← game_success_honest_eq_paritySuccess g ω distinct b]
-  exact Game.success_le_value _ _
 
 theorem game_success_le_two_add_parity_third
     (g : Incidence O N) (ω : FiniteDistribution O)
@@ -175,15 +151,6 @@ theorem game_value_le_one_sub_third
   have hv := paritySuccess_le_parityValue g ω s.2
   linarith
 
-theorem game_value_le_one_sub_gap_third
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (gap : ℝ) (hgap : ∀ b : N → Bool, paritySuccess g ω b ≤ 1 - gap) :
-    (game g ω).value ≤ 1 - gap / 3 := by
-  apply (Game.value_le_iff _ _).mpr
-  intro s
-  have h := game_success_le_two_add_parity_third g ω distinct s.1 s.2
-  linarith [hgap s.2]
 
 theorem game_value_le_fourteen_fifteenths
     (g : Incidence O N) (ω : FiniteDistribution O)
@@ -193,86 +160,6 @@ theorem game_value_le_fourteen_fifteenths
   have h := game_value_le_one_sub_third g ω distinct
   linarith
 
-/-- Two bits encode the four satisfying answers for an occurrence. -/
-def satisfyingTriple (rhs : Bool) (a : Bool × Bool) : Triple :=
-  fun i => if i = 0 then a.1 else if i = 1 then a.2 else (a.1 ^^ a.2) ^^ rhs
-
-theorem satisfyingTriple_valid (rhs : Bool) (a : Bool × Bool) :
-    xorTriple (satisfyingTriple rhs a) = rhs := by
-  have h : ∀ x y z : Bool, ((x ^^ y) ^^ ((x ^^ y) ^^ z)) = z := by decide
-  exact h a.1 a.2 rhs
-
-theorem satisfyingTriple_of_valid (a : Triple) (rhs : Bool)
-    (valid : xorTriple a = rhs) : satisfyingTriple rhs (a 0, a 1) = a := by
-  have h : ∀ x y z : Bool, ((x ^^ y) ^^ ((x ^^ y) ^^ z)) = z := by decide
-  funext i
-  fin_cases i
-  · rfl
-  · rfl
-  · change ((a 0 ^^ a 1) ^^ rhs) = a 2
-    rw [← valid]
-    exact h (a 0) (a 1) (a 2)
-
-def fourAnswerGame (g : Incidence O N) (ω : FiniteDistribution O) :
-    Game O N (Bool × Bool) Bool where
-  questions := incidenceLaw g ω
-  accepts o n a b := (game g ω).accepts o n (satisfyingTriple (g.rhs o) a) b
-
-theorem four_answer_card : Fintype.card (Bool × Bool) = 4 := by decide
-
-theorem fourAnswerGame_isProjection
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    UniqueGamesTheorem.Repetition.IsProjection (fourAnswerGame g ω) := by
-  intro o n a b b' hb hb'
-  exact game_isProjection g ω distinct o n (satisfyingTriple (g.rhs o) a) b b' hb hb'
-
-theorem fourAnswerGame_accepts_encode
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (o : O) (n : N) (a : Triple) (b : Bool)
-    (h : (game g ω).accepts o n a b = true) :
-    (fourAnswerGame g ω).accepts o n (a 0, a 1) b = true := by
-  have valid : xorTriple a = g.rhs o := by
-    obtain ⟨_, _, hv, _⟩ := (game_accepts_iff g ω o n a b).mp h
-    exact hv
-  change (game g ω).accepts o n (satisfyingTriple (g.rhs o) (a 0, a 1)) b = true
-  rw [satisfyingTriple_of_valid a (g.rhs o) valid]
-  exact h
-
-/-- Rejecting invalid ambient triples does not change the optimum. Both
-directions transport local answer functions; no extra question is revealed. -/
-theorem fourAnswerGame_value_eq (g : Incidence O N) (ω : FiniteDistribution O) :
-    (fourAnswerGame g ω).value = (game g ω).value := by
-  apply le_antisymm
-  · apply (Game.value_le_iff _ _).mpr
-    intro s
-    change (game g ω).success
-      ((fun o => satisfyingTriple (g.rhs o) (s.1 o)), s.2) ≤ (game g ω).value
-    exact Game.success_le_value _ _
-  · apply (Game.value_le_iff _ _).mpr
-    intro s
-    calc
-      (game g ω).success s ≤
-          (fourAnswerGame g ω).success ((fun o => (s.1 o 0, s.1 o 1)), s.2) := by
-        apply FiniteDistribution.probability_mono
-        intro q h
-        exact fourAnswerGame_accepts_encode g ω q.1 q.2 (s.1 q.1) (s.2 q.2) h
-      _ ≤ (fourAnswerGame g ω).value := Game.success_le_value _ _
-
-theorem fourAnswerGame_value_le_one_sub_third
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j) :
-    (fourAnswerGame g ω).value ≤ 1 - (1 - parityValue g ω) / 3 := by
-  rw [fourAnswerGame_value_eq]
-  exact game_value_le_one_sub_third g ω distinct
-
-theorem fourAnswerGame_value_le_fourteen_fifteenths
-    (g : Incidence O N) (ω : FiniteDistribution O)
-    (distinct : ∀ o i j, g.name o i = g.name o j → i = j)
-    (hopt : parityValue g ω ≤ (4 : ℝ) / 5) :
-    (fourAnswerGame g ω).value ≤ (14 : ℝ) / 15 := by
-  rw [fourAnswerGame_value_eq]
-  exact game_value_le_fourteen_fifteenths g ω distinct hopt
 
 end
 end UniqueGamesTheorem.Clean.IncidenceGap

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineDrain
@@ -61,10 +62,6 @@ def memory (x : Nat) (output : List Bool) : Tape → List Bool :=
 
 theorem memory_input (x : Nat) (output : List Bool) : Input x (memory x output) :=
   ⟨rfl, rfl, rfl, rfl, rfl⟩
-
-private theorem join_trace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 theorem affine_frame (x e : Nat) (base : Tape → List Bool) (input : Input x base) :
     Function.update base 1 (encodeWord e) =
@@ -130,7 +127,7 @@ theorem cleanupTraceAt {σ Λ : Type} (q : Nat) (labels : Label → Λ) (exit : 
     rfl
   rw [hreverse] at first
   rw [hrelation] at second
-  exact join_trace first second
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
 
 /-- Sum of the actual arithmetic, row-emission, and cleanup transition counts. -/
 def steps (q x : Nat) (output : List Bool) : Nat :=
@@ -139,7 +136,7 @@ def steps (q x : Nat) (output : List Bool) : Nat :=
       (MachineDummyRows.trueBits.length + 1))
 
 /-- For each fixed degree, the exact cost is linear in index and prior output. -/
-def timeBound (q x outputLength : Nat) : Nat :=
+def timeBound {R : Type*} [Semiring R] (q x outputLength : R) : R :=
   (5 * q + 11) * x + 2 * outputLength + 5 * q + 40986
 
 theorem steps_eq (q x : Nat) (output : List Bool) :
@@ -174,7 +171,7 @@ theorem traceAt {σ Λ : Type} (q : Nat) (labels : Label → Λ) (exit : Option 
   have clean := cleanupTraceAt q labels exit program code x (reverseIndex q x + 1)
     (base 4 ++ MachineDummyRows.rowBits x (reverseIndex q x)) ambient none
   rw [cleanup_frame x (reverseIndex q x + 1) _ base input] at clean
-  exact join_trace (join_trace affine row) clean
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans affine row) clean
 
 /-- A canonical finite machine over six Boolean stacks. -/
 def machine (q : Nat) : FinTM2 where
@@ -188,17 +185,6 @@ def machine (q : Nat) : FinTM2 where
   initialState := ((), none)
   m := instruction q id none
 
-def machineInTime (q x : Nat) (base : Tape → List Bool) (input : Input x base)
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine q).step
-      ⟨some (.affine .seed), ((), register), base⟩
-      (some ⟨none, ((), none), Function.update base (4 : Tape)
-        (base 4 ++ emittedBits q x)⟩)
-      (timeBound q x (base 4).length) where
-  steps := steps q x (base 4)
-  evals_in_steps := traceAt q id none (instruction q id none)
-    (fun _ => rfl) x base input () register
-  steps_le_m := (steps_eq q x (base 4)).le
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularDummyRow
 

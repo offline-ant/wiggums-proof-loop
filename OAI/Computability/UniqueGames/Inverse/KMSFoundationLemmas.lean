@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.BigOperators.Group.Finset.Piecewise
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Algebra.Order.Field.Basic
@@ -516,72 +517,9 @@ open scoped Classical
 
 variable {Ω Γ : Type*} [DecidableEq Ω] [DecidableEq Γ]
 
-/-- An embedding preserves the numerator and denominator of relative density. -/
-theorem relativeDensity_map (e : Ω ↪ Γ) (S I : Finset Ω) :
-    relativeDensity (S.map e) (I.map e) = relativeDensity S I := by
-  unfold relativeDensity
-  rw [← Finset.map_inter]
-  simp
-
-theorem relativeDensity_equiv (e : Ω ≃ Γ) (S I : Finset Ω) :
-    relativeDensity (S.map e.toEmbedding) (I.map e.toEmbedding) =
-      relativeDensity S I :=
-  relativeDensity_map e.toEmbedding S I
 
 variable [Fintype Ω]
 
-/-- The image of the entire finite matrix domain. -/
-def finiteChart (e : Ω ↪ Γ) : Finset Γ := Finset.univ.map e
-
-/-- Matrices whose chart images lie in an ambient interval. -/
-def intervalPreimage (e : Ω ↪ Γ) (I : Finset Γ) : Finset Ω :=
-  Finset.univ.filter fun x => e x ∈ I
-
-omit [DecidableEq Ω] in
-theorem map_intervalPreimage (e : Ω ↪ Γ) (I : Finset Γ) :
-    (intervalPreimage e I).map e = I ∩ finiteChart e := by
-  ext y
-  constructor
-  · intro hy
-    obtain ⟨x, hx, rfl⟩ := Finset.mem_map.mp hy
-    exact Finset.mem_inter.mpr ⟨(Finset.mem_filter.mp hx).2,
-      Finset.mem_map.mpr ⟨x, Finset.mem_univ x, rfl⟩⟩
-  · intro hy
-    obtain ⟨x, _, hxy⟩ := Finset.mem_map.mp (Finset.mem_inter.mp hy).2
-    refine Finset.mem_map.mpr ⟨x, Finset.mem_filter.mpr ⟨Finset.mem_univ x, ?_⟩, hxy⟩
-    simpa only [hxy] using (Finset.mem_inter.mp hy).1
-
-omit [DecidableEq Ω] [DecidableEq Γ] in
-theorem mapped_subset_finiteChart (e : Ω ↪ Γ) (S : Finset Ω) :
-    S.map e ⊆ finiteChart e := by
-  intro y hy
-  obtain ⟨x, _, rfl⟩ := Finset.mem_map.mp hy
-  exact Finset.mem_map.mpr ⟨x, Finset.mem_univ x, rfl⟩
-
-/-- Pulling the chart-intersected interval back to matrices preserves density
-exactly; matrices are sampled uniformly on this actual preimage. -/
-theorem relativeDensity_intervalPreimage (e : Ω ↪ Γ) (S : Finset Ω) (I : Finset Γ) :
-    relativeDensity (S.map e) (I ∩ finiteChart e) =
-      relativeDensity S (intervalPreimage e I) := by
-  rw [← map_intervalPreimage]
-  exact relativeDensity_map e S (intervalPreimage e I)
-
-/-- A nonempty lifted fiber in an ambient interval yields a nonempty matrix
-slice and loses no relative-density factor on transport. -/
-theorem ambient_density_passes_to_preimage (e : Ω ↪ Γ)
-    (S : Finset Ω) (I : Finset Γ) (hSI : (S.map e ∩ I).Nonempty)
-    {α : ℝ} (hα : α ≤ relativeDensity (S.map e) I) :
-    (intervalPreimage e I).Nonempty ∧ α ≤ relativeDensity S (intervalPreimage e I) := by
-  obtain ⟨y, hy⟩ := hSI
-  obtain ⟨x, _, hxy⟩ := Finset.mem_map.mp (Finset.mem_inter.mp hy).1
-  have hx : x ∈ intervalPreimage e I := by
-    apply Finset.mem_filter.mpr
-    exact ⟨Finset.mem_univ x, by simpa only [hxy] using (Finset.mem_inter.mp hy).2⟩
-  refine ⟨⟨x, hx⟩, ?_⟩
-  have h := density_bound_passes_to_chart (S.map e) I (finiteChart e)
-    (mapped_subset_finiteChart e S) ⟨y, hy⟩ hα
-  rw [relativeDensity_intervalPreimage] at h
-  exact h.2
 
 end
 end UniqueGamesTheorem.Inverse.KMS

@@ -1,7 +1,8 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineControlLemmas
-import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLookupDiscard
+import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
 import OAI.Computability.UniqueGames.PCP.CleanupLemmas
 import OAI.Computability.UniqueGames.PCP.Emitter
 import OAI.Computability.UniqueGames.PCP.FinalBooleanVerifier
@@ -52,24 +53,6 @@ theorem unaryBits_eq_encodeWords (slots : List (Fin N)) (bits : Buffer N) :
   | cons i slots ih => simpa only [unaryBits, List.flatMap_cons, List.map_cons,
       encodeWords] using congrArg (encodeWord (GraphTables.bitWord (bits i)) ++ ·) ih
 
-theorem unaryBits_length_le (slots : List (Fin N)) (bits : Buffer N) :
-    (unaryBits slots bits).length ≤ 2 * slots.length := by
-  induction slots with
-  | nil => simp [unaryBits]
-  | cons i slots ih =>
-      have hi : (encodeWord (GraphTables.bitWord (bits i))).length ≤ 2 := by
-        cases bits i <;> simp [GraphTables.bitWord, encodeWord_length]
-      simp only [unaryBits, List.flatMap_cons, List.length_append, List.length_cons] at *
-      omega
-
-theorem statementPushBound_readUnarySlots (source : K) (slots : List (Fin N))
-    (next : TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N)) :
-    Runtime.statementPushBound (readUnarySlots source slots next) =
-      Runtime.statementPushBound next := by
-  induction slots with
-  | nil => rfl
-  | cons i slots ih =>
-      simp only [readUnarySlots, Runtime.statementPushBound, ih, max_self]
 
 variable [DecidableEq K]
 
@@ -111,58 +94,6 @@ theorem stepAux_readUnaryAll (source : K)
   rw [hin, MachineFixedBlockMap.fill_all] at h
   exact h
 
-/-- A fixed table lookup or fixed pattern permutation can follow immediately
-after the physical unary decoding, with one genuine finite TM2 transition. -/
-def unaryBlockMapAt {M : Nat} (source destination : K) (F : Buffer N → Buffer M)
-    (exit : Option Λ) : TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N) :=
-  readUnarySlots source (List.ofFn id)
-    (MachineFixedBlockMap.writeSlots destination (fun state => F state.2)
-      (List.ofFn id).reverse
-      (.load (fun state => (state.1, MachineFixedBlockMap.emptyBuffer N))
-        (MachineFixedBlockMap.finishAt exit)))
-
-theorem stepAux_unaryBlockMapAt {M : Nat} (source destination : K)
-    (F : Buffer N → Buffer M) (exit : Option Λ) (hne : source ≠ destination)
-    (state : σ × Buffer N) (bits : Buffer N) (tapes : K → List Bool) (suffix : List Bool)
-    (hinput : tapes source = unaryBits (List.ofFn id) bits ++ suffix) :
-    TM2.stepAux (unaryBlockMapAt source destination F exit) state tapes =
-      { l := exit, var := (state.1, MachineFixedBlockMap.emptyBuffer N),
-        stk := Function.update (Function.update tapes source suffix) destination
-          (List.ofFn (F bits) ++ tapes destination) } := by
-  unfold unaryBlockMapAt
-  rw [stepAux_readUnaryAll source _ state bits tapes suffix hinput,
-    MachineFixedBlockMap.stepAux_writeSlots]
-  simp only [List.map_reverse, List.map_ofFn, Function.comp_id, List.reverse_reverse,
-    Function.update_of_ne (Ne.symm hne), TM2.stepAux]
-  cases exit <;> rfl
-
-theorem step_unaryBlockMapAt {M : Nat} (source destination : K)
-    (F : Buffer N → Buffer M) (exit : Option Λ) (hne : source ≠ destination)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N))
-    (label : Λ) (atLabel : program label = unaryBlockMapAt source destination F exit)
-    (state : σ × Buffer N) (bits : Buffer N) (tapes : K → List Bool) (suffix : List Bool)
-    (hinput : tapes source = unaryBits (List.ofFn id) bits ++ suffix) :
-    TM2.step program ⟨some label, state, tapes⟩ =
-      some ⟨exit, (state.1, MachineFixedBlockMap.emptyBuffer N),
-        Function.update (Function.update tapes source suffix) destination
-          (List.ofFn (F bits) ++ tapes destination)⟩ := by
-  simp only [TM2.step, atLabel,
-    stepAux_unaryBlockMapAt source destination F exit hne state bits tapes suffix hinput]
-
-def unaryBlockInTime {M : Nat} (source destination : K)
-    (F : Buffer N → Buffer M) (exit : Option Λ) (hne : source ≠ destination)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (σ × Buffer N))
-    (label : Λ) (atLabel : program label = unaryBlockMapAt source destination F exit)
-    (state : σ × Buffer N) (bits : Buffer N) (tapes : K → List Bool) (suffix : List Bool)
-    (hinput : tapes source = unaryBits (List.ofFn id) bits ++ suffix) :
-    StateTransition.EvalsToInTime (TM2.step program) ⟨some label, state, tapes⟩
-      (some ⟨exit, (state.1, MachineFixedBlockMap.emptyBuffer N),
-        Function.update (Function.update tapes source suffix) destination
-          (List.ofFn (F bits) ++ tapes destination)⟩) 1 where
-  steps := 1
-  evals_in_steps := step_unaryBlockMapAt source destination F exit hne program label
-    atLabel state bits tapes suffix hinput
-  steps_le_m := Nat.le_refl _
 
 end RelationReader
 
@@ -223,18 +154,10 @@ inductive Tape
   | archive | reverseIndex | scanWork | indexWork
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.input, .output, .accumulator, .scratch, .vertices,
-  .darts, .tail, .head, .rowIndex, .archive, .reverseIndex, .scanWork, .indexWork]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.input, .output, .accumulator, .scratch, .vertices,
+  .darts, .tail, .head, .rowIndex, .archive, .reverseIndex, .scanWork, .indexWork}
+  complete x := by cases x <;> simp
 
 abbrev Ambient := Unit × Buffer 4096
 abbrev Plan := List (Emitter.Command 5 Ambient 36864)
@@ -365,61 +288,6 @@ def headPhaseInTime (headerPlan rowPlan : Plan) (base : Tape → List Bool)
     (program headerPlan rowPlan) rfl rfl rfl rfl rfl rfl (fun _ => rfl)
     base table e hTable hReverse hHead hScratch (ambient, ()) none
 
-def workingTapes (vertices darts row : Nat) (input tail head accumulator : List Bool) :
-    Tape → List Bool
-  | .input => input
-  | .output => []
-  | .accumulator => accumulator
-  | .scratch => []
-  | .vertices => encodeWord vertices
-  | .darts => encodeWord darts
-  | .tail => tail
-  | .head => head
-  | .rowIndex => encodeWord row
-  | .archive | .reverseIndex | .scanWork | .indexWork => []
-
-theorem workingTapes_operands (vertices darts row tail head : Nat)
-    (input accumulator : List Bool) :
-    ∀ i, workingTapes vertices darts row input (encodeWord tail) (encodeWord head)
-      accumulator (source i) = encodeWord (values vertices darts tail head row i) := by
-  intro i
-  fin_cases i <;> rfl
-
-theorem update_working_input (vertices darts row : Nat)
-    (input tail head accumulator replacement : List Bool) :
-    Function.update (workingTapes vertices darts row input tail head accumulator) Tape.input
-      replacement = workingTapes vertices darts row replacement tail head accumulator := by
-  funext tape
-  cases tape <;> simp [workingTapes, Function.update]
-
-theorem update_working_tail (vertices darts row : Nat)
-    (input tail head accumulator replacement : List Bool) :
-    Function.update (workingTapes vertices darts row input tail head accumulator) Tape.tail
-      replacement = workingTapes vertices darts row input replacement head accumulator := by
-  funext tape
-  cases tape <;> simp [workingTapes, Function.update]
-
-theorem update_working_head (vertices darts row : Nat)
-    (input tail head accumulator replacement : List Bool) :
-    Function.update (workingTapes vertices darts row input tail head accumulator) Tape.head
-      replacement = workingTapes vertices darts row input tail replacement accumulator := by
-  funext tape
-  cases tape <;> simp [workingTapes, Function.update]
-
-theorem update_working_accumulator (vertices darts row : Nat)
-    (input tail head accumulator replacement : List Bool) :
-    Function.update (workingTapes vertices darts row input tail head accumulator) Tape.accumulator
-      replacement = workingTapes vertices darts row input tail head replacement := by
-  funext tape
-  cases tape <;> simp [workingTapes, Function.update]
-
-theorem update_working_rowIndex (vertices darts row : Nat)
-    (input tail head accumulator : List Bool) :
-    Function.update (workingTapes vertices darts row input tail head accumulator) Tape.rowIndex
-      (true :: encodeWord row) =
-      workingTapes vertices darts (row + 1) input tail head accumulator := by
-  funext tape
-  cases tape <;> simp [workingTapes, Function.update, encodeWord, List.replicate_succ]
 
 theorem source_ne_scratch (i : Fin 5) : source i ≠ Tape.scratch := by
   fin_cases i <;> decide
@@ -430,222 +298,6 @@ theorem source_ne_accumulator (i : Fin 5) : source i ≠ Tape.accumulator := by
 end Program
 
 end UniqueGamesTheorem.Foundations.Complexity.FinalCNFMachine
-
-namespace UniqueGamesTheorem.Foundations.Complexity.FinalCNFCleanup
-
-open Turing MachineComposition
-open FinalCNFMachine (State)
-open FinalCNFMachine.Program (Tape Plan)
-
-section Redirect
-
-variable {K Λ Λ' σ : Type} {Γ : K → Type} [DecidableEq K]
-
-def redirectLabel (labels : Λ → Λ') (haltTarget : Option Λ') : Option Λ → Option Λ'
-  | none => haltTarget
-  | some label => some (labels label)
-
-def redirectCfg (labels : Λ → Λ') (haltTarget : Option Λ') (cfg : TM2.Cfg Γ Λ σ) :
-    TM2.Cfg Γ Λ' σ :=
-  ⟨redirectLabel labels haltTarget cfg.l, cfg.var, cfg.stk⟩
-
-/-- Structural redirection changes only the destinations of goto and halt. -/
-def redirectStmt (labels : Λ → Λ') (haltTarget : Option Λ') :
-    TM2.Stmt Γ Λ σ → TM2.Stmt Γ Λ' σ
-  | .push k f next => .push k f (redirectStmt labels haltTarget next)
-  | .peek k f next => .peek k f (redirectStmt labels haltTarget next)
-  | .pop k f next => .pop k f (redirectStmt labels haltTarget next)
-  | .load f next => .load f (redirectStmt labels haltTarget next)
-  | .branch test yes no => .branch test
-      (redirectStmt labels haltTarget yes) (redirectStmt labels haltTarget no)
-  | .goto label => .goto (fun state => labels (label state))
-  | .halt => match haltTarget with
-    | none => .halt
-    | some label => .goto (fun _ => label)
-
-theorem stepAux_redirect (labels : Λ → Λ') (haltTarget : Option Λ')
-    (stmt : TM2.Stmt Γ Λ σ) (state : σ) (tapes : ∀ k, List (Γ k)) :
-    TM2.stepAux (redirectStmt labels haltTarget stmt) state tapes =
-      redirectCfg labels haltTarget (TM2.stepAux stmt state tapes) := by
-  induction stmt generalizing state tapes with
-  | push k f next ih => exact ih state (Function.update tapes k (f state :: tapes k))
-  | peek k f next ih => exact ih (f state (tapes k).head?) tapes
-  | pop k f next ih =>
-      exact ih (f state (tapes k).head?) (Function.update tapes k (tapes k).tail)
-  | load f next ih => exact ih (f state) tapes
-  | branch test yes no ihYes ihNo =>
-      cases h : test state with
-      | false => simpa only [redirectStmt, TM2.stepAux, h, Bool.cond_false] using ihNo state tapes
-      | true => simpa only [redirectStmt, TM2.stepAux, h, Bool.cond_true] using ihYes state tapes
-  | goto label => rfl
-  | halt => cases haltTarget <;> rfl
-
-end Redirect
-
-/-- The raw machine has thirteen tapes. These are precisely the twelve
-non-output tapes, including the original input and retained archive. -/
-def chosen : List Tape :=
-  [.input, .accumulator, .scratch, .vertices, .darts, .tail, .head,
-    .rowIndex, .archive, .reverseIndex, .scanWork, .indexWork]
-
-@[simp] theorem chosen_length : chosen.length = 12 := rfl
-
-@[simp] theorem mem_chosen (tape : Tape) : tape ∈ chosen ↔ tape ≠ .output := by
-  cases tape <;> simp [chosen]
-
-abbrev Label (headerPlan rowPlan : Plan) :=
-  FinalCNFMachine.Program.Label headerPlan.length rowPlan.length ⊕
-    (MachineDrainMany.Label chosen ⊕ Unit)
-
-def cleanupLabel (headerPlan rowPlan : Plan) : MachineDrainMany.Label chosen → Label headerPlan rowPlan :=
-  fun label => .inr (.inl label)
-
-def resetLabel (headerPlan rowPlan : Plan) : Label headerPlan rowPlan := .inr (.inr ())
-
-def cleanupEntry (headerPlan rowPlan : Plan) : Option (Label headerPlan rowPlan) :=
-  MachineDrainMany.entry chosen (cleanupLabel headerPlan rowPlan) (some (resetLabel headerPlan rowPlan))
-
-def completedProgram (headerPlan rowPlan : Plan) : Label headerPlan rowPlan →
-    TM2.Stmt (fun _ : Tape => Bool) (Label headerPlan rowPlan) (State Unit)
-  | .inl label => redirectStmt Sum.inl (cleanupEntry headerPlan rowPlan)
-      (FinalCNFMachine.Program.program headerPlan rowPlan label)
-  | .inr (.inl label) => MachineDrainMany.instruction chosen (cleanupLabel headerPlan rowPlan)
-      (some (resetLabel headerPlan rowPlan)) label
-  | .inr (.inr _) => .load (fun _ => (FinalCNFMachine.Program.machine headerPlan rowPlan).initialState) .halt
-
-def completedMachine (headerPlan rowPlan : Plan) : FinTM2 where
-  K := Tape
-  k₀ := .input
-  k₁ := .output
-  Γ _ := Bool
-  Λ := Label headerPlan rowPlan
-  main := .inl .copyFirst
-  σ := State Unit
-  initialState := (FinalCNFMachine.Program.machine headerPlan rowPlan).initialState
-  m := completedProgram headerPlan rowPlan
-
-def embeddedCfg (headerPlan rowPlan : Plan)
-    (cfg : (FinalCNFMachine.Program.machine headerPlan rowPlan).Cfg) :
-    (completedMachine headerPlan rowPlan).Cfg :=
-  redirectCfg Sum.inl (cleanupEntry headerPlan rowPlan) cfg
-
-theorem step_simulation (headerPlan rowPlan : Plan)
-    (a b : (FinalCNFMachine.Program.machine headerPlan rowPlan).Cfg)
-    (step : (FinalCNFMachine.Program.machine headerPlan rowPlan).step a = some b) :
-    (completedMachine headerPlan rowPlan).step (embeddedCfg headerPlan rowPlan a) =
-      some (embeddedCfg headerPlan rowPlan b) := by
-  cases a with
-  | mk label state tapes =>
-    cases label with
-    | none => simp [FinTM2.step, TM2.step] at step
-    | some label =>
-      have hb : TM2.stepAux (FinalCNFMachine.Program.program headerPlan rowPlan label)
-          state tapes = b := Option.some.inj step
-      rw [← hb]
-      change some (TM2.stepAux
-        (redirectStmt Sum.inl (cleanupEntry headerPlan rowPlan)
-          (FinalCNFMachine.Program.program headerPlan rowPlan label)) state tapes) = _
-      erw [stepAux_redirect]
-      rfl
-
-@[simp] theorem embedded_init (headerPlan rowPlan : Plan) (input : List Bool) :
-    embeddedCfg headerPlan rowPlan (initList (FinalCNFMachine.Program.machine headerPlan rowPlan) input) =
-      initList (completedMachine headerPlan rowPlan) input := rfl
-
-theorem finalTapes_eq (base : Tape → List Bool) :
-    MachineDrainMany.finalTapes chosen base = MachineDrainMany.haltTapes .output (base .output) := by
-  funext tape
-  rw [MachineDrainMany.finalTapes_apply]
-  simp only [mem_chosen]
-  by_cases h : tape = .output
-  · subst tape
-    simp [MachineDrainMany.haltTapes]
-  · simp [MachineDrainMany.haltTapes, h]
-
-theorem haltList_eq (headerPlan rowPlan : Plan) (output : List Bool) :
-    haltList (completedMachine headerPlan rowPlan) output =
-      ⟨none, (FinalCNFMachine.Program.machine headerPlan rowPlan).initialState,
-        MachineDrainMany.haltTapes .output output⟩ := by
-  congr 1
-
-/-- Actual drains followed by a real state-reset instruction reach canonical halt. -/
-def cleanupExecution (headerPlan rowPlan : Plan) (state : State Unit) (base : Tape → List Bool) :
-    StateTransition.EvalsToInTime (completedMachine headerPlan rowPlan).step
-      ⟨cleanupEntry headerPlan rowPlan, state, base⟩
-      (some (haltList (completedMachine headerPlan rowPlan) (base .output)))
-      (MachineDrainMany.steps chosen base + 1) := by
-  let after : (completedMachine headerPlan rowPlan).Cfg :=
-    ⟨some (resetLabel headerPlan rowPlan),
-      (state.1, MachineDrainMany.finalRegister chosen state.2),
-      MachineDrainMany.finalTapes chosen base⟩
-  have drains : StateTransition.EvalsToInTime (completedMachine headerPlan rowPlan).step
-      ⟨cleanupEntry headerPlan rowPlan, state, base⟩ (some after)
-      (MachineDrainMany.steps chosen base) := {
-    steps := MachineDrainMany.steps chosen base
-    evals_in_steps := MachineDrainMany.trace chosen (cleanupLabel headerPlan rowPlan)
-      (some (resetLabel headerPlan rowPlan)) (completedProgram headerPlan rowPlan)
-      (fun _ => rfl) base state.1 state.2
-    steps_le_m := le_rfl }
-  have reset : StateTransition.EvalsToInTime (completedMachine headerPlan rowPlan).step
-      after (some (haltList (completedMachine headerPlan rowPlan) (base .output))) 1 := {
-    steps := 1
-    evals_in_steps := by
-      change some (⟨none, (FinalCNFMachine.Program.machine headerPlan rowPlan).initialState,
-        MachineDrainMany.finalTapes chosen base⟩ : (completedMachine headerPlan rowPlan).Cfg) =
-          some (haltList (completedMachine headerPlan rowPlan) (base .output))
-      erw [finalTapes_eq, haltList_eq]
-      rfl
-    steps_le_m := le_rfl }
-  simpa only [Nat.add_comm] using
-    StateTransition.EvalsToInTime.trans _ (MachineDrainMany.steps chosen base) 1
-      _ after _ drains reset
-
-/-- The extra cost is bounded from the actual raw execution, independently of
-the contents of its dirty private tapes and finite state. -/
-def outputsInTime (headerPlan rowPlan : Plan) (input output : List Bool)
-    (state : State Unit) (base : Tape → List Bool) (budget : Nat)
-    (raw : StateTransition.EvalsToInTime
-      (FinalCNFMachine.Program.machine headerPlan rowPlan).step
-      (initList (FinalCNFMachine.Program.machine headerPlan rowPlan) input)
-      (some ⟨none, state, base⟩) budget)
-    (correctOutput : base .output = output) :
-    TM2OutputsInTime (completedMachine headerPlan rowPlan) input (some output)
-      (budget + 12 * (input.length + budget *
-        Runtime.programPushBound (FinalCNFMachine.Program.machine headerPlan rowPlan) + 1) + 1) := by
-  let lifted := liftExecutionInTime
-    (FinalCNFMachine.Program.machine headerPlan rowPlan).step
-    (completedMachine headerPlan rowPlan).step (embeddedCfg headerPlan rowPlan)
-    (step_simulation headerPlan rowPlan) raw
-  have joined := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ lifted
-    (cleanupExecution headerPlan rowPlan state base)
-  have stackBound : ∀ tape, (base tape).length ≤ input.length + budget *
-      Runtime.programPushBound (FinalCNFMachine.Program.machine headerPlan rowPlan) := by
-    intro tape
-    have h := Runtime.executionSizeBound
-      (FinalCNFMachine.Program.machine headerPlan rowPlan).step
-      (fun cfg => (cfg.stk tape).length)
-      (Runtime.programPushBound (FinalCNFMachine.Program.machine headerPlan rowPlan))
-      (Runtime.stepStackLength (FinalCNFMachine.Program.machine headerPlan rowPlan) tape) raw
-    exact h.trans (Nat.add_le_add_right
-      (Runtime.initialStackLength (FinalCNFMachine.Program.machine headerPlan rowPlan) input tape) _)
-  have cleanupBound := MachineDrainMany.steps_le_uniform chosen base _ stackBound
-  rw [chosen_length] at cleanupBound
-  rw [embedded_init, correctOutput] at joined
-  exact { toEvalsTo := joined.toEvalsTo
-          steps_le_m := joined.steps_le_m.trans (by omega) }
-
-/-- For fixed raw plans, polynomial raw time gives polynomial cleanup time. -/
-noncomputable def completedTime (headerPlan rowPlan : Plan) (rawTime : Polynomial Nat) : Polynomial Nat :=
-  rawTime + Polynomial.C 12 * (Polynomial.X + rawTime *
-    Polynomial.C (Runtime.programPushBound (FinalCNFMachine.Program.machine headerPlan rowPlan)) + 1) + 1
-
-theorem completedTime_eval (headerPlan rowPlan : Plan) (rawTime : Polynomial Nat) (n : Nat) :
-    (completedTime headerPlan rowPlan rawTime).eval n =
-      rawTime.eval n + 12 * (n + rawTime.eval n *
-        Runtime.programPushBound (FinalCNFMachine.Program.machine headerPlan rowPlan) + 1) + 1 := by
-  simp [completedTime]
-
-end UniqueGamesTheorem.Foundations.Complexity.FinalCNFCleanup
 
 /-!
 The concrete final-CNF machine's entry phase. It archives its complete input,
@@ -747,30 +399,19 @@ def headerInTime (rowPlan : Plan) (n m : Nat) (rowsBits : List Bool) (ambient : 
   have hm : m ≤ word.length := by
     simp only [word, List.length_append, encodeWords_length, List.sum_cons,
       List.sum_nil, List.length_cons, List.length_nil] ; omega
-  let p₀ := MachineCopy.copyInTime Tape.input Tape.archive Tape.scratch
+  have p₀ := MachineCopy.copyInTime Tape.input Tape.archive Tape.scratch
     (by decide) (by decide) (by decide) false .copyFirst .copySecond (some .startVertices)
     (program headerPlan rowPlan) rfl rfl b₀ (by rfl) (ambient, ()) none
-  have p₀' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some .copyFirst, ((ambient, ()), none), b₀⟩
-      (some ⟨some .startVertices, ((ambient, ()), none), b₁⟩) (2 * (word.length + 1)) := by
-    have h := p₀
-    rw [h₀] at h
-    simpa only [show b₀ .input = word from rfl] using h
-  let p₁ := Hastad.SourceMachine.fieldInTime Tape.input Tape.vertices (by decide)
+  rw [h₀] at p₀
+  have p₁ := Hastad.SourceMachine.fieldInTime Tape.input Tape.vertices (by decide)
     .startVertices .readVertices (some .startDarts) (program headerPlan rowPlan)
     rfl rfl b₁ n (encodeWord m ++ rowsBits)
     (by simp [b₁, headerFrame, word, encodeWords, List.append_assoc]) (ambient, ()) none
-  have p₁' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some .startVertices, ((ambient, ()), none), b₁⟩
-      (some ⟨some .startDarts, ((ambient, ()), none), b₂⟩) (n + 2) := by
-    simpa only [h₁] using p₁
-  let p₂ := Hastad.SourceMachine.fieldInTime Tape.input Tape.darts (by decide)
+  rw [h₁] at p₁
+  have p₂ := Hastad.SourceMachine.fieldInTime Tape.input Tape.darts (by decide)
     .startDarts .readDarts (some .seedIndex) (program headerPlan rowPlan)
     rfl rfl b₂ m rowsBits rfl (ambient, ()) none
-  have p₂' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some .startDarts, ((ambient, ()), none), b₂⟩
-      (some ⟨some .seedIndex, ((ambient, ()), none), b₃⟩) (m + 2) := by
-    simpa only [h₂] using p₂
+  rw [h₂] at p₂
   let p₃ : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
       ⟨some .seedIndex, ((ambient, ()), none), b₃⟩
       (some ⟨some (.header (Emitter.labelAt headerPlan.length 36864 0 .entry)),
@@ -787,7 +428,7 @@ def headerInTime (rowPlan : Plan) (n m : Nat) (rowsBits : List Bool) (ambient : 
       apply congrArg some
       exact congrArg (TM2.Cfg.mk _ _) ht
     steps_le_m := Nat.le_refl _ }
-  let p₄ := Emitter.planInTime (Emitter.listCommands headerPlan) source Tape.scratch
+  have p₄ := Emitter.planInTime (Emitter.listCommands headerPlan) source Tape.scratch
     Tape.accumulator source_ne_scratch source_ne_accumulator (by decide)
     Label.header (some .headerClearTail) (program headerPlan rowPlan) (fun _ => rfl)
     (values n m 0 0 0) b₄
@@ -800,36 +441,24 @@ def headerInTime (rowPlan : Plan) (n m : Nat) (rowsBits : List Bool) (ambient : 
       · exact Nat.zero_le _
       · exact Nat.zero_le _
       · exact Nat.zero_le _)
-  have p₄' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some (.header (Emitter.labelAt headerPlan.length 36864 0 .entry)),
-        ((ambient, ()), none), b₄⟩
-      (some ⟨some .headerClearTail, ((ambient, ()), none), b₅⟩)
-      (7 * (3 * (word.length + 1) + 3) + 1) := by
-    have h := p₄
-    rw [h₄] at h
-    simpa only [headerPlan_length] using h
-  let p₅ := MachineLookup.discardInTime Tape.tail .headerClearTail .headerClearHead
+  rw [h₄] at p₄
+  have p₅ := MachineLookup.discardInTime Tape.tail .headerClearTail .headerClearHead
     (program headerPlan rowPlan) rfl b₅ 0 [] (by simp [b₅, headerFrame]) (ambient, ()) none
-  have p₅' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some .headerClearTail, ((ambient, ()), none), b₅⟩
-      (some ⟨some .headerClearHead, ((ambient, ()), none), b₆⟩) 1 := by
-    simpa only [h₅] using p₅
-  let p₆ := MachineLookup.discardInTime Tape.head .headerClearHead .guard
+  rw [h₅] at p₅
+  have p₆ := MachineLookup.discardInTime Tape.head .headerClearHead .guard
     (program headerPlan rowPlan) rfl b₆ 0 [] (by simp [b₆, headerFrame]) (ambient, ()) none
-  have p₆' : StateTransition.EvalsToInTime (TM2.step (program headerPlan rowPlan))
-      ⟨some .headerClearHead, ((ambient, ()), none), b₆⟩
-      (some ⟨some .guard, ((ambient, ()), none), b₇⟩) 1 := by
-    simpa only [h₆] using p₆
-  let p₀₁ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀' p₁'
-  let p₀₁₂ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁ p₂'
+  rw [h₆] at p₆
+  let p₀₁ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀ p₁
+  let p₀₁₂ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁ p₂
   let p₀₁₂₃ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂ p₃
-  let p₀₁₂₃₄ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃ p₄'
-  let p₀₁₂₃₄₅ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃₄ p₅'
-  let p := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃₄₅ p₆'
+  let p₀₁₂₃₄ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃ p₄
+  let p₀₁₂₃₄₅ := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃₄ p₅
+  let p := StateTransition.EvalsToInTime.trans _ _ _ _ _ _ p₀₁₂₃₄₅ p₆
   exact {
     toEvalsTo := p.toEvalsTo
     steps_le_m := by
       have h := p.steps_le_m
+      simp only [headerPlan_length, show b₀ .input = word from rfl] at h
       change _ ≤ headerTimePolynomial.eval word.length
       rw [headerTimePolynomial_eval]
       omega }

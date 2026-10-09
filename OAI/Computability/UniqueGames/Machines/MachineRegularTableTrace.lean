@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineRegularTable
 
 namespace OAI
@@ -6,10 +7,6 @@ namespace UniqueGamesTheorem.Foundations.Complexity.MachineRegularTable.Top
 
 open Turing MachineComposition
 open UniqueGamesTheorem.Foundations.PCP
-
-private theorem joinTrace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 private theorem normalizeEmptyAppend {A : Type*} (output : List Bool → A)
     (bits : List Bool) : output ([] ++ bits) = output bits :=
@@ -37,7 +34,7 @@ theorem headerOldTrace (H : BaseTable) (t : GraphTables.Table) :
         (counterStacks [] [] [] [])) := by
   have first := headerStartTrace H t
   have second := oldStageTrace H t (headerOutput t) (headerStacks t)
-  have joined := joinTrace (f := advance (TM2.step (program H))) first second
+  have joined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (f := advance (TM2.step (program H))) first second
   have output_eq : headerOutput t ++ oldPrefix H t t.darts = oldOutput H t := rfl
   exact joined.trans (congrArg
     (fun output : List Bool => some (cfg H (some Label.ownerSeed)
@@ -53,7 +50,7 @@ theorem beforeCleanupTrace (H : BaseTable) (t : GraphTables.Table) :
       some ⟨clearEntry 0, readyState H, finalStacks t (finalOutput H t)⟩ := by
   have first := headerOldTrace H t
   have second := ownerStageTrace H t (oldOutput H t)
-  have joined := joinTrace (f := advance (TM2.step (program H))) first second
+  have joined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (f := advance (TM2.step (program H))) first second
   have output_eq : oldOutput H t ++ ownerPrefix H t t.vertices = finalOutput H t := rfl
   exact joined.trans (congrArg
     (fun output : List Bool => some (cfg H (clearEntry 0)
@@ -73,7 +70,7 @@ theorem fullTrace (H : BaseTable) (t : GraphTables.Table) :
         (counterStacks [] [] [] []))) =
       some (cfg H none (inputData t (finalOutput H t)) (fun _ => [])
         (counterStacks [] [] [] [])) :=
-  joinTrace (f := advance (TM2.step (program H))) (beforeCleanupTrace H t) (cleanupFinalTrace H t (finalOutput H t))
+  UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (f := advance (TM2.step (program H))) (beforeCleanupTrace H t) (cleanupFinalTrace H t (finalOutput H t))
 
 @[simp] theorem update_frame_output (data : Data) (header : Header.Tape → List Bool)
     (counters : Fin 4 → List Bool) (replacement : List Bool) :

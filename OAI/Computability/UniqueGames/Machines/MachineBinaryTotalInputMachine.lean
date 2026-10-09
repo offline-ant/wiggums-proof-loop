@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryParsingLemmas
 import OAI.Computability.UniqueGames.Machines.MachineBinaryValidatorMachine
 import OAI.Computability.UniqueGames.Machines.MachineDrain
@@ -30,17 +31,9 @@ inductive Label
   | rejectOutput
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.scan, .restore, .drain, .rejectOutput]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.scan, .restore, .drain, .rejectOutput}
+  complete x := by cases x <;> simp
 
 abbrev Alphabet (_ : Fin 3) := Bool
 abbrev State := Mode × Option Bool
@@ -178,10 +171,6 @@ theorem step_rejectOutput (output : List Bool) :
   simp only [cfg, List.reverse_reverse, tapes_output, update_output, TM2.stepAux]
   rfl
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 theorem acceptedTrace (input : List Bool) (accepted : run .clause input = .done) :
     (advance machine.step)^[2 * input.length + 2]
       (some (cfg (some .scan) input [] [])) = some (cfg none [] input []) := by
@@ -191,7 +180,7 @@ theorem acceptedTrace (input : List Bool) (accepted : run .clause input = .done)
   simp only [List.length_reverse, List.reverse_reverse, List.append_nil] at second
   have time : 2 * input.length + 2 = (input.length + 1) + (input.length + 1) := by omega
   rw [time]
-  exact joinTrace first second
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
 
 theorem rejectedTrace (input : List Bool) (rejected : run .clause input ≠ .done) :
     (advance machine.step)^[2 * input.length + 3]
@@ -206,7 +195,7 @@ theorem rejectedTrace (input : List Bool) (rejected : run .clause input ≠ .don
       step_rejectOutput []
   have time : 2 * input.length + 3 = (input.length + 1) + (input.length + 1) + 1 := by omega
   rw [time]
-  exact joinTrace (joinTrace first second) third
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second) third
 
 theorem initList_eq (input : List Bool) :
     initList machine input = cfg (some .scan) input [] [] := by

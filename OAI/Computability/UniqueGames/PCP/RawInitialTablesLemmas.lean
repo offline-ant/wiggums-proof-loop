@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import Mathlib.Tactic.FinCases
 import Mathlib.Tactic.Linarith
@@ -73,8 +74,6 @@ def table (F : Formula) : GraphTables.Table :=
 
 @[simp] theorem table_darts (F : Formula) : (table F).darts = 6 * F.clauses.length + 1 := rfl
 
-theorem table_vertices_positive (F : Formula) : 0 < (table F).vertices := by
-  rw [table_vertices]; omega
 
 theorem table_darts_positive (F : Formula) : 0 < (table F).darts := by
   rw [table_darts]; omega
@@ -98,11 +97,6 @@ theorem table_satisfiable_iff (F : Formula) :
   exact ((raw64 F).satisfiable_reindex (vertexOrder F) (dartOrder F) labelOrder).trans
     (raw64_satisfiable_iff F)
 
-theorem initial_rejection (F : Formula) (unsat : ¬ F.Satisfiable)
-    (labeling : Fin (table F).vertices → GraphTables.Label) :
-    1 ≤ (GraphTables.semantics (table F)).rejectionCount labeling :=
-  ConstraintGraph.rejectionCount_positive _
-    (fun h => unsat ((table_satisfiable_iff F).mp h)) labeling
 
 theorem initial_size (F : Formula) :
     (table F).vertices + (table F).darts = F.variables + 7 * F.clauses.length + 2 := by
@@ -248,9 +242,6 @@ def relationPredicate (signs : Signs) (slot : Slot) :
 def relationWordsFor (signs : Signs) (slot : Slot) (orientation : Bool) : List Nat :=
   relationWords (relationOf (relationPredicate signs slot orientation))
 
-@[simp] theorem relationWordsFor_length (signs : Signs) (slot : Slot) (orientation : Bool) :
-    (relationWordsFor signs slot orientation).length = 4096 := by
-  exact relationWords_length _
 
 def incidenceWords (n i : Nat) (names : Names) (signs : Signs)
     (slot : Slot) (orientation : Bool) : List Nat :=
@@ -345,7 +336,8 @@ def rowFor (F : Formula) (d : InitialGraph.Dart F) :
 
 theorem rowList_table (F : Formula) :
     rowList (table F) = (orderedList (dartOrder F)).map (rowFor F) := by
-  simp only [rowList, table, ofEnumeratedGraph, ofGraph, graphRows, Vector.toList_ofFn,
+  simp only [rowList, table, ofEnumeratedGraph, GenericGraphTables.ofEnumeratedGraph,
+    GenericGraphTables.ofGraph, GenericGraphTables.graphRows, Vector.toList_ofFn,
     orderedList, List.map_ofFn]
   rfl
 
@@ -516,8 +508,6 @@ def Satisfiable (input : Input) : Prop := (GraphTables.semantics input.val).Sati
 
 noncomputable def gap (input : Input) : ℝ := (GraphTables.semantics input.val).gap
 
-theorem size_positive (input : Input) : 0 < size input :=
-  input.property.trans_le (Nat.le_add_left _ _)
 
 theorem gap_nonnegative (input : Input) : 0 ≤ gap input :=
   (GraphTables.semantics input.val).gap_nonnegative

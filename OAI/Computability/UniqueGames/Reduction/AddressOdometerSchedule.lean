@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.SourceQueryLoopLemmas
 import OAI.Computability.UniqueGames.Reduction.AddressMachineSpace
 
@@ -9,6 +10,7 @@ namespace UniqueGamesTheorem.Reduction.AddressOdometerSchedule
 open Turing
 open UniqueGamesTheorem.Foundations.Complexity MachineTupleOdometer
 open UniqueGamesTheorem.Foundations.Hastad
+open SourceOdometerSchedule (allBits blockPrefix blocks blockPrefix_all val_snoc zeros_snoc)
 open MachineTransfer
 
 
@@ -100,7 +102,7 @@ theorem setDigits_other (m : Nat) {q : Nat} (digits : Fin q → Nat)
         · rfl
   | _ => rfl
 
-private theorem digitCases {P : Tape k s d noiseCount → Prop} (tape : Tape k s d noiseCount)
+theorem digitCases {P : Tape k s d noiseCount → Prop} (tape : Tape k s d noiseCount)
     (hc : ∀ i, P (current k s d noiseCount i))
     (hr : ∀ i, P (remaining k s d noiseCount i))
     (other : ∀ tape, (∀ i, tape ≠ current k s d noiseCount i) →
@@ -183,17 +185,14 @@ theorem setDigits_putDigit (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
       putDigit ⟨q, hq⟩ (setDigits m digits base) a r := by
   funext tape
   apply digitCases tape
-  · intro i
+  case hc | hr =>
+    intro i
     by_cases hi : i.val < q
     · have hne : i ≠ ⟨q, hq⟩ := by intro h; have := congrArg Fin.val h; simp at this; omega
       simp [hi, hne]
     · by_cases he : i = ⟨q, hq⟩ <;> simp [hi, he]
-  · intro i
-    by_cases hi : i.val < q
-    · have hne : i ≠ ⟨q, hq⟩ := by intro h; have := congrArg Fin.val h; simp at this; omega
-      simp [hi, hne]
-    · by_cases he : i = ⟨q, hq⟩ <;> simp [hi, he]
-  · intro tape hc hr
+  case other =>
+    intro tape hc hr
     simp [setDigits_other m digits _ tape hc hr, putDigit_other _ _ _ _ tape (hc _) (hr _)]
 
 theorem setDigits_snoc (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
@@ -202,7 +201,8 @@ theorem setDigits_snoc (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
       putDigit ⟨q, hq⟩ (setDigits m digits base) a (m - 1 - a) := by
   funext tape
   apply digitCases tape
-  · intro i
+  case hc | hr =>
+    intro i
     by_cases hi : i.val < q
     · have hi' : i.val < q + 1 := by omega
       have hne : i ≠ ⟨q, hq⟩ := by intro h; have := congrArg Fin.val h; simp at this; omega
@@ -214,19 +214,8 @@ theorem setDigits_snoc (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
       · have hi' : ¬ i.val < q + 1 := by omega
         have hne : i ≠ ⟨q, hq⟩ := by intro h; exact he (congrArg Fin.val h)
         simp [hi, hi', hne]
-  · intro i
-    by_cases hi : i.val < q
-    · have hi' : i.val < q + 1 := by omega
-      have hne : i ≠ ⟨q, hq⟩ := by intro h; have := congrArg Fin.val h; simp at this; omega
-      simp [hi, hi', hne, Fin.snoc]
-    · by_cases he : i.val = q
-      · have hie : i = ⟨q, hq⟩ := Fin.ext he
-        subst i
-        simp [Fin.snoc]
-      · have hi' : ¬ i.val < q + 1 := by omega
-        have hne : i ≠ ⟨q, hq⟩ := by intro h; exact he (congrArg Fin.val h)
-        simp [hi, hi', hne]
-  · intro tape hc hr
+  case other =>
+    intro tape hc hr
     simp [setDigits_other m _ _ tape hc hr, putDigit_other _ _ _ _ tape (hc _) (hr _)]
 
 theorem setDigits_snoc_base (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
@@ -246,32 +235,6 @@ theorem setDigits_snoc_base (m q : Nat) (hq : q < k) (digits : Fin q → Nat)
     (h : tape ≠ accumulator k s d noiseCount) : setAcc base bits tape = base tape := by
   simp [setAcc, h]
 
-def allBits {q : ℕ} (bits : (Fin q → Fin m) → List Bool) : List Bool :=
-  (tupleOrder m q).flatMap bits
-
-def blockPrefix (blocks : ℕ → List Bool) : ℕ → List Bool
-  | 0 => []
-  | n + 1 => blockPrefix blocks n ++ blocks n
-
-theorem blockPrefix_eq_ofFn (blocks : ℕ → List Bool) (n : ℕ) :
-    blockPrefix blocks n = (List.ofFn (fun i : Fin n => blocks i.val)).flatten := by
-  induction n with
-  | zero => simp [blockPrefix]
-  | succ n ih =>
-    rw [blockPrefix, List.ofFn_succ', List.concat_eq_append, List.flatten_append]
-    simpa only [Fin.val_castSucc, Fin.val_last, List.flatten_cons,
-      List.flatten_nil, List.append_nil] using congrArg (fun xs => xs ++ blocks n) ih
-
-def blocks {q : ℕ} (bits : (Fin (q + 1) → Fin m) → List Bool) (d : ℕ) : List Bool :=
-  if h : d < m then allBits (fun c => bits (Fin.snoc c ⟨d, h⟩)) else []
-
-theorem blockPrefix_all {q : ℕ} (bits : (Fin (q + 1) → Fin m) → List Bool) :
-    blockPrefix (blocks bits) m = allBits bits := by
-  rw [blockPrefix_eq_ofFn]
-  simp only [blocks, Fin.isLt, ↓reduceDIte, allBits, tupleOrder_snoc]
-  simp only [List.flatMap_assoc, List.flatMap_map]
-  simp only [List.flatMap_def, List.map_ofFn, Function.comp_def]
-
 def configuration (label : Λ) (canonical : σ) (tapes : Tape k s d noiseCount → List Bool) :
     Configuration (Tape k s d noiseCount) Λ σ := ⟨some label, (canonical, none), tapes⟩
 
@@ -285,17 +248,6 @@ def BodyTrace (program : Λ → TM2.Stmt (fun _ : Tape k s d noiseCount => Bool)
     some (configuration returnLabel canonical
       (setDigits m (fun i => (c i).val)
         (setAcc base ((bits c).reverse ++ output))))
-
-theorem val_snoc {q : ℕ} (c : Fin q → Fin m) (digit : Fin m) :
-    (fun i : Fin (q + 1) => (Fin.snoc (α := fun _ => Fin m) c digit i).val) =
-      Fin.snoc (fun i => (c i).val) digit.val := by
-  funext i
-  refine Fin.lastCases ?_ (fun j => ?_) i <;> simp
-
-theorem zeros_snoc (q : ℕ) :
-    Fin.snoc (fun _ : Fin q => (0 : ℕ)) 0 = fun _ : Fin (q + 1) => 0 := by
-  funext i
-  refine Fin.lastCases ?_ (fun j => ?_) i <;> simp
 
 def initialConfiguration (q : ℕ) (bodyLabel : Λ) (canonical : σ)
     (base : Tape k s d noiseCount → List Bool) : Configuration (Tape k s d noiseCount) Λ σ :=
@@ -429,15 +381,8 @@ theorem exists_schedule
         hqu, ↓reduceDIte, Nat.sub_zero, blockPrefix_all]
       rw [← zeros_snoc q, setDigits_snoc m q hqu]
       rfl
-    have result := (show ∃ t : NestedCycle m (currentAt k s d noiseCount) (remainingAt k s d noiseCount)
-        bodyLabel next resetLabel program (q + 1) (next (q + 1))
-        (bodyConfiguration (currentAt k s d noiseCount q) (remainingAt k s d noiseCount q)
-          bodyLabel (m - 1) (m - 1) schedule.currentSuffix schedule.remainingSuffix schedule.ambient schedule.base)
-        (cycleExit (currentAt k s d noiseCount q) (remainingAt k s d noiseCount q)
-          (next (q + 1)) (m - 1) schedule.currentSuffix schedule.remainingSuffix schedule.ambient schedule.base),
-        t.LeafBound B from ⟨tree, hbounded⟩)
-    rw [hstart, hfinish] at result
-    exact result
+    rw [← hstart, ← hfinish]
+    exact ⟨tree, hbounded⟩
 
 /-- The time bound is derived from the concrete schedule, not from the number
 of tuples alone. Dimension zero consists of its single actual body trace. -/
@@ -462,27 +407,6 @@ theorem traversalInTime
     evals_in_steps := tree.trace
     steps_le_m := tree.steps_le_power positive B ht }⟩
 
-@[simp] theorem initial_current (base : Tape k s d noiseCount → List Bool)
-    (bodyLabel : Λ) (canonical : σ) (i : Fin k) :
-    (initialConfiguration (m := m) k bodyLabel canonical base).stk (current k s d noiseCount i) =
-      encodeWord 0 := by simp [initialConfiguration, configuration]
-
-@[simp] theorem initial_remaining (base : Tape k s d noiseCount → List Bool)
-    (bodyLabel : Λ) (canonical : σ) (i : Fin k) :
-    (initialConfiguration (m := m) k bodyLabel canonical base).stk (remaining k s d noiseCount i) =
-      encodeWord (m - 1) := by simp [initialConfiguration, configuration]
-
-@[simp] theorem final_current (base : Tape k s d noiseCount → List Bool)
-    (exitLabel : Λ) (canonical : σ)
-    (bits : (Fin k → Fin m) → List Bool) (i : Fin k) :
-    (finalConfiguration exitLabel canonical base bits).stk (current k s d noiseCount i) =
-      encodeWord 0 := by simp [finalConfiguration, configuration]
-
-@[simp] theorem final_remaining (base : Tape k s d noiseCount → List Bool)
-    (exitLabel : Λ) (canonical : σ)
-    (bits : (Fin k → Fin m) → List Bool) (i : Fin k) :
-    (finalConfiguration exitLabel canonical base bits).stk (remaining k s d noiseCount i) =
-      encodeWord (m - 1) := by simp [finalConfiguration, configuration]
 
 @[simp] theorem final_accumulator (base : Tape k s d noiseCount → List Bool)
     (exitLabel : Λ) (canonical : σ)

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrainManyLemmas
 import OAI.Computability.UniqueGames.PCP.QueriesLemmas
 import OAI.Computability.UniqueGames.PCP.RuntimeModel
@@ -15,18 +16,10 @@ inductive Label
   | equalStore | differentStore
   deriving DecidableEq
 
-protected abbrev Label.enumList : List Label := [.leftFirst, .leftSecond, .rightFirst,
-  .rightSecond, .compare, .equalStore, .differentStore]
-
-protected theorem Label.enumList_getElem?_ctorIdx_eq (x : Label) :
-    Label.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Label.enumList_nodup : Label.enumList.Nodup := by decide
-
 instance : Fintype Label where
-  elems := ⟨Label.enumList, Label.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.leftFirst, .leftSecond, .rightFirst,
+  .rightSecond, .compare, .equalStore, .differentStore}
+  complete x := by cases x <;> simp
 
 variable {q : Nat} {Λ : Type}
 
@@ -148,12 +141,6 @@ def compareInTime (labels : Label → Λ) (next : Λ)
   simpa only [hTail, hHead, encodeWord_eq_iff, encodeWord_length, comparisonTime,
     Nat.add_assoc] using run
 
-theorem comparisonTime_le (tailName headName N : Nat)
-    (hTail : tailName ≤ N) (hHead : headName ≤ N) :
-    comparisonTime tailName headName ≤ 5 * N + 11 := by
-  have hm : max (tailName + 1) (headName + 1) ≤ N + 1 := max_le (by omega) (by omega)
-  unfold comparisonTime
-  omega
 
 theorem comparisonTime_le_of_lt (tailName headName N : Nat)
     (hTail : tailName < N) (hHead : headName < N) :
@@ -162,25 +149,6 @@ theorem comparisonTime_le_of_lt (tailName headName N : Nat)
   unfold comparisonTime
   omega
 
-/-- A linear word-length budget, with the actual complete execution retained. -/
-def compareWordsInTime_bounded (labels : Label → Λ) (next : Λ)
-    (program : Λ → TM2.Stmt Alphabet Λ (State q))
-    (atLabel : ∀ label, program (labels label) = statement labels next label)
-    (base : Tape → List Bool)
-    (hLeft : base .compareLeft = []) (hRight : base .compareRight = [])
-    (hScratch : base .scratch = [])
-    (relation : GenericGraphTables.RelationTable q) (oldLoop : Bool)
-    (N : Nat) (hTail : (base .tail).length ≤ N) (hHead : (base .head).length ≤ N) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .leftFirst), normal relation oldLoop, base⟩
-      (some ⟨some next, normal relation (decide (base .tail = base .head)), base⟩)
-      (5 * N + 6) := by
-  let run := compareWordsInTime labels next program atLabel base hLeft hRight hScratch
-    relation oldLoop
-  refine { toEvalsTo := run.toEvalsTo, steps_le_m := ?_ }
-  have hm := max_le hTail hHead
-  have h := run.steps_le_m
-  omega
 
 def rowLoop (table : GenericGraphTables.Table q) (e : Fin table.darts) : Bool :=
   decide (table.rows[e].tail.val = table.rows[table.rows[e].reverseIndex].tail.val)
@@ -188,19 +156,6 @@ def rowLoop (table : GenericGraphTables.Table q) (e : Fin table.darts) : Bool :=
 def rowState (table : GenericGraphTables.Table q) (e : Fin table.darts) : State q :=
   normal table.rows[e].relation (rowLoop table e)
 
-theorem rowLoop_eq_graph (table : GenericGraphTables.Table q) (e : Fin table.darts) :
-    rowLoop table e = decide ((GenericGraphTables.semantics table).tail e =
-      (GenericGraphTables.semantics table).head e) := by
-  simp only [rowLoop, ConstraintGraph.head, GenericGraphTables.semantics_tail,
-    GenericGraphTables.semantics_reverse, Fin.val_inj]
-  rfl
-
-theorem rowContext_eq (table : GenericGraphTables.Table q) (e : Fin table.darts) :
-    context (rowState table e).1 =
-      (table.rows[e].relation, decide ((GenericGraphTables.semantics table).tail e =
-        (GenericGraphTables.semantics table).head e)) := by
-  change (table.rows[e].relation, rowLoop table e) = _
-  rw [rowLoop_eq_graph]
 
 def compareRowInTime (labels : Label → Λ) (next : Λ)
     (program : Λ → TM2.Stmt Alphabet Λ (State q))
@@ -220,18 +175,6 @@ def compareRowInTime (labels : Label → Λ) (next : Λ)
   exact run.steps_le_m.trans (comparisonTime_le_of_lt _ _ _
     table.rows[e].tail.isLt table.rows[table.rows[e].reverseIndex].tail.isLt)
 
-theorem relationFromRowState (table : GenericGraphTables.Table q) (e : Fin table.darts)
-    (event : AlphabetGraph.LocalEvent (Fin q)) (slot : Fin 6) (orientation : Bool)
-    (a b : GraphTables.Label) :
-    GraphTables.relationAt
-      (Relations.relationFromTable (context (rowState table e).1).1
-        (context (rowState table e).1).2 event slot orientation) a b =
-      (AlphabetGraph.graph (GenericGraphTables.semantics table)).accepts
-        (((e, event), slot), orientation)
-        (Enumeration.labelEquiv.symm a) (Enumeration.labelEquiv.symm b) := by
-  rw [rowContext_eq]
-  exact Relations.relationAt_relation_graph (GenericGraphTables.semantics table)
-    e event slot orientation a b
 
 end UniqueGamesTheorem.Foundations.PCP.AlphabetTable.CompareLoop
 

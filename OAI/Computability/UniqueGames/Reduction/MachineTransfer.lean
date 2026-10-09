@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Computability.TuringMachine.Computable
 
 namespace OAI
@@ -5,161 +6,17 @@ namespace OAI
 /-!
 # Certified reversal and relabeling between finite alphabets
 
-The actual TM2 machine transfers a list over a finite alphabet `α` to a second
-stack over `β`, reverses its order, and applies a fixed map `f : α → β` to each
-symbol. The trace has exactly `input.length + 1` transitions. An explicit
-fallback symbol makes the push expression total, including the unused branch
-where the internal register is empty.
-
-This primitive supports machine composition when intermediate stack alphabets
-differ. It does not yet implement the Unique Games reduction.
+The transfer loop reverses its input while applying a fixed symbol map.
+Its placement-aware trace preserves ambient state and other tapes, and reaches
+an optional continuation in exactly `input.length + 1` transitions. The
+standalone polynomial-time certificate is a two-stack instance of this trace.
 -/
 
 namespace UniqueGamesTheorem.Reduction.MachineTransfer
 
 open Turing
 
-abbrev alphabet (α β : Type) : Bool → Type
-  | false => α
-  | true => β
-
-variable {α β : Type} [Fintype α] [Fintype β]
-
-def loop (f : α → β) (fallback : β) :
-    TM2.Stmt (alphabet α β) Unit (Option β) :=
-  .pop false (fun _ head => head.map f)
-    (.branch Option.isSome
-      (.push true (fun state => state.getD fallback) (.goto fun _ => ()))
-      .halt)
-
-def machine (f : α → β) (fallback : β) : FinTM2 where
-  K := Bool
-  k₀ := false
-  k₁ := true
-  Γ := alphabet α β
-  Λ := Unit
-  main := ()
-  σ := Option β
-  initialState := none
-  Γk₀Fin := inferInstanceAs (Fintype α)
-  m _ := loop f fallback
-
-def tapeStacks (input : List α) (output : List β) :
-    (side : Bool) → List (alphabet α β side)
-  | false => input
-  | true => output
-
-def running (f : α → β) (fallback : β) (input : List α) (output : List β)
-    (state : Option β) : (machine f fallback).Cfg :=
-  ⟨some (), state, tapeStacks input output⟩
-
-def halted (f : α → β) (fallback : β) (output : List β) : (machine f fallback).Cfg :=
-  ⟨none, none, tapeStacks (α := α) [] output⟩
-
-omit [Fintype α] [Fintype β] in
-private theorem update_input (input replacement : List α) (output : List β) :
-    Function.update (tapeStacks input output) false replacement = tapeStacks replacement output := by
-  funext side
-  cases side <;> rfl
-
-omit [Fintype α] [Fintype β] in
-private theorem update_output (input : List α) (output replacement : List β) :
-    Function.update (tapeStacks input output) true replacement = tapeStacks input replacement := by
-  funext side
-  cases side <;> rfl
-
-theorem step_empty (f : α → β) (fallback : β) (output : List β) (state : Option β) :
-    (machine f fallback).step (running f fallback [] output state) =
-      some (halted f fallback output) := by
-  change some (TM2.stepAux (loop f fallback) state (tapeStacks (α := α) [] output)) = _
-  simp [loop, TM2.stepAux, tapeStacks, halted, Function.update]
-  rw [update_input]
-  rfl
-
-theorem step_cons (f : α → β) (fallback : β) (head : α) (input : List α)
-    (output : List β) (state : Option β) :
-    (machine f fallback).step (running f fallback (head :: input) output state) =
-      some (running f fallback input (f head :: output) (some (f head))) := by
-  change some (TM2.stepAux (loop f fallback) state (tapeStacks (head :: input) output)) = _
-  simp [loop, TM2.stepAux, tapeStacks, running, Function.update]
-  rw [update_input, update_output]
-  rfl
-
-def next (f : α → β) (fallback : β) (configuration : Option (machine f fallback).Cfg) :
-    Option (machine f fallback).Cfg := configuration.bind (machine f fallback).step
-
-/-- Exact actual-machine trace, for any accumulator and internal register. -/
-theorem transfer_steps (f : α → β) (fallback : β) (input : List α) (output : List β)
-    (state : Option β) :
-    (next f fallback)^[input.length + 1] (some (running f fallback input output state)) =
-      some (halted f fallback (input.reverse.map f ++ output)) := by
-  induction input generalizing output state with
-  | nil =>
-    simpa only [List.length_nil, Nat.zero_add, Function.iterate_one, next,
-      Option.bind_some, List.reverse_nil, List.map_nil, List.nil_append]
-      using step_empty f fallback output state
-  | cons head input ih =>
-    rw [List.length_cons, Function.iterate_succ_apply]
-    change (next f fallback)^[input.length + 1]
-      ((machine f fallback).step (running f fallback (head :: input) output state)) = _
-    rw [step_cons, ih]
-    simp only [List.reverse_cons, List.map_append, List.map_singleton,
-      List.append_assoc, List.singleton_append]
-
-theorem initList_eq (f : α → β) (fallback : β) (input : List α) :
-    initList (machine f fallback) input = running f fallback input [] none := by
-  unfold initList running
-  congr 1
-  funext side
-  cases side <;> rfl
-
-theorem haltList_eq (f : α → β) (fallback : β) (output : List β) :
-    haltList (machine f fallback) output = halted f fallback output := by
-  unfold haltList halted
-  congr 1
-  funext side
-  cases side <;> rfl
-
-theorem transfer_init_steps (f : α → β) (fallback : β) (input : List α) :
-    (next f fallback)^[input.length + 1] (some (initList (machine f fallback) input)) =
-      some (haltList (machine f fallback) (input.reverse.map f)) := by
-  calc
-    _ = (next f fallback)^[input.length + 1]
-        (some (running f fallback input [] none)) :=
-      congrArg (fun c => (next f fallback)^[input.length + 1] (some c))
-        (initList_eq f fallback input)
-    _ = some (halted f fallback (input.reverse.map f)) := by
-      simpa only [List.append_nil] using transfer_steps f fallback input [] none
-    _ = _ := congrArg some (haltList_eq f fallback (input.reverse.map f)).symm
-
-def outputsInTime (f : α → β) (fallback : β) (input : List α) :
-    TM2OutputsInTime (machine f fallback) input (some (input.reverse.map f))
-      (input.length + 1) where
-  steps := input.length + 1
-  evals_in_steps := transfer_init_steps f fallback input
-  steps_le_m := Nat.le_refl _
-
-@[simp] theorem outputsInTime_steps (f : α → β) (fallback : β) (input : List α) :
-    (outputsInTime f fallback input).steps = input.length + 1 := rfl
-
-/-- A genuine finite-machine certificate with identity encodings and bound `X+1`. -/
-noncomputable def computableInPolyTime (f : α → β) (fallback : β) :
-    TM2ComputableInPolyTime (id : List α → List α) (id : List β → List β)
-      (fun input => input.reverse.map f) where
-  tm := machine f fallback
-  inputAlphabet := Equiv.refl α
-  outputAlphabet := Equiv.refl β
-  time := Polynomial.X + 1
-  outputsFun input := by
-    change TM2OutputsInTime (machine f fallback) (input.map id)
-      (some ((input.reverse.map f).map id))
-      ((Polynomial.X + 1 : Polynomial Nat).eval input.length)
-    have hi := @List.map_id ((machine f fallback).Γ (machine f fallback).k₀) input
-    have ho := @List.map_id ((machine f fallback).Γ (machine f fallback).k₁)
-      (input.reverse.map f)
-    erw [hi, ho]
-    simpa only [Polynomial.eval_add, Polynomial.eval_X, Polynomial.eval_one]
-      using outputsInTime f fallback input
+section Placed
 
 variable {K Λ σ : Type} {Γ : K → Type} [DecidableEq K]
 
@@ -198,31 +55,6 @@ theorem tapesAt_other (src dst k : K) (notSrc : k ≠ src) (notDst : k ≠ dst)
     tapesAt src dst base (base src) (base dst) = base := by
   simp [tapesAt]
 
-private theorem update_tapesAt_src (src dst : K) (distinct : src ≠ dst)
-    (base : (k : K) → List (Γ k)) (input replacement : List (Γ src))
-    (output : List (Γ dst)) :
-    Function.update (tapesAt src dst base input output) src replacement =
-      tapesAt src dst base replacement output := by
-  funext k
-  by_cases hs : k = src
-  · subst k
-    simp [tapesAt, distinct]
-  · by_cases hd : k = dst
-    · subst k
-      simp [tapesAt, Ne.symm distinct]
-    · simp [tapesAt, hs, hd]
-
-private theorem update_tapesAt_dst (src dst : K)
-    (base : (k : K) → List (Γ k)) (input : List (Γ src))
-    (output replacement : List (Γ dst)) :
-    Function.update (tapesAt src dst base input output) dst replacement =
-      tapesAt src dst base input replacement := by
-  funext k
-  by_cases hd : k = dst
-  · subst k
-    simp [tapesAt]
-  · simp [tapesAt, hd]
-
 def nextAt (dst : K) (program : Λ → TM2.Stmt Γ Λ (σ × Option (Γ dst)))
     (configuration : Option (TM2.Cfg Γ Λ (σ × Option (Γ dst)))) :
     Option (TM2.Cfg Γ Λ (σ × Option (Γ dst))) :=
@@ -240,7 +72,8 @@ theorem stepAt_empty (src dst : K) (distinct : src ≠ dst)
     (tapesAt src dst base [] output)) = _
   rw [atLoop]
   cases exit <;>
-    simp [loopAt, exitAt, TM2.stepAux, tapesAt_src, distinct, update_tapesAt_src]
+    simp [loopAt, exitAt, TM2.stepAux, tapesAt, distinct,
+      Function.update_comm distinct.symm]
 
 theorem stepAt_cons (src dst : K) (distinct : src ≠ dst)
     (f : Γ src → Γ dst) (fallback : Γ dst) (loopLabel : Λ) (exit : Option Λ)
@@ -255,8 +88,8 @@ theorem stepAt_cons (src dst : K) (distinct : src ≠ dst)
   change some (TM2.stepAux (program loopLabel) (ambient, register)
     (tapesAt src dst base (head :: input) output)) = _
   rw [atLoop]
-  simp [loopAt, TM2.stepAux, tapesAt_src, tapesAt_dst, distinct,
-    update_tapesAt_src, update_tapesAt_dst]
+  simp [loopAt, TM2.stepAux, tapesAt, distinct,
+    Function.update_comm distinct.symm]
 
 /-- Placement-aware exact transfer, preserving all ambient state and other tapes.
 The optional exit label is reached in the same final empty-pop transition. -/
@@ -314,6 +147,84 @@ def transferAtInTime (src dst : K) (distinct : src ≠ dst)
   evals_in_steps := transferAt_fromTapes src dst distinct f fallback loopLabel exit
     program atLoop base ambient register
   steps_le_m := Nat.le_refl _
+
+end Placed
+
+/-- Two-stack specialization of the placement-aware transfer machine. -/
+abbrev alphabet (α β : Type) : Bool → Type
+  | false => α
+  | true => β
+
+variable {α β : Type} [Fintype α] [Fintype β]
+
+abbrev machine (f : α → β) (fallback : β) : FinTM2 where
+  K := Bool
+  k₀ := false
+  k₁ := true
+  Γ := alphabet α β
+  Λ := Unit
+  main := ()
+  σ := Unit × Option β
+  initialState := ((), none)
+  Γk₀Fin := inferInstanceAs (Fintype α)
+  m _ := loopAt false true f fallback () none
+
+def tapeStacks (input : List α) (output : List β) :
+    (side : Bool) → List (alphabet α β side)
+  | false => input
+  | true => output
+
+/-- The standalone certificate is the placed trace, not a second execution proof. -/
+def outputsInTime (f : α → β) (fallback : β) (input : List α) :
+    TM2OutputsInTime (machine f fallback) input (some (input.reverse.map f))
+      (input.length + 1) := by
+  let base := tapeStacks input ([] : List β)
+  have initial : initList (machine f fallback) input =
+      ⟨some (), ((), none), base⟩ := by
+    unfold initList
+    congr 1
+    funext side
+    cases side <;> rfl
+  have final : (⟨none, ((), none),
+      tapesAt false true base [] (input.reverse.map f)⟩ : (machine f fallback).Cfg) =
+      haltList (machine f fallback) (input.reverse.map f) := by
+    unfold haltList
+    congr 1
+    funext side
+    cases side <;> rfl
+  have run := transferAt_fromTapes false true (by decide) f fallback () none
+    (machine f fallback).m rfl base () none
+  change (nextAt true (machine f fallback).m)^[input.length + 1]
+    (some ⟨some (), ((), none), base⟩) =
+    some ⟨none, ((), none), tapesAt false true base [] (input.reverse.map f ++ [])⟩ at run
+  rw [List.append_nil, final] at run
+  refine { steps := input.length + 1, evals_in_steps := ?_, steps_le_m := Nat.le_refl _ }
+  change (nextAt true (machine f fallback).m)^[input.length + 1]
+    (some (initList (machine f fallback) input)) = _
+  rw [initial]
+  exact run
+
+@[simp] theorem outputsInTime_steps (f : α → β) (fallback : β) (input : List α) :
+    (outputsInTime f fallback input).steps = input.length + 1 := rfl
+
+/-- A genuine finite-machine certificate with identity encodings and bound `X+1`. -/
+noncomputable def computableInPolyTime (f : α → β) (fallback : β) :
+    TM2ComputableInPolyTime (id : List α → List α) (id : List β → List β)
+      (fun input => input.reverse.map f) where
+  tm := machine f fallback
+  inputAlphabet := Equiv.refl α
+  outputAlphabet := Equiv.refl β
+  time := Polynomial.X + 1
+  outputsFun input := by
+    change TM2OutputsInTime (machine f fallback) (input.map id)
+      (some ((input.reverse.map f).map id))
+      ((Polynomial.X + 1 : Polynomial Nat).eval input.length)
+    have hi := @List.map_id ((machine f fallback).Γ (machine f fallback).k₀) input
+    have ho := @List.map_id ((machine f fallback).Γ (machine f fallback).k₁)
+      (input.reverse.map f)
+    erw [hi, ho]
+    simpa only [Polynomial.eval_add, Polynomial.eval_X, Polynomial.eval_one]
+      using outputsInTime f fallback input
 
 end UniqueGamesTheorem.Reduction.MachineTransfer
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.PreprocessingInternalRows
 import OAI.Computability.UniqueGames.PCP.PreprocessingPaddingWords
 
@@ -32,9 +33,6 @@ def vertexRows (x : Vertex t padding) :
   List.ofFn (fun p : Fin q => actualRow t padding tables x (.inl p)) ++
     [actualRow t padding tables x (.inr ())]
 
-def originalVertexRows (e : Fin t.darts) := vertexRows t padding tables (.inl e)
-def dummyVertexRows (v : Fin t.vertices) (j : Fin (padding v)) :=
-  vertexRows t padding tables (.inr ⟨v, j⟩)
 
 def vertexBits (x : Vertex t padding) : List Bool :=
   encodeWords ((vertexRows t padding tables x).flatMap GraphTables.rowWords)
@@ -43,10 +41,6 @@ def originalVertexBits (e : Fin t.darts) : List Bool := vertexBits t padding tab
 def dummyVertexBits (v : Fin t.vertices) (j : Fin (padding v)) : List Bool :=
   vertexBits t padding tables (.inr ⟨v, j⟩)
 
-/-- The internal row is exactly the checked lookup/select row. -/
-theorem actualRow_internal (v : Fin t.vertices) (x : PaddedCloud t padding v) (p : Fin q) :
-    actualRow t padding tables x.val (.inl p) =
-      PreprocessingInternalRows.row t padding tables v x p := rfl
 
 theorem actualRow_eq (x : Vertex t padding) (p : Fin q ⊕ Unit) :
     actualRow t padding tables x p =
@@ -87,18 +81,10 @@ theorem actualRow_eq (x : Vertex t padding) (p : Fin q ⊕ Unit) :
     portOrder_inherited]
   exact Nat.add_comm _ _
 
-private theorem relation_ext {r s : GraphTables.RelationTable}
-    (h : ∀ a b, GraphTables.relationAt r a b = GraphTables.relationAt s a b) : r = s := by
-  apply Vector.ext
-  intro i hi
-  simpa only [GraphTables.relationAt, Prod.eta, Equiv.apply_symm_apply,
-    Fin.getElem_fin] using h (GraphTables.relationIndex.symm ⟨i, hi⟩).1
-      (GraphTables.relationIndex.symm ⟨i, hi⟩).2
-
 @[simp] theorem inherited_original_relation (e : Fin t.darts) :
     (actualRow t padding tables (.inl e) (.inr ())).relation = t.rows[e].relation := by
   rw [actualRow_eq]
-  apply relation_ext
+  apply GraphTables.relation_ext
   intro a b
   exact accepts_original t padding tables e a b
 
@@ -106,7 +92,7 @@ private theorem relation_ext {r s : GraphTables.RelationTable}
     (actualRow t padding tables (.inr ⟨v, j⟩) (.inr ())).relation =
       MachineDummyRows.trueRelation := by
   rw [actualRow_eq]
-  apply relation_ext
+  apply GraphTables.relation_ext
   intro a b
   have h := accepts_dummy t padding tables ⟨v, j⟩ a b
   simpa only [PortTables.accepts, MachineDummyRows.trueRelation,
@@ -130,12 +116,6 @@ theorem inherited_dummy_words (v : Fin t.vertices) (j : Fin (padding v)) :
     PreprocessingPaddingOffsets.vertexOrder_dummy_val,
     inherited_dummy_reverse, inherited_dummy_relation]
 
-private theorem encodeWords_flatMap {α : Type*} (xs : List α) (words : α → List Nat) :
-    encodeWords (xs.flatMap words) = xs.flatMap (fun x => encodeWords (words x)) := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp only [List.flatMap_cons, encodeWords_append, ih]
-
 /-- Per-row serialization agrees with the generic table codec. -/
 theorem actualRow_bits (x : Vertex t padding) (p : Fin q ⊕ Unit) :
     encodeWords (GraphTables.rowWords (actualRow t padding tables x p)) =
@@ -153,7 +133,7 @@ theorem vertexBits_eq (x : Vertex t padding) :
   unfold vertexBits vertexRows
   rw [List.flatMap_append, encodeWords_append]
   simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil]
-  rw [encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
+  rw [UniqueGamesTheorem.Foundations.Complexity.encodeWords_flatMap, List.flatMap_def, List.map_ofFn]
   change (List.ofFn (fun p : Fin q =>
     encodeWords (GraphTables.rowWords (actualRow t padding tables x (.inl p))))).flatten ++
       encodeWords (GraphTables.rowWords (actualRow t padding tables x (.inr ()))) = _
@@ -181,29 +161,16 @@ theorem vertexOrder_ofFn {α : Type*} (f : Vertex t padding → α) :
       List.ofFn (fun e : Fin t.darts => f (.inl e)) ++
         (paddingList padding).map (fun z => f (.inr z)) := by
   change List.ofFn (fun i : Fin (t.darts + ∑ v, padding v) =>
-    f ((vertexOrder t padding).symm i)) = _
+    f ((Equiv.sumCongr (Equiv.refl (Fin t.darts)) (paddingOrder padding)).symm
+      (finSumFinEquiv.symm i))) = _
   rw [List.ofFn_add]
   have hold (e : Fin t.darts) :
-      (vertexOrder t padding).symm (e.castLE (Nat.le_add_right t.darts (∑ v, padding v))) =
-        Sum.inl e := (vertexOrder t padding).symm_apply_apply (Sum.inl e)
-  have hnew (i : Fin (∑ v, padding v)) :
-      (vertexOrder t padding).symm (i.natAdd t.darts) =
-        Sum.inr ((paddingOrder padding).symm i) := by
-    apply (vertexOrder t padding).injective
-    erw [Equiv.apply_symm_apply]
-    change i.natAdd t.darts = Fin.natAdd t.darts
-      ((paddingOrder padding) ((paddingOrder padding).symm i))
-    rw [Equiv.apply_symm_apply]
-  apply congrArg₂ (· ++ ·)
-  · exact congrArg List.ofFn (funext (fun i => congrArg f (hold i)))
-  · calc
-      List.ofFn (fun i : Fin (∑ v, padding v) =>
-          f ((vertexOrder t padding).symm (i.natAdd t.darts))) =
-          List.ofFn (fun i => f (.inr ((paddingOrder padding).symm i))) :=
-        congrArg List.ofFn (funext (fun i => congrArg f (hnew i)))
-      _ = (List.ofFn (paddingOrder padding).symm).map (fun z => f (.inr z)) :=
-        (List.map_ofFn (f := (paddingOrder padding).symm) (g := fun z => f (.inr z))).symm
-      _ = _ := by rw [paddingOrder_ofFn]
+      finSumFinEquiv.symm (e.castLE (Nat.le_add_right t.darts (∑ v, padding v))) =
+        Sum.inl e := finSumFinEquiv.symm_apply_apply (Sum.inl e)
+  simp only [hold, finSumFinEquiv_symm_apply_natAdd, Equiv.sumCongr_symm,
+    Equiv.sumCongr_apply, Equiv.refl_symm, Equiv.refl_apply, Sum.map_inl, Sum.map_inr]
+  rw [← paddingOrder_ofFn, List.map_ofFn]
+  rfl
 
 /-- The stored dummy list uses exactly the nested owner/local-index loop order. -/
 theorem paddingList_flatMap {α : Type*} (f : (Σ v : Fin t.vertices, Fin (padding v)) → List α) :

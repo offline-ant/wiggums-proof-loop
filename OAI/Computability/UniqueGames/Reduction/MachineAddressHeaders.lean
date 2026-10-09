@@ -1,12 +1,11 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineDrain
-import OAI.Computability.UniqueGames.Machines.MachineTransducerCopy
+import OAI.Computability.UniqueGames.Machines.MachineCopy
 import OAI.Computability.UniqueGames.PCP.SourceFieldArrayLemmas
 import OAI.Computability.UniqueGames.PCP.SourceHeaderCounts
 import OAI.Computability.UniqueGames.Reduction.CanonicalBodyTemplateLemmas
-import OAI.Computability.UniqueGames.Reduction.CloneMachineModelLemmas
 
 namespace OAI
-
 
 
 namespace UniqueGamesTheorem.Reduction.MachineAddressHeaders
@@ -15,6 +14,7 @@ open Turing
 open UniqueGamesTheorem.Foundations.Complexity
 open UniqueGamesTheorem.Foundations.Hastad
 open MachineComposition
+
 
 namespace Prefix
 
@@ -79,21 +79,10 @@ theorem clear_readTapes (slots : Fin 5 ↪ K) (base : K → List Bool)
     (n m : Nat) (suffix : List Bool) :
     Function.update (readTapes slots base n m suffix) (slots 1) [] =
       resultTapes slots base n m := by
-  funext tape
-  by_cases hw : tape = slots 1
-  · subst tape
-    simp [readTapes, resultTapes, SourceFieldArray.sequenceTapes, SourceMachine.afterField,
-      SourceMachine.fieldTapes, copied, destination, slots.injective.eq_iff]
-  · by_cases hn : tape = slots 2
-    · subst tape
-      simp [readTapes, resultTapes, SourceFieldArray.sequenceTapes, SourceMachine.afterField,
-        SourceMachine.fieldTapes, copied, destination, slots.injective.eq_iff]
-    · by_cases hm : tape = slots 3
-      · subst tape
-        simp [readTapes, resultTapes, SourceFieldArray.sequenceTapes, SourceMachine.afterField,
-          SourceMachine.fieldTapes, copied, destination, slots.injective.eq_iff]
-      · simp [readTapes, resultTapes, SourceFieldArray.sequenceTapes, SourceMachine.afterField,
-          SourceMachine.fieldTapes, copied, destination, slots.injective.eq_iff, hw, hn, hm]
+  simp [readTapes, resultTapes, SourceFieldArray.sequenceTapes, SourceMachine.afterField,
+    SourceMachine.fieldTapes, copied, destination, slots.injective.eq_iff,
+    Function.update_comm (show slots 1 ≠ slots 2 by simp [slots.injective.eq_iff]),
+    Function.update_comm (show slots 1 ≠ slots 3 by simp [slots.injective.eq_iff])]
 
 theorem readTapes_work (slots : Fin 5 ↪ K) (base : K → List Bool)
     (n m : Nat) (suffix : List Bool) : readTapes slots base n m suffix (slots 1) = suffix := by
@@ -108,8 +97,6 @@ theorem resultTapes_other (slots : Fin 5 ↪ K) (base : K → List Bool) (n m : 
     resultTapes slots base n m (slots 0) = base (slots 0) := by
   simp [resultTapes, slots.injective.eq_iff]
 
-@[simp] theorem resultTapes_work (slots : Fin 5 ↪ K) (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (slots 1) = [] := by simp [resultTapes]
 
 @[simp] theorem resultTapes_n (slots : Fin 5 ↪ K) (base : K → List Bool) (n m : Nat) :
     resultTapes slots base n m (slots 2) = encodeWord n ++ base (slots 2) := by
@@ -183,17 +170,9 @@ inductive Kind
   | capacity | edges
   deriving DecidableEq
 
-protected abbrev Kind.enumList : List Kind := [.capacity, .edges]
-
-protected theorem Kind.enumList_getElem?_ctorIdx_eq (x : Kind) :
-    Kind.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Kind.enumList_nodup : Kind.enumList.Nodup := by decide
-
 instance : Fintype Kind where
-  elems := ⟨Kind.enumList, Kind.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.capacity, .edges}
+  complete x := by cases x <;> simp
 
 def polynomial (k s d noiseCount : Nat) : Kind → Polynomial Nat
   | .capacity => Polynomial.X ^ (1 + 9 * k)
@@ -214,18 +193,10 @@ inductive Control
   | accA | accB | counter | scratch
   deriving DecidableEq
 
-protected abbrev Control.enumList : List Control := [.variableCount, .occurrenceCount, .baseValue,
-  .capacity, .temporary, .reversed, .accA, .accB, .counter, .scratch]
-
-protected theorem Control.enumList_getElem?_ctorIdx_eq (x : Control) :
-    Control.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Control.enumList_nodup : Control.enumList.Nodup := by decide
-
 instance : Fintype Control where
-  elems := ⟨Control.enumList, Control.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.variableCount, .occurrenceCount, .baseValue,
+  .capacity, .temporary, .reversed, .accA, .accB, .counter, .scratch}
+  complete x := by cases x <;> simp
 
 abbrev Coefficients (k s d noiseCount : Nat) :=
   Fin (CookLevin.PolynomialMachine.width (polynomial k s d noiseCount .capacity)) ⊕
@@ -256,22 +227,8 @@ def coefficientBlock (k s d noiseCount : Nat) (kind : Kind) :
 
 def localSlots (k s d noiseCount : Nat) (kind : Kind) :
     MachineHorner.Layout (CookLevin.PolynomialMachine.width (polynomial k s d noiseCount kind)) ↪
-      Layout k s d noiseCount where
-  toFun
-    | .inl i => .inl (controlSlots kind i)
-    | .inr i => .inr (coefficientBlock k s d noiseCount kind i)
-  inj' := by
-    intro a b h
-    cases a with
-    | inl a =>
-      cases b with
-      | inl b => exact congrArg Sum.inl ((controlSlots kind).injective (Sum.inl.inj h))
-      | inr b => cases h
-    | inr a =>
-      cases b with
-      | inl b => cases h
-      | inr b =>
-        exact congrArg Sum.inr ((coefficientBlock k s d noiseCount kind).injective (Sum.inr.inj h))
+      Layout k s d noiseCount :=
+  (controlSlots kind).sumMap (coefficientBlock k s d noiseCount kind)
 
 variable {k s d noiseCount : Nat} {K Λ σ : Type}
 
@@ -303,14 +260,14 @@ def evalSlots (slots : Layout k s d noiseCount ↪ K) (kind : Kind) :
 inductive Label (k s d noiseCount : Nat)
   | copyNOut | copyNBack | copyMOut | copyMBack | addM | seedBase
   | evaluate (kind : Kind) (localLabel : SourceHeaderCounts.Eval.Label (polynomial k s d noiseCount kind))
-  | doubleScan | doubleEmit (symbol : Bool) | doubleRestore | alphabet | edgeTransfer
+  | vertexTransfer | alphabet | edgeTransfer
   deriving DecidableEq, Fintype
 
 def evalStart (kind : Kind) : Label k s d noiseCount :=
   .evaluate kind (SourceHeaderCounts.Eval.start (polynomial k s d noiseCount kind))
 
 def afterEval : Kind → Label k s d noiseCount
-  | .capacity => .doubleScan | .edges => .edgeTransfer
+  | .capacity => .vertexTransfer | .edges => .edgeTransfer
 
 variable [DecidableEq K]
 
@@ -334,13 +291,8 @@ def statement (slots : Layout k s d noiseCount ↪ K) (labels : Label k s d nois
   | .evaluate kind localLabel => SourceHeaderCounts.Eval.statement
       (polynomial k s d noiseCount kind) (evalSlots slots kind)
       (fun label => labels (.evaluate kind label)) (some (labels (afterEval kind))) localLabel
-  | .doubleScan => MachineTransducerCopy.scanLoop (control slots .capacity) (control slots .scratch)
-      () (fun _ symbol => labels (.doubleEmit symbol)) (labels .doubleRestore)
-  | .doubleEmit symbol => MachineTransducerCopy.emitter (control slots .reversed)
-      (fun q _ => q) (fun _ : Unit => CloneMachineModel.affineEmit 2 0)
-      (labels .doubleScan) () symbol
-  | .doubleRestore => MachineTransfer.loopAt (control slots .scratch) (control slots .capacity)
-      id false (labels .doubleRestore) (some (labels .alphabet))
+  | .vertexTransfer => MachineTransfer.loopAt (control slots .capacity) (control slots .reversed)
+      id false (labels .vertexTransfer) (some (labels .alphabet))
   | .alphabet => MachineSubstitution.pushWord (control slots .reversed) (encodeWord (2 ^ s))
       (.goto fun _ => labels (evalStart .edges))
   | .edgeTransfer => MachineTransfer.loopAt (control slots .temporary) (control slots .reversed)
@@ -396,24 +348,20 @@ theorem evalPhaseTrace (slots : Layout k s d noiseCount ↪ K)
     using evaluated
 
 def headerBits (k s d noiseCount n m : Nat) : List Bool :=
-  encodeWords [2 * capacity k s d n m, 2 ^ s, edgeCount k s d noiseCount m]
+  encodeWords [capacity k s d n m, 2 ^ s, edgeCount k s d noiseCount m]
 
 def resultTapes (slots : Layout k s d noiseCount ↪ K) (base : K → List Bool)
     (n m : Nat) : K → List Bool :=
   Function.update (Function.update (Function.update base
     (control slots .baseValue) (encodeWord (radix s d n m)))
-    (control slots .capacity) (encodeWord (capacity k s d n m)))
+    (control slots .capacity) [])
     (control slots .reversed) ((headerBits k s d noiseCount n m).reverse ++ base (control slots .reversed))
 
 def steps (k s d noiseCount n m : Nat) : Nat :=
   2 * n + 3 * m + 10 +
     SourceHeaderCounts.Eval.steps (polynomial k s d noiseCount .capacity) (radix s d n m) +
     SourceHeaderCounts.Eval.steps (polynomial k s d noiseCount .edges) m +
-    3 * capacity k s d n m + edgeCount k s d noiseCount m + 8
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
+    capacity k s d n m + edgeCount k s d noiseCount m + 5
 
 def preparedBase (slots : Layout k s d noiseCount ↪ K) (base : K → List Bool)
     (n m : Nat) : K → List Bool :=
@@ -478,45 +426,17 @@ theorem prepareBaseTrace (slots : Layout k s d noiseCount ↪ K)
       simp [encodeWord, List.reverse_replicate, ← List.append_assoc,
         List.replicate_append_replicate, radix, Nat.add_comm, Nat.add_assoc]
     rw [wordEq]
-  have combined := trace_trans _ (trace_trans _ (trace_trans _ copyingN copyingM) adding) seeding
+  have combined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans copyingN copyingM) adding) seeding
   have timeEq : 2 * (n + 1 + 1) + 2 * (m + 1 + 1) + (m + 1) + 1 =
       2 * n + 3 * m + 10 := by omega
   rw [timeEq] at combined
   have frame : t4 = preparedBase slots base n m := by
-    funext tape
-    by_cases ht : tape = control slots .temporary
-    · subst tape
-      simp [t4, t3, t2, t1, preparedBase, clean.temporary]
-    · simp [t4, t3, t2, t1, preparedBase, Function.update_apply, ht]
-      split_ifs <;> rfl
+    simp [t4, t3, t2, t1, preparedBase,
+      Function.update_comm (show control slots .baseValue ≠ control slots .temporary by simp),
+      ← clean.temporary]
   rw [frame] at combined
   exact combined
 
-/-- Physical doubling emits the vertex-count word and restores the capacity. -/
-theorem doubleTrace (slots : Layout k s d noiseCount ↪ K)
-    (labels : Label k s d noiseCount → Λ) (exit : Option Λ)
-    (program : Λ → TM2.Stmt (fun _ : K => Bool) Λ (MachineHorner.State σ))
-    (atLabels : ∀ label, program (labels label) = statement slots labels exit label)
-    (base : K → List Bool) (value : Nat)
-    (hcap : base (control slots .capacity) = encodeWord value)
-    (hscratch : base (control slots .scratch) = []) (ambient : σ) (register : Option Bool) :
-    (advance (TM2.step program))^[3 * value + 5]
-      (some ⟨some (labels .doubleScan), ((ambient, ()), register), base⟩) =
-      some ⟨some (labels .alphabet), ((ambient, ()), none),
-        Function.update base (control slots .reversed)
-          ((encodeWord (2 * value)).reverse ++ base (control slots .reversed))⟩ := by
-  have copied := MachineTransducerCopy.transduceCopyTrace (control slots .capacity)
-    (control slots .scratch) (control slots .reversed) (by simp) (by simp) (by simp)
-    () (fun q _ => q) (fun _ : Unit => CloneMachineModel.affineEmit 2 0)
-    (labels .doubleScan) (labels .doubleRestore) (fun _ symbol => labels (.doubleEmit symbol))
-    (some (labels .alphabet)) program (atLabels .doubleScan)
-    (by intro q symbol; cases q; exact atLabels (.doubleEmit symbol))
-    (atLabels .doubleRestore) base hscratch ambient () register
-  rw [hcap, CloneMachineAffine.output_eq_flatMap, CloneMachineAffine.affineEmit_word,
-    Nat.zero_add, encodeWord_length] at copied
-  have timeEq : 3 * (value + 1) + 2 = 3 * value + 5 := by omega
-  rw [timeEq] at copied
-  exact copied
 
 /-- All arithmetic and header emission, with exact composed transition count. -/
 theorem trace (slots : Layout k s d noiseCount ↪ K)
@@ -532,8 +452,8 @@ theorem trace (slots : Layout k s d noiseCount ↪ K)
       some ⟨exit, ((ambient, ()), none), resultTapes slots base n m⟩ := by
   let t1 := preparedBase slots base n m
   let t2 := Function.update t1 (control slots .capacity) (encodeWord (capacity k s d n m))
-  let t3 := Function.update t2 (control slots .reversed)
-    ((encodeWord (2 * capacity k s d n m)).reverse ++ t2 (control slots .reversed))
+  let t3 := MachineTransfer.tapesAt (control slots .capacity) (control slots .reversed) t2 []
+    ((encodeWord (capacity k s d n m)).reverse ++ t2 (control slots .reversed))
   let t4 := Function.update t3 (control slots .reversed)
     ((encodeWord (2 ^ s)).reverse ++ t3 (control slots .reversed))
   let t5 := Function.update t4 (control slots .temporary) (encodeWord (edgeCount k s d noiseCount m))
@@ -546,10 +466,17 @@ theorem trace (slots : Layout k s d noiseCount ↪ K)
   change (advance (TM2.step program))^[SourceHeaderCounts.Eval.steps
       (polynomial k s d noiseCount .capacity) (radix s d n m)]
     (some ⟨some (labels (evalStart .capacity)), ((ambient, ()), none), t1⟩) =
-    some ⟨some (labels .doubleScan), ((ambient, ()), none), t2⟩ at evaluatedCap
+    some ⟨some (labels .vertexTransfer), ((ambient, ()), none), t2⟩ at evaluatedCap
   have cw2 : WorkClean slots t2 := cw1.update_control .capacity (by decide) _
-  have doubled := doubleTrace slots labels exit program atLabels t2 (capacity k s d n m)
-    (by simp [t2]) cw2.scratch ambient none
+  have vertexTransferred := MachineTransfer.transferAt_fromTapes (Γ := fun _ : K => Bool)
+    (σ := σ × Unit) (control slots .capacity) (control slots .reversed) (by simp)
+    id false (labels .vertexTransfer) (some (labels .alphabet)) program
+    (atLabels .vertexTransfer) t2 (ambient, ()) none
+  change (advance (TM2.step program))^[(t2 (control slots .capacity)).length + 1]
+    (some ⟨some (labels .vertexTransfer), ((ambient, ()), none), t2⟩) = _ at vertexTransferred
+  have ht2 : t2 (control slots .capacity) = encodeWord (capacity k s d n m) := by simp [t2]
+  rw [ht2, encodeWord_length] at vertexTransferred
+  simp only [List.map_id] at vertexTransferred
   have alphabetStep : (advance (TM2.step program))^[1]
       (some ⟨some (labels .alphabet), ((ambient, ()), none), t3⟩) =
       some ⟨some (labels (evalStart .edges)), ((ambient, ()), none), t4⟩ := by
@@ -558,11 +485,12 @@ theorem trace (slots : Layout k s d noiseCount ↪ K)
     change some (TM2.stepAux (MachineSubstitution.pushWord _ _ _) _ _) = _
     rw [MachineSubstitution.stepAux_pushWord]
     rfl
-  have cw3 : WorkClean slots t3 := cw2.update_control .reversed (by decide) _
+  have cw3 : WorkClean slots t3 :=
+    (cw2.update_control .capacity (by decide) []).update_control .reversed (by decide) _
   have cw4 : WorkClean slots t4 := cw3.update_control .reversed (by decide) _
   have evaluatedEdges := evalPhaseTrace slots labels exit program atLabels .edges t4 m
-    (by simpa [t4, t3, t2, t1, preparedBase, inputControl] using hm)
-    (by simpa [t4, t3, t2, t1, preparedBase, outputControl] using clean.temporary)
+    (by simpa [t4, t3, MachineTransfer.tapesAt, t2, t1, preparedBase, inputControl] using hm)
+    (by simpa [t4, t3, MachineTransfer.tapesAt, t2, t1, preparedBase, outputControl] using clean.temporary)
     cw4 ambient none
   simp only [polynomial_edges_eval] at evaluatedEdges
   change (advance (TM2.step program))^[SourceHeaderCounts.Eval.steps
@@ -578,11 +506,10 @@ theorem trace (slots : Layout k s d noiseCount ↪ K)
   have ht5 : t5 (control slots .temporary) = encodeWord (edgeCount k s d noiseCount m) := by simp [t5]
   rw [ht5, encodeWord_length] at transferred
   simp only [List.map_id] at transferred
-  have combined := trace_trans _ (trace_trans _ (trace_trans _
-    (trace_trans _ (trace_trans _ prepared evaluatedCap) doubled) alphabetStep) evaluatedEdges) transferred
+  have combined := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans prepared evaluatedCap) vertexTransferred) alphabetStep) evaluatedEdges) transferred
   have timeEq : 2 * n + 3 * m + 10 +
       SourceHeaderCounts.Eval.steps (polynomial k s d noiseCount .capacity) (radix s d n m) +
-      (3 * capacity k s d n m + 5) + 1 +
+      (capacity k s d n m + 1 + 1) + 1 +
       SourceHeaderCounts.Eval.steps (polynomial k s d noiseCount .edges) m +
       (edgeCount k s d noiseCount m + 1 + 1) = steps k s d noiseCount n m := by
     unfold steps
@@ -591,13 +518,12 @@ theorem trace (slots : Layout k s d noiseCount ↪ K)
   have frame : MachineTransfer.tapesAt (control slots .temporary) (control slots .reversed)
       t5 [] ((encodeWord (edgeCount k s d noiseCount m)).reverse ++ t5 (control slots .reversed)) =
       resultTapes slots base n m := by
-    funext tape
-    by_cases ht : tape = control slots .temporary
-    · subst tape
-      simp [MachineTransfer.tapesAt, resultTapes, clean.temporary]
-    · simp [MachineTransfer.tapesAt, t5, t4, t3, t2, t1, preparedBase, resultTapes,
-        headerBits, encodeWords, List.reverse_append, List.append_assoc, Function.update_apply, ht]
-      split_ifs <;> rfl
+    simp only [MachineTransfer.tapesAt, t5, Function.update_idem]
+    rw [show Function.update t4 (control slots .temporary) [] = t4 from
+      Function.update_eq_self_iff.mpr (by
+        simp [t4, t3, MachineTransfer.tapesAt, t2, t1, preparedBase, clean.temporary])]
+    simp [t4, t3, MachineTransfer.tapesAt, t2, t1, preparedBase, resultTapes,
+      headerBits, encodeWords, List.reverse_append, List.append_assoc]
   rw [frame] at combined
   exact combined
 
@@ -824,10 +750,6 @@ def inPolynomialTime (slots : Layout k s d noiseCount ↪ K) (labels : Label k s
     resultTapes slots base n m (Arithmetic.control (arithmeticSlots slots) .baseValue) =
       encodeWord (radix s d n m) := by simp [resultTapes, Arithmetic.resultTapes]
 
-@[simp] theorem resultTapes_capacity (slots : Layout k s d noiseCount ↪ K)
-    (base : K → List Bool) (n m : Nat) :
-    resultTapes slots base n m (Arithmetic.control (arithmeticSlots slots) .capacity) =
-      encodeWord (capacity k s d n m) := by simp [resultTapes, Arithmetic.resultTapes]
 
 @[simp] theorem resultTapes_reversed (slots : Layout k s d noiseCount ↪ K)
     (base : K → List Bool) (n m : Nat) :

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.PoweringMachineOuterLoopLemmas
 
 namespace OAI
@@ -18,10 +19,6 @@ def initialExtra (graph : PortTables.Table vertices d) (n : Nat) :
     initialExtra graph n (.inl (PoweringMachineTapes.table (PoweringMachineRowBody.capacity n))) =
       PortTables.tableBits graph := by simp [initialExtra]
 
-theorem initialExtra_other (graph : PortTables.Table vertices d) (n : Nat)
-    (tape : PoweringMachineInitialize.ExtraTape (PoweringMachineRowBody.capacity n))
-    (hne : tape ≠ .inl (PoweringMachineTapes.table (PoweringMachineRowBody.capacity n))) :
-    initialExtra graph n tape = [] := by simp [initialExtra, hne]
 
 @[simp] theorem initialExtra_scratch (graph : PortTables.Table vertices d) (n : Nat) :
     initialExtra graph n

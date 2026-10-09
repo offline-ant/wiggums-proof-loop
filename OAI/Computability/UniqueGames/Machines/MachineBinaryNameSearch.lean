@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import OAI.Computability.UniqueGames.Machines.MachineBinaryNameCompare
 
@@ -141,22 +142,13 @@ private theorem update_source (source counter : K) (distinct : source ≠ counte
     (base : K → List Bool) (input count replacement : List Bool) :
     Function.update (tapesAt source counter base input count) source replacement =
       tapesAt source counter base replacement count := by
-  funext k
-  by_cases hs : k = source
-  · subst k; simp [tapesAt, distinct]
-  · by_cases hc : k = counter
-    · subst k; simp [tapesAt, Ne.symm distinct]
-    · simp [tapesAt, hs, hc]
+  simp [tapesAt, Function.update_comm distinct]
 
 private theorem update_counter (source counter : K)
     (base : K → List Bool) (input count replacement : List Bool) :
     Function.update (tapesAt source counter base input count) counter replacement =
       tapesAt source counter base input replacement := by
   simp [tapesAt]
-
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 variable (tape : Fin 6 → K) (distinct : Function.Injective tape)
 variable (labels : Label → Λ) (foundExit missingExit malformedExit : Option Λ)
@@ -178,15 +170,6 @@ theorem signStep (sign : Bool) (input counter : List Bool) :
   rw [atLabels .sign]
   simp [instruction, TM2.stepAux, clean, BinaryNameCompare.clean, hd, update_source]
 
-theorem emptyStep (counter : List Bool) :
-    TM2.step program
-      ⟨some (labels .sign), clean ambient,
-        tapesAt (tape 0) (tape 5) base [] counter⟩ =
-      some ⟨missingExit, clean ambient, tapesAt (tape 0) (tape 5) base [] counter⟩ := by
-  have hd : tape 0 ≠ tape 5 := fun h => (by decide : (0 : Fin 6) ≠ 5) (distinct h)
-  change some (TM2.stepAux (program (labels .sign)) _ _) = _
-  rw [atLabels .sign]
-  simp [instruction, TM2.stepAux, clean, BinaryNameCompare.clean, hd, update_source]
 
 omit distinct in
 theorem incrementStep (input counter : List Bool) :
@@ -244,7 +227,7 @@ theorem tokenTrace (token : Token) (key suffix counter : List Bool)
   rw [show Function.update initial (compareTapes tape 0) suffix =
       tapesAt (tape 0) (tape 5) base suffix counter by
     exact update_source _ _ (hd 0 5 (by decide)) base _ counter suffix] at second
-  exact joinTrace first second
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
 
 /-- Successful search returns exactly the first occurrence index. All labels
 are literal instruction equations, so this theorem supplies its own body runs. -/
@@ -287,7 +270,7 @@ theorem searchTrace (tokens : List Token) (key suffix counter : List Bool)
               atLabels base ambient (stream tokens ++ suffix) counter
         have rest := ih (true :: counter) tailCanonical remaining
         simp only [same, ite_false] at first
-        have full := joinTrace first (joinTrace increment rest)
+        have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans increment rest)
         have counterEq : List.replicate ((payloads tokens).idxOf key) true ++
             (true :: counter) =
             List.replicate ((payloads tokens).idxOf key + 1) true ++ counter := by
@@ -299,45 +282,9 @@ theorem searchTrace (tokens : List Token) (key suffix counter : List Bool)
         simpa only [steps, same, ite_false, stream_cons, List.append_assoc, afterMatch,
           payloads_cons, indexEq, counterEq] using full
 
-/-- Explicit polynomial bound for the actual successful run. -/
-def searchInTime (tokens : List Token) (key suffix counter : List Bool)
-    (canonical : ∀ token ∈ tokens, BinaryNameMachine.canonical token.2 = true)
-    (present : key ∈ payloads tokens)
-    (keyWord : base (tape 1) = key.reverse)
-    (candidateEmpty : base (tape 2) = []) (copyEmpty : base (tape 3) = [])
-    (scratchEmpty : base (tape 4) = []) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (labels .sign), clean ambient,
-        tapesAt (tape 0) (tape 5) base (stream tokens ++ suffix) counter⟩
-      (some ⟨foundExit, clean ambient,
-        tapesAt (tape 0) (tape 5) base (stream (afterMatch tokens key) ++ suffix)
-          (List.replicate ((payloads tokens).idxOf key) true ++ counter)⟩)
-      ((3 * key.length + 7) * (stream tokens).length) where
-  steps := steps tokens key
-  evals_in_steps := searchTrace tape distinct labels foundExit missingExit malformedExit
-    program atLabels base ambient tokens key suffix counter canonical present keyWord
-      candidateEmpty copyEmpty scratchEmpty
-  steps_le_m := steps_le_stream tokens key
 
 end Program
 
-/-- Concrete finite-control instantiation; the counter is its designated output. -/
-def machine : FinTM2 where
-  K := Fin 6
-  k₀ := 0
-  k₁ := 5
-  Γ _ := Bool
-  Λ := Label ⊕ Fin 3
-  main := .inl .sign
-  σ := State Unit
-  initialState := clean ()
-  m label := match label with
-    | .inl l => instruction id Sum.inl (some (.inr 0)) (some (.inr 1)) (some (.inr 2)) l
-    | .inr _ => .halt
-
-theorem machine_finiteAlphabet (k : machine.K) : Finite (machine.Γ k) := by
-  change Finite Bool
-  infer_instance
 
 end UniqueGamesTheorem.BinaryNameSearch
 

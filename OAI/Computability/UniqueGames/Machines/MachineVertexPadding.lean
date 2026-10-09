@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachinePaddingTable
@@ -25,18 +26,10 @@ inductive Tape
   | scratch | work | saved | product | rowWork | rowSpare
   deriving DecidableEq
 
-protected abbrev Tape.enumList : List Tape := [.original, .output, .vertex, .edge, .power, .level,
-  .fuel, .relation, .scratch, .work, .saved, .product, .rowWork, .rowSpare]
-
-protected theorem Tape.enumList_getElem?_ctorIdx_eq (x : Tape) :
-    Tape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Tape.enumList_nodup : Tape.enumList.Nodup := by decide
-
 instance : Fintype Tape where
-  elems := ⟨Tape.enumList, Tape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.original, .output, .vertex, .edge, .power, .level,
+  .fuel, .relation, .scratch, .work, .saved, .product, .rowWork, .rowSpare}
+  complete x := by cases x <;> simp
 
 inductive Label (d : Nat)
   | splitCode (l : MachineTableSplit.Label)
@@ -217,10 +210,6 @@ def program {σ : Type} (d : Nat) (hd : 0 < d) : Label d → TM2.Stmt Alphabet (
   | .cleanRelation => MachineDrain.drain .relation .cleanRelation (some .cleanFuel)
   | .cleanFuel => MachineDrain.drain .fuel .cleanFuel none
 
-private theorem appendTrace {α : Type} (f : α → α) {a b : Nat} {x y z : α}
-    (hs : f^[a] x = y) (ht : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm a b, Function.iterate_add_apply, hs, ht]
-
 theorem tableBits_split {n d : Nat} (t : PortTables.Table n d) :
     PortTables.tableBits t = encodeWords [n, n * d] ++ PreprocessingPaddingWords.rowsBits t := by
   change encodeWords (PortTables.tableWords t) = _
@@ -275,12 +264,6 @@ theorem powerTrace {σ : Type} (d : Nat) (hd : 0 < d)
     (fun _ => rfl) _ _ _ (MachineCeilingPower.paddingTrace n ambient register)
   simpa only [Placement.configuration, Placement.label, powerTapes] using h
 
-theorem affineTapes (input output vertex edge power level fuel relation : List Bool) :
-    MachineUnaryAffineAt.tapes Tape.power Tape.scratch Tape.output
-      (memory input output vertex edge power level fuel relation) power [] output =
-      memory input output vertex edge power level fuel relation := by
-  funext k
-  cases k <;> simp [MachineUnaryAffineAt.tapes, MachineCopy.forkTapes, memory]
 
 theorem affineOutputTrace {σ : Type} (d : Nat) (hd : 0 < d)
     (coefficient : Nat) (seed scan restore : Label d) (exit : Option (Label d))
@@ -322,7 +305,7 @@ theorem affineOutputTrace {σ : Type} (d : Nat) (hd : 0 < d)
     funext k
     cases k <;> simp [MachineUnaryAffineAt.tapes, MachineCopy.forkTapes, base, memory]
   rw [hstart, hfinish] at ht
-  exact appendTrace _ hs ht
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hs ht
 
 theorem headersTrace {σ : Type} (d : Nat) (hd : 0 < d)
     (input output vertex edge level : List Bool) (m : Nat) (ambient : σ)
@@ -336,7 +319,7 @@ theorem headersTrace {σ : Type} (d : Nat) (hd : 0 < d)
     rfl rfl rfl input output vertex edge level [] [] m ambient register
   have h₂ := affineOutputTrace d hd 1 .vertexSeed .vertexScan .vertexRestore (some .copyFirst)
     rfl rfl rfl input (encodeWord (d * m) ++ output) vertex edge level [] [] m ambient none
-  have h := appendTrace _ h₁ h₂
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂
   simpa only [Nat.one_mul, Nat.mul_comm d m, encodeWords, List.append_nil, List.append_assoc,
     show (1 + 2 * (m + 1)) + (1 + 2 * (m + 1)) = 4 * (m + 1) + 2 by omega] using h
 
@@ -487,7 +470,7 @@ theorem cleanupTrace {σ : Type} (d : Nat) (hd : 0 < d)
     (ambient, false) none).evals_in_steps
   simp only [MachineDrain.drainInTime, memory, encodeWord_length, MachineDummyRows.trueBits_length,
     update_vertex, update_edge, update_power, update_relation, update_fuel] at h₁ h₂ h₃ h₄ h₅
-  have h := appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _ h₁ h₂) h₃) h₄) h₅
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂) h₃) h₄) h₅
   have ht : cleanupTime d m = (((m + 2 + (m * d + 2)) + (m + 2)) + 8193) + 2 := by
     unfold cleanupTime
     omega
@@ -531,8 +514,7 @@ theorem vertexPaddingTrace {σ : Type} {n d : Nat} (hd : 0 < d) (t : PortTables.
   have h₇ := cleanupTrace d hd input
     (PortTables.tableBits (PreprocessingPaddingTables.pad t (PreprocessingLevels.le_paddedSize n)))
     level m ambient
-  have h := appendTrace _ (appendTrace _ (appendTrace _ (appendTrace _
-    (appendTrace _ (appendTrace _ h₁ h₂) h₃) h₄) h₅) h₆) h₇
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h₁ h₂) h₃) h₄) h₅) h₆) h₇
   have ht : totalTime t =
       (((((MachineTableSplit.exactSteps n (n * d) rows +
         MachineCeilingPower.totalTime ExpanderFamily.growth n) + (4 * (m + 1) + 2)) +
@@ -644,9 +626,6 @@ def machine (d : Nat) (hd : 0 < d) : FinTM2 where
   initialState := (((), false), none)
   m := program d hd
 
-theorem alphabet_finite (d : Nat) (hd : 0 < d) : ∀ k, Finite ((machine d hd).Γ k) := by
-  intro k
-  exact inferInstanceAs (Finite Bool)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineVertexPadding
 

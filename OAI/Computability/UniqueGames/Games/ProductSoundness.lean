@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Games.ProductLemmas
 import OAI.Computability.UniqueGames.Repetition.AnalyticCheegerLemmas
 import OAI.Computability.UniqueGames.Repetition.TensorAlgebraLemmas
@@ -23,27 +24,6 @@ variable {L R E A : Type*}
   [Fintype L] [Fintype R] [Fintype E] [Fintype A]
   [Nonempty E] [Nonempty A]
 
-theorem product_soundness_rate (G : BipartiteGame L R E A) (t : ℕ)
-    (hvalue : G.toGame.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.product t).toGame.value ≤ (1 - (1 : ℝ) / 10240000) ^ t := by
-  rw [product_value_eq_repetition]
-  exact UniqueGamesTheorem.Repetition.final_repetition_value
-    G.toGame G.toGame_isProjection t hvalue
-
-theorem product_soundness (G : BipartiteGame L R E A) (t : ℕ) {δ : ℝ}
-    (hcount : (1 - (1 : ℝ) / 10240000) ^ t ≤ δ)
-    (hvalue : G.toGame.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.product t).toGame.value ≤ δ :=
-  (G.product_soundness_rate t hvalue).trans hcount
-
-theorem product_explicit_soundness [DecidableEq A]
-    (G : BipartiteGame L R E A) (t : ℕ) {δ : ℝ}
-    (hcount : (1 - (1 : ℝ) / 10240000) ^ t ≤ δ)
-    (hvalue : G.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.product t).value ≤ δ := by
-  classical
-  rw [← toGame_value]
-  exact G.product_soundness t hcount (by simpa only [toGame_value] using hvalue)
 
 end
 
@@ -51,28 +31,6 @@ noncomputable section
 
 variable {L R E : Type*} [Fintype L] [Fintype R] [Fintype E] [Nonempty E]
 
-theorem binaryProduct_soundness_rate {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ)
-    (hvalue : G.toGame.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.binaryProduct t).toGame.value ≤ (1 - (1 : ℝ) / 10240000) ^ t := by
-  rw [binaryProduct_value_eq_repetition]
-  exact UniqueGamesTheorem.Repetition.final_repetition_value
-    G.toGame G.toGame_isProjection t hvalue
-
-theorem binaryProduct_soundness {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ) {δ : ℝ}
-    (hcount : (1 - (1 : ℝ) / 10240000) ^ t ≤ δ)
-    (hvalue : G.toGame.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.binaryProduct t).toGame.value ≤ δ :=
-  (G.binaryProduct_soundness_rate t hvalue).trans hcount
-
-theorem binaryProduct_explicit_soundness {ell : ℕ}
-    (G : BipartiteGame L R E (Fin ell → ZMod 2)) (t : ℕ) {δ : ℝ}
-    (hcount : (1 - (1 : ℝ) / 10240000) ^ t ≤ δ)
-    (hvalue : G.value ≤ 1 - (1 : ℝ) / 800) :
-    (G.binaryProduct t).value ≤ δ := by
-  rw [← toGame_value]
-  exact G.binaryProduct_soundness t hcount (by simpa only [toGame_value] using hvalue)
 
 end
 

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.Fin.Tuple.Basic
 import Mathlib.Logic.Equiv.Fin.Basic
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
@@ -78,31 +79,18 @@ def recordsList {k s d : Nat} (a : Fin k → Fin 3 → Ambient s d)
 
 theorem recordsList_length {k s d : Nat} (a : Fin k → Fin 3 → Ambient s d)
     (positions : List (Fin k)) : (recordsList a positions).length = 9 * positions.length := by
-  induction positions with
-  | nil => rfl
-  | cons j positions ih =>
-    change (liftRecord j (CanonicalWordTemplate.template (a j)) ++
-      recordsList a positions).length = 9 * (positions.length + 1)
-    rw [List.length_append, liftRecord_length, CanonicalWordTemplate.template_length, ih]
-    omega
+  simp [recordsList, List.length_flatMap, List.map_const', Nat.mul_comm]
 
 theorem eval_recordsList {n m k s d : Nat} (occ : Fin k → Fin m)
     (names : Fin m → Fin 3 → Fin n) (a : Fin k → Fin 3 → Ambient s d)
     (positions : List (Fin k)) :
     evalTemplate (sourceFields occ names) (recordsList a positions) =
       (positions.map (fun j => ActualCanonical.record names (occ j) (a j))).flatMap recordWords := by
-  induction positions with
-  | nil => rfl
-  | cons j positions ih =>
-    change
-      evalTemplate (sourceFields occ names)
-          (liftRecord j (CanonicalWordTemplate.template (a j)) ++ recordsList a positions) =
-        recordWords (ActualCanonical.record names (occ j) (a j)) ++
-          (positions.map (fun i => ActualCanonical.record names (occ i) (a i))).flatMap recordWords
-    rw [show ∀ xs ys, evalTemplate (sourceFields occ names) (xs ++ ys) =
-      evalTemplate (sourceFields occ names) xs ++ evalTemplate (sourceFields occ names) ys by
-      intro xs ys; exact List.map_append]
-    rw [eval_liftRecord, CanonicalWordTemplate.eval_template, ih]
+  simp only [evalTemplate, recordsList, List.map_flatMap, List.flatMap_map]
+  apply List.flatMap_congr
+  intro j _
+  change evalTemplate (sourceFields occ names) (liftRecord j _) = _
+  rw [eval_liftRecord, CanonicalWordTemplate.eval_template]
 
 def ambientShift {k s d : Nat} (z : Ambient s d)
     (a : Fin k → Fin 3 → Ambient s d) (b : Fin k → F2) : Ambient s d :=
@@ -136,11 +124,6 @@ theorem eval_data {n m k s d : Nat} (occ : Fin k → Fin m)
   rw [eval_recordsList, List.map_ofFn]
   rfl
 
-theorem alphabetOffset_data {n m k s d : Nat} (occ : Fin k → Fin m)
-    (names : Fin m → Fin 3 → Fin n) (rhs : Fin m → F2)
-    (z : Ambient s d) (a : Fin k → Fin 3 → Ambient s d) :
-    alphabetOffset z a (fun j => rhs (occ j)) =
-      (ActualCanonical.data occ names rhs z a).1.1 := rfl
 
 theorem eval_canonical {n m k s d : Nat} (occ : Fin k → Fin m)
     (names : Fin m → Fin 3 → Fin n) (rhs : Fin m → F2)
@@ -152,33 +135,6 @@ theorem eval_canonical {n m k s d : Nat} (occ : Fin k → Fin m)
         (ActualCanonical.canonical occ names rhs X).2) :=
   eval_data occ names rhs _ _
 
-theorem alphabetOffset_canonical {n m k s d : Nat} (occ : Fin k → Fin m)
-    (names : Fin m → Fin 3 → Fin n) (rhs : Fin m → F2)
-    (X : ActualHomogeneous.E k →ₗ[F2] Ambient s d) :
-    alphabetOffset (X (ActualHomogeneous.hBasis k)) (ActualCanonical.standardTriple X)
-        (fun j => rhs (occ j)) =
-      (ActualCanonical.canonical occ names rhs X).1.1 := rfl
-
-/-- The finite coefficient table's three coefficients for each local record. -/
-def coefficientTriples {k s d : Nat} (c : ActualEnumeration.Coefficients k (Ambient s d))
-    (j : Fin k) : Fin 3 → Ambient s d :=
-  ![(c.2 j).1, (c.2 j).2, 0]
-
-theorem fromCoefficients_hBasis {k s d : Nat}
-    (c : ActualEnumeration.Coefficients k (Ambient s d)) :
-    ActualEnumeration.fromCoefficients k (Ambient s d) c (ActualHomogeneous.hBasis k) = c.1 :=
-  congrArg Prod.fst (ActualEnumeration.to_fromCoefficients k (Ambient s d) c)
-
-theorem standardTriple_fromCoefficients {k s d : Nat}
-    (c : ActualEnumeration.Coefficients k (Ambient s d)) :
-    ActualCanonical.standardTriple (ActualEnumeration.fromCoefficients k (Ambient s d) c) =
-      coefficientTriples c := by
-  have h := ActualEnumeration.to_fromCoefficients k (Ambient s d) c
-  funext j i
-  fin_cases i
-  · exact congrArg (fun p : ActualEnumeration.Coefficients k (Ambient s d) => (p.2 j).1) h
-  · exact congrArg (fun p : ActualEnumeration.Coefficients k (Ambient s d) => (p.2 j).2) h
-  · rfl
 
 theorem eval_actualQuery (S : ActualSource.Source) {k s d : Nat}
     (q : ActualGame.Query S k s d) :
@@ -188,42 +144,6 @@ theorem eval_actualQuery (S : ActualSource.Source) {k s d : Nat}
       bodyWords (ActualOrbit.body (ActualGame.canonical S k s d) q) :=
   eval_canonical q.1 (ActualGame.names S) (ActualGame.rhs S) q.2
 
-theorem alphabetOffset_actualQuery (S : ActualSource.Source) {k s d : Nat}
-    (q : ActualGame.Query S k s d) :
-    alphabetOffset (q.2 (ActualHomogeneous.hBasis k)) (ActualCanonical.standardTriple q.2)
-        (fun j => ActualGame.rhs S (q.1 j)) =
-      ActualGame.offset S k s d q := rfl
-
-/-- Direct specialization to an actual enumerated coefficient table. -/
-theorem eval_fromCoefficients (S : ActualSource.Source) {k s d : Nat}
-    (occ : ActualGame.Question S k) (c : ActualEnumeration.Coefficients k (Ambient s d)) :
-    evalTemplate (sourceFields occ (ActualGame.names S))
-        (template c.1 (coefficientTriples c) (fun j => ActualGame.rhs S (occ j))) =
-      bodyWords (ActualOrbit.body (ActualGame.canonical S k s d)
-        (occ, ActualEnumeration.fromCoefficients k (Ambient s d) c)) := by
-  simpa only [fromCoefficients_hBasis, standardTriple_fromCoefficients] using
-    eval_actualQuery S (occ, ActualEnumeration.fromCoefficients k (Ambient s d) c)
-
-theorem alphabetOffset_fromCoefficients (S : ActualSource.Source) {k s d : Nat}
-    (occ : ActualGame.Question S k) (c : ActualEnumeration.Coefficients k (Ambient s d)) :
-    alphabetOffset c.1 (coefficientTriples c) (fun j => ActualGame.rhs S (occ j)) =
-      ActualGame.offset S k s d
-        (occ, ActualEnumeration.fromCoefficients k (Ambient s d) c) := by
-  simpa only [fromCoefficients_hBasis, standardTriple_fromCoefficients] using
-    alphabetOffset_actualQuery S (occ, ActualEnumeration.fromCoefficients k (Ambient s d) c)
-
-/-- Both permutation offsets of an actual edge are the same finite expressions
-used by the corresponding canonical-body templates. -/
-theorem actualEdge_permutation (S : ActualSource.Source) (k : Nat) {s d : Nat}
-    (g : ActualSource.SplitGadget s d) (omega : ActualGame.Outcome S k g) :
-    (ActualGame.edge S k g omega).permutation =
-      Encoding.translationTable
-        (alphabetOffset ((ActualGame.leftQuery S k g omega).2 (ActualHomogeneous.hBasis k))
-          (ActualCanonical.standardTriple (ActualGame.leftQuery S k g omega).2)
-          (fun j => ActualGame.rhs S ((ActualGame.leftQuery S k g omega).1 j)))
-        (alphabetOffset ((ActualGame.rightQuery S k g omega).2 (ActualHomogeneous.hBasis k))
-          (ActualCanonical.standardTriple (ActualGame.rightQuery S k g omega).2)
-          (fun j => ActualGame.rhs S ((ActualGame.rightQuery S k g omega).1 j))) := rfl
 
 theorem flatMap_encodeWord (fields : Fin k → Fin 4 → Nat) (tokens : List (Token k)) :
     tokens.flatMap (fun token => encodeWord (evalToken fields token)) =
@@ -234,14 +154,6 @@ theorem flatMap_encodeWord (fields : Fin k → Fin 4 → Nat) (tokens : List (To
     simp only [List.flatMap_cons, evalTemplate, List.map_cons, encodeWords]
     exact congrArg (List.append (encodeWord (evalToken fields token))) ih
 
-theorem actualQuery_bits (S : ActualSource.Source) {k s d : Nat}
-    (q : ActualGame.Query S k s d) :
-    (template (q.2 (ActualHomogeneous.hBasis k)) (ActualCanonical.standardTriple q.2)
-        (fun j => ActualGame.rhs S (q.1 j))).flatMap
-          (fun token => encodeWord (evalToken (sourceFields q.1 (ActualGame.names S)) token)) =
-      CanonicalEncoding.bodyBits (ActualOrbit.body (ActualGame.canonical S k s d) q) := by
-  rw [flatMap_encodeWord, eval_actualQuery]
-  rfl
 
 end UniqueGamesTheorem.Reduction.CanonicalBodyTemplate
 
@@ -312,34 +224,6 @@ def template {k s d : Nat} (z : Ambient s d) (a : Fin k → Fin 3 → Ambient s 
     (template z a b).length = 1 + 9*k := by
   simp [template]
 
-theorem templateOutput_data {n m k s d : Nat} (occ : Fin k → Fin m)
-    (names : Fin m → Fin 3 → Fin n) (rhs : Fin m → F2)
-    (z : Ambient s d) (a : Fin k → Fin 3 → Ambient s d) :
-    MachineFieldTemplate.templateOutput (template z a (fun j => rhs (occ j)))
-        (savedFields (CanonicalBodyTemplate.sourceFields occ names)) =
-      encodeWords (bodyWords ((ActualCanonical.data occ names rhs z a).1.2,
-        (ActualCanonical.data occ names rhs z a).2)) := by
-  rw [template, templateOutput_lowerTemplate, CanonicalBodyTemplate.eval_data]
-
-theorem templateOutput_actualQuery (S : ActualSource.Source) {k s d : Nat}
-    (q : ActualGame.Query S k s d) :
-    MachineFieldTemplate.templateOutput
-        (template (q.2 (ActualHomogeneous.hBasis k)) (ActualCanonical.standardTriple q.2)
-          (fun j => ActualGame.rhs S (q.1 j)))
-        (savedFields (CanonicalBodyTemplate.sourceFields q.1 (ActualGame.names S))) =
-      encodeWords (bodyWords (ActualOrbit.body (ActualGame.canonical S k s d) q)) := by
-  rw [template, templateOutput_lowerTemplate, CanonicalBodyTemplate.eval_actualQuery]
-
-/-- Exact output using the finite coefficient table directly as program data. -/
-theorem templateOutput_fromCoefficients (S : ActualSource.Source) {k s d : Nat}
-    (occ : ActualGame.Question S k) (c : ActualEnumeration.Coefficients k (Ambient s d)) :
-    MachineFieldTemplate.templateOutput
-        (template c.1 (CanonicalBodyTemplate.coefficientTriples c)
-          (fun j => ActualGame.rhs S (occ j)))
-        (savedFields (CanonicalBodyTemplate.sourceFields occ (ActualGame.names S))) =
-      encodeWords (bodyWords (ActualOrbit.body (ActualGame.canonical S k s d)
-        (occ, ActualEnumeration.fromCoefficients k (Ambient s d) c))) := by
-  rw [template, templateOutput_lowerTemplate, CanonicalBodyTemplate.eval_fromCoefficients]
 
 end UniqueGamesTheorem.Reduction.CanonicalBodyMachine
 
@@ -368,16 +252,6 @@ def readCoordinates {m k : Nat} (digits : Fin k → Fin m) : Fin k → Fin m :=
 @[simp] theorem readCoordinates_apply {m k : Nat} (digits : Fin k → Fin m) (j : Fin k) :
     readCoordinates digits j = digits j.rev := rfl
 
-@[simp] theorem readCoordinates_involutive {m k : Nat} (digits : Fin k → Fin m) :
-    readCoordinates (readCoordinates digits) = digits := by
-  funext j
-  simp only [readCoordinates_apply, Fin.rev_rev]
-
-def coordinateEquiv (m k : Nat) : (Fin k → Fin m) ≃ (Fin k → Fin m) where
-  toFun := readCoordinates
-  invFun := readCoordinates
-  left_inv := readCoordinates_involutive
-  right_inv := readCoordinates_involutive
 
 theorem readCoordinates_snoc {m k : Nat} (tail : Fin k → Fin m) (d : Fin m) :
     readCoordinates (Fin.snoc tail d) = Fin.cons d (readCoordinates tail) :=
@@ -410,12 +284,6 @@ theorem tupleOrder_readCoordinates (m k : Nat) :
     simp only [ActualEnumeration.functions, Explicit.pairs, List.map_flatMap,
       List.map_map, Function.comp_def]
 
-theorem functions_readCoordinates (m k : Nat) :
-    (ActualEnumeration.functions (List.finRange m) k).map readCoordinates =
-      MachineTupleOdometer.tupleOrder m k := by
-  have h := congrArg (List.map readCoordinates) (tupleOrder_readCoordinates m k)
-  simpa only [List.map_map, Function.comp_def, readCoordinates_involutive,
-    List.map_id_fun', id_eq] using h.symm
 
 /-- An arbitrary exact emitted list, including serialized edge bytes, inherits
 the order identity. There is no permutation or counting-only replacement. -/
@@ -425,33 +293,6 @@ theorem functions_flatMap (m k : Nat) (emit : (Fin k → Fin m) → List α) :
         (fun digits => emit (readCoordinates digits)) := by
   rw [← tupleOrder_readCoordinates]
   exact List.flatMap_map readCoordinates emit _
-
-section ActualSchedule
-
-variable {K Λ σ : Type} [DecidableEq K]
-  {m k : Nat} {current remaining : Nat → K} {bodyLabel : Λ}
-  {checkLabel resetLabel : Nat → Λ}
-  {program : Λ → TM2.Stmt (MachineTupleOdometer.Alphabet (K := K)) Λ (σ × Option Bool)}
-  {exitLabel : Λ} {start finish : MachineTupleOdometer.Configuration K Λ σ}
-
-/-- Apply the coordinate readout to an existing actual odometer schedule.
-Its visit-order theorem already follows from the real nested-cycle constructors. -/
-theorem actualSchedule_order
-    (tree : MachineTupleOdometer.NestedCycle m current remaining bodyLabel
-      checkLabel resetLabel program k exitLabel start finish) :
-    tree.order.map readCoordinates = ActualEnumeration.functions (List.finRange m) k := by
-  rw [MachineTupleOdometer.NestedCycle.order_eq_tupleOrder, tupleOrder_readCoordinates]
-
-theorem actualSchedule_flatMap
-    (tree : MachineTupleOdometer.NestedCycle m current remaining bodyLabel
-      checkLabel resetLabel program k exitLabel start finish)
-    (emit : (Fin k → Fin m) → List α) :
-    (ActualEnumeration.functions (List.finRange m) k).flatMap emit =
-      tree.order.flatMap (fun digits => emit (readCoordinates digits)) := by
-  rw [MachineTupleOdometer.NestedCycle.order_eq_tupleOrder]
-  exact functions_flatMap m k emit
-
-end ActualSchedule
 
 end UniqueGamesTheorem.Reduction.OccurrenceTupleOrder
 
@@ -551,10 +392,6 @@ def decodeInputBits (bits : List Bool) : Option Input :=
     decodeInputBits (inputBits input) = some input := by
   simp [decodeInputBits, inputBits]
 
-theorem inputWords_injective {first second : Input}
-    (same : inputWords first = inputWords second) : first = second := by
-  have parsed := congrArg decodeInputWords same
-  simpa only [decodeInputWords_encoded, Option.some.injEq] using parsed
 
 theorem inputBits_injective {first second : Input}
     (same : inputBits first = inputBits second) : first = second := by
@@ -566,12 +403,7 @@ theorem inputBits_injective {first second : Input}
 
 theorem equationsWords_length {n : Nat} (equations : List (CloneGap.Equation (Fin n))) :
     (equations.flatMap equationWords).length = 4 * equations.length := by
-  induction equations with
-  | nil => rfl
-  | cons e equations ih =>
-      simp only [List.flatMap_cons, List.length_append, equationWords_length,
-        List.length_cons, ih, Nat.mul_add, Nat.mul_one]
-      omega
+  simp [List.length_flatMap, List.map_const', Nat.mul_comm]
 
 @[simp] theorem inputWords_length (input : Input) :
     (inputWords input).length = 2 + 4 * input.equations.length := by
@@ -588,13 +420,10 @@ theorem equationBits_length_le {n : Nat} (e : CloneGap.Equation (Fin n)) :
 theorem equationsBits_length_le {n : Nat} (equations : List (CloneGap.Equation (Fin n))) :
     (encodeWords (equations.flatMap equationWords)).length ≤
       equations.length * (3 * n + 2) := by
-  induction equations with
-  | nil => simp [encodeWords]
-  | cons e equations ih =>
-      have he := equationBits_length_le e
-      simp only [List.flatMap_cons, encodeWords_append, List.length_append,
-        List.length_cons, Nat.add_mul, Nat.one_mul]
-      omega
+  rw [encodeWords_flatMap, List.length_flatMap]
+  simpa only [List.map_const', List.sum_replicate, nsmul_eq_mul, Nat.cast_id] using
+    (List.sum_le_sum (l := equations) (g := fun _ => 3 * n + 2)
+      (fun e _ => equationBits_length_le e))
 
 theorem inputBits_length (input : Input) :
     (inputBits input).length = input.variables + input.equations.length + 2 +

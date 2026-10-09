@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Lean.Elab.Tactic.Omega
 import Mathlib.Algebra.CharP.Two
 import Mathlib.Algebra.Field.Basic
@@ -128,160 +129,22 @@ section
 /-!
 # Finite-field polynomial exceptional events
 
-The nonzero polynomial obstruction for each fixed input set gives a uniform
-bound over all linear lifts.  Its coefficients lie in the binary prime field,
-so its degree is fixed before the extension field is chosen.  The theorems
-below keep this order explicit and combine finitely many obstructions without
-any union over maps.
+A fixed nonzero polynomial bounds any exceptional event contained in its zero
+set. Reindex just once at the Schwartz-Zippel boundary, which is stated for
+`Fin n`; all project probabilities use their actual finite variable type.
 -/
 
 namespace UniqueGamesTheorem.Quadratic
 
-open scoped BigOperators
-
 noncomputable section
 
-variable {K F : Type*} [Field K] [Field F] [Fintype F]
-
-/-- The exact uniform probability on an explicit finite assignment space. -/
-def assignmentProbability {n : ℕ} (event : (Fin n → F) → Prop) : ℚ≥0 := by
-  classical
-  exact ((Finset.univ.filter event).card : ℚ≥0) / (Fintype.card F : ℚ≥0) ^ n
-
-omit [Field F] in
-theorem assignmentProbability_mono {n : ℕ}
-    {event event' : (Fin n → F) → Prop} (h : ∀ x, event x → event' x) :
-    assignmentProbability event ≤ assignmentProbability event' := by
-  classical
-  apply div_le_div_of_nonneg_right _ zero_le
-  exact_mod_cast Finset.card_le_card
-    (show Finset.univ.filter event ⊆ Finset.univ.filter event' from by
-      intro x hx
-      exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, h x (Finset.mem_filter.mp hx).2⟩)
-
-/-- The checked Schwartz-Zippel theorem on the whole finite field. -/
-theorem assignmentProbability_eval_zero_le {n : ℕ}
-    (p : MvPolynomial (Fin n) F) (hp : p ≠ 0) :
-    assignmentProbability (fun x => MvPolynomial.eval x p = 0) ≤
-      (p.totalDegree : ℚ≥0) / Fintype.card F := by
-  classical
-  simpa [assignmentProbability] using
-    MvPolynomial.schwartz_zippel_totalDegree hp (Finset.univ : Finset F)
-
-omit [Fintype F] in
-/-- Injective coefficient extension preserves the total degree exactly. -/
-theorem totalDegree_map_eq_of_injective {σ : Type*}
-    (φ : K →+* F) (hφ : Function.Injective φ) (p : MvPolynomial σ K) :
-    (MvPolynomial.map φ p).totalDegree = p.totalDegree := by
-  classical
-  unfold MvPolynomial.totalDegree
-  rw [MvPolynomial.support_map_of_injective p hφ]
-
-/-- A prime-field polynomial gives the same fixed numerator in every finite
-extension field.  Only the denominator grows with the field size. -/
-theorem assignmentProbability_eval₂_zero_le {n : ℕ}
-    (φ : K →+* F) (hφ : Function.Injective φ)
-    (p : MvPolynomial (Fin n) K) (hp : p ≠ 0) :
-    assignmentProbability (fun x => MvPolynomial.eval₂ φ x p = 0) ≤
-      (p.totalDegree : ℚ≥0) / Fintype.card F := by
-  have hp' : MvPolynomial.map φ p ≠ 0 := by
-    intro hz
-    apply hp
-    apply MvPolynomial.map_injective φ hφ
-    simpa using hz
-  have h := assignmentProbability_eval_zero_le (MvPolynomial.map φ p) hp'
-  simpa only [← MvPolynomial.eval₂_eq_eval_map,
-    totalDegree_map_eq_of_injective φ hφ] using h
-
-/-- An exceptional event contained in a polynomial zero set satisfies the
-same bound, including events expressed by existence of an arbitrary lift. -/
-theorem assignmentProbability_le_of_polynomial {n : ℕ}
-    (φ : K →+* F) (hφ : Function.Injective φ)
-    (p : MvPolynomial (Fin n) K) (hp : p ≠ 0)
-    (event : (Fin n → F) → Prop)
-    (hvanish : ∀ x, event x → MvPolynomial.eval₂ φ x p = 0) :
-    assignmentProbability event ≤ (p.totalDegree : ℚ≥0) / Fintype.card F :=
-  (assignmentProbability_mono hvanish).trans
-    (assignmentProbability_eval₂_zero_le φ hφ p hp)
-
-/-- A fixed finite family of exceptional events admits a single fixed-degree
-bound.  There is still no enumeration or union over the possible lifts. -/
-theorem assignmentProbability_union_le {n : ℕ} {J : Type*} [Fintype J]
-    (φ : K →+* F) (hφ : Function.Injective φ)
-    (p : J → MvPolynomial (Fin n) K) (hp : ∀ j, p j ≠ 0)
-    (event : J → (Fin n → F) → Prop)
-    (hvanish : ∀ j x, event j x → MvPolynomial.eval₂ φ x (p j) = 0) :
-    assignmentProbability (fun x => ∃ j, event j x) ≤
-      ((∑ j, (p j).totalDegree : ℕ) : ℚ≥0) / Fintype.card F := by
-  classical
-  let P : MvPolynomial (Fin n) K := ∏ j, p j
-  have hP : P ≠ 0 := Finset.prod_ne_zero_iff.mpr (fun j _ => hp j)
-  have hvanishP : ∀ x, (∃ j, event j x) → MvPolynomial.eval₂ φ x P = 0 := by
-    intro x hx
-    obtain ⟨j, hj⟩ := hx
-    change (MvPolynomial.eval₂Hom φ x) P = 0
-    simp only [P, map_prod]
-    exact Finset.prod_eq_zero (Finset.mem_univ j) (hvanish j x hj)
-  have hbound := assignmentProbability_le_of_polynomial φ hφ P hP _ hvanishP
-  apply hbound.trans
-  apply div_le_div_of_nonneg_right _ zero_le
-  exact_mod_cast MvPolynomial.totalDegree_finsetProd Finset.univ p
-
-end
-
-end UniqueGamesTheorem.Quadratic
-
-end
-
-section
-
-/-!
-# Polynomial exceptional events on arbitrary finite variable sets
-
-Reindexing the variable set transports both the polynomial and the uniform
-assignment space. Thus the checked finite-field zero bound applies directly
-to the three-by-r variables in the genericity proof, without changing the
-degree or taking a union over possible linear lifts.
--/
-
-namespace UniqueGamesTheorem.Quadratic
-
-open scoped BigOperators
-
-noncomputable section
-
-variable {σ τ K F : Type*} [Field K] [Field F] [Fintype F]
-
-/-- Reindexing an assignment transports it contravariantly along the variable
-equivalence. -/
-def reindexAssignments (e : σ ≃ τ) : (σ → F) ≃ (τ → F) where
-  toFun x := fun t => x (e.symm t)
-  invFun y := fun s => y (e s)
-  left_inv x := by funext s; simp
-  right_inv y := by funext t; simp
+variable {σ K F : Type*} [Field K] [Field F] [Fintype F]
 
 /-- Uniform assignment probability for an arbitrary finite variable set. -/
 def finiteAssignmentProbability [Fintype σ] (event : (σ → F) → Prop) : ℚ≥0 := by
   classical
   exact ((Finset.univ.filter event).card : ℚ≥0) /
     (Fintype.card F : ℚ≥0) ^ Fintype.card σ
-
-omit [Field F] in
-theorem finiteAssignmentProbability_reindex [Fintype σ] {n : ℕ}
-    (e : σ ≃ Fin n) (event : (σ → F) → Prop) :
-    finiteAssignmentProbability event =
-      assignmentProbability (fun y : Fin n → F => event (fun s => y (e s))) := by
-  classical
-  have hcard : Fintype.card σ = n := by simpa using Fintype.card_congr e
-  have hevent (x : σ → F) :
-      event x ↔ event (fun s => reindexAssignments e x (e s)) := by
-    simp [reindexAssignments]
-  have hsub := Fintype.card_congr ((reindexAssignments (F := F) e).subtypeEquiv
-    (p := event) (q := fun y : Fin n → F => event (fun s => y (e s))) hevent)
-  have hfilter : (Finset.univ.filter event).card =
-      (Finset.univ.filter (fun y : Fin n → F => event (fun s => y (e s)))).card := by
-    simpa only [Fintype.card_subtype] using hsub
-  simp only [finiteAssignmentProbability, assignmentProbability, hfilter, hcard]
 
 /-- A bad event contained in a fixed nonzero polynomial's zero set has
 probability at most its total degree divided by the field size. -/
@@ -292,55 +155,40 @@ theorem finiteAssignmentProbability_le_of_polynomial [Fintype σ]
     (hvanish : ∀ x, event x → MvPolynomial.eval₂ φ x p = 0) :
     finiteAssignmentProbability event ≤ (p.totalDegree : ℚ≥0) / Fintype.card F := by
   classical
-  let e : σ ≃ Fin (Fintype.card σ) := Fintype.equivFin σ
-  let p' := MvPolynomial.renameEquiv K e p
-  have hp' : p' ≠ 0 := by
-    intro h
-    apply hp
-    apply (MvPolynomial.renameEquiv K e).injective
-    simpa only [map_zero] using h
-  rw [finiteAssignmentProbability_reindex e event]
-  have hbound := assignmentProbability_le_of_polynomial φ hφ p' hp'
-    (fun y => event (fun s => y (e s))) (by
-      intro y hy
-      change MvPolynomial.eval₂ φ y (MvPolynomial.rename e p) = 0
-      rw [MvPolynomial.eval₂_rename]
-      exact hvanish (fun s => y (e s)) hy)
-  simpa only [p', MvPolynomial.totalDegree_renameEquiv] using hbound
-
-theorem finiteAssignmentProbability_eval₂_zero_le [Fintype σ]
-    (φ : K →+* F) (hφ : Function.Injective φ)
-    (p : MvPolynomial σ K) (hp : p ≠ 0) :
-    finiteAssignmentProbability (fun x => MvPolynomial.eval₂ φ x p = 0) ≤
-      (p.totalDegree : ℚ≥0) / Fintype.card F :=
-  finiteAssignmentProbability_le_of_polynomial φ hφ p hp _ (fun _ h => h)
-
-/-- A finite family of input-set obstructions yields a fixed total numerator.
-The family index is independent of the chosen linear lift. -/
-theorem finiteAssignmentProbability_union_le [Fintype σ] {J : Type*} [Fintype J]
-    (φ : K →+* F) (hφ : Function.Injective φ)
-    (p : J → MvPolynomial σ K) (hp : ∀ j, p j ≠ 0)
-    (event : J → (σ → F) → Prop)
-    (hvanish : ∀ j x, event j x → MvPolynomial.eval₂ φ x (p j) = 0) :
-    finiteAssignmentProbability (fun x => ∃ j, event j x) ≤
-      ((∑ j, (p j).totalDegree : ℕ) : ℚ≥0) / Fintype.card F := by
-  classical
-  let e : σ ≃ Fin (Fintype.card σ) := Fintype.equivFin σ
-  let p' : J → MvPolynomial (Fin (Fintype.card σ)) K :=
-    fun j => MvPolynomial.renameEquiv K e (p j)
-  have hp' (j : J) : p' j ≠ 0 := by
-    intro h
-    apply hp j
-    apply (MvPolynomial.renameEquiv K e).injective
-    simpa only [map_zero] using h
-  rw [finiteAssignmentProbability_reindex e]
-  have hbound := assignmentProbability_union_le φ hφ p' hp'
-    (fun j y => event j (fun s => y (e s))) (by
-      intro j y hy
-      change MvPolynomial.eval₂ φ y (MvPolynomial.rename e (p j)) = 0
-      rw [MvPolynomial.eval₂_rename]
-      exact hvanish j (fun s => y (e s)) hy)
-  simpa only [p', MvPolynomial.totalDegree_renameEquiv] using hbound
+  let e := Fintype.equivFin σ
+  let q := MvPolynomial.renameEquiv F e (MvPolynomial.map φ p)
+  have hq : q ≠ 0 :=
+    (MvPolynomial.renameEquiv F e).injective.ne
+      ((MvPolynomial.map_injective φ hφ).ne hp)
+  have hdegree : q.totalDegree = p.totalDegree := by
+    rw [MvPolynomial.totalDegree_renameEquiv]
+    unfold MvPolynomial.totalDegree
+    rw [MvPolynomial.support_map_of_injective p hφ]
+  let E : (σ → F) ≃ (Fin (Fintype.card σ) → F) := Equiv.arrowCongr e (Equiv.refl F)
+  have heval (y : Fin (Fintype.card σ) → F) :
+      MvPolynomial.eval y q = MvPolynomial.eval₂ φ (fun s => y (e s)) p := by
+    simp [q, MvPolynomial.eval_rename, Function.comp_def]
+  have hcount : (Finset.univ.filter event).card =
+      (Finset.univ.filter (fun y => event (E.symm y))).card := by
+    simpa only [Fintype.card_subtype] using
+      Fintype.card_congr (E.subtypeEquiv
+        (p := event) (q := fun y => event (E.symm y)) (fun _ => by simp))
+  have hsub : Finset.univ.filter (fun y => event (E.symm y)) ⊆
+      Finset.univ.filter (fun y => MvPolynomial.eval y q = 0) := by
+    intro y hy
+    refine Finset.mem_filter.mpr ⟨Finset.mem_univ _, ?_⟩
+    rw [heval]
+    exact hvanish (E.symm y) (Finset.mem_filter.mp hy).2
+  calc
+    finiteAssignmentProbability event ≤
+        ((Finset.univ.filter (fun y => MvPolynomial.eval y q = 0)).card : ℚ≥0) /
+          (Fintype.card F : ℚ≥0) ^ Fintype.card σ := by
+      unfold finiteAssignmentProbability
+      rw [hcount]
+      exact div_le_div_of_nonneg_right (by exact_mod_cast Finset.card_le_card hsub) zero_le
+    _ ≤ (q.totalDegree : ℚ≥0) / Fintype.card F := by
+      simpa using MvPolynomial.schwartz_zippel_totalDegree hq (Finset.univ : Finset F)
+    _ = _ := by rw [hdegree]
 
 end
 
@@ -406,14 +254,6 @@ theorem finrank_ker_le_one_of_nonzero_unique (f : V →ₗ[R] W)
   · exact v.property
   · exact w.property
 
-/-- Consequently the image rank can lose at most one dimension. -/
-theorem finrank_source_le_range_add_one [FiniteDimensional R V]
-    (f : V →ₗ[R] W)
-    (h : ∀ v w : V, v ≠ 0 → w ≠ 0 → f v = 0 → f w = 0 → v = w) :
-    Module.finrank R V ≤ Module.finrank R f.range + 1 := by
-  have hk := finrank_ker_le_one_of_nonzero_unique f h
-  have hr := f.finrank_range_add_finrank_ker
-  omega
 
 variable [Fintype V] [Fintype I] [DecidableEq I]
 
@@ -490,14 +330,6 @@ noncomputable def squareRoot (c : F) : F :=
 @[simp] theorem squareRoot_sq (c : F) : squareRoot c ^ 2 = c :=
   Classical.choose_spec (Finite.surjective_of_injective squareMap_injective c)
 
-@[simp] theorem squareRoot_of_sq (c : F) : squareRoot (c ^ 2) = c := by
-  apply squareMap_injective
-  exact squareRoot_sq _
-
-theorem squareRoot_unique {c r : F} (h : r ^ 2 = c) : r = squareRoot c := by
-  apply squareMap_injective
-  change r ^ 2 = squareRoot c ^ 2
-  rw [h, squareRoot_sq]
 
 end UniqueGamesTheorem.Quadratic
 
@@ -525,50 +357,6 @@ def alignmentEvent (z : V → n → F) (g : V →ₗ[R] (n → F)) (c : V → F)
   classical
   exact Finset.univ.filter (fun v => v ≠ 0 ∧ (∑ i, z v i * g v i) = c v)
 
-/-- Exact finite bad-set reduction.  Its right hand side quantifies only over
-input sets, while column membership already accounts for every linear lift. -/
-theorem all_lifts_bound_iff_subsets (b : Basis ι R V) (z : V → n → F)
-    (c : V → F) (k : ℕ) :
-    (∀ g : V →ₗ[R] (n → F), (alignmentEvent z g c).card ≤ k) ↔
-      ∀ E : Finset V, 0 ∉ E → E.card = k + 1 →
-        (fun e : E => c e) ∉
-          LinearMap.range (alignmentMatrix b (fun e : E => (e : V)) z).mulVecLin := by
-  classical
-  constructor
-  · intro h E hzero hcard hmem
-    obtain ⟨g, hg⟩ := (exists_lift_alignment_iff_mem_range b
-      (fun e : E => (e : V)) z (fun e : E => c e)).mpr hmem
-    have hsubset : E ⊆ alignmentEvent z g c := by
-      intro v hv
-      refine Finset.mem_filter.mpr ⟨Finset.mem_univ _, ?_, hg ⟨v, hv⟩⟩
-      intro hvzero
-      exact hzero (hvzero ▸ hv)
-    have hle := (Finset.card_le_card hsubset).trans (h g)
-    omega
-  · intro h g
-    by_contra hbad
-    have hlarge : k + 1 ≤ (alignmentEvent z g c).card := by omega
-    obtain ⟨E, hsub, hcard⟩ := Finset.exists_subset_card_eq hlarge
-    have hzero : (0 : V) ∉ E := by
-      intro hz
-      have hh := (Finset.mem_filter.mp (hsub hz)).2.1
-      exact hh rfl
-    apply h E hzero hcard
-    apply (exists_lift_alignment_iff_mem_range b
-      (fun e : E => (e : V)) z (fun e : E => c e)).mp
-    refine ⟨g, ?_⟩
-    intro e
-    exact (Finset.mem_filter.mp (hsub e.property)).2.2
-
-theorem all_lifts_bound_of_card_le (z : V → n → F) (c : V → F) (k : ℕ)
-    (hcard : Fintype.card V - 1 ≤ k) (g : V →ₗ[R] (n → F)) :
-    (alignmentEvent z g c).card ≤ k := by
-  classical
-  have hsub : alignmentEvent z g c ⊆ Finset.univ.erase (0 : V) := by
-    intro v hv
-    exact Finset.mem_erase.mpr ⟨(Finset.mem_filter.mp hv).2.1, Finset.mem_univ _⟩
-  have hle := Finset.card_le_card hsub
-  simpa using hle.trans (by simpa using hcard)
 
 end AlignmentEvents
 
@@ -634,31 +422,11 @@ theorem isGeneric_range_of_injective
   have he (v : V) : ((e v : LinearMap.range z) : Fin 3 → F) = z v := rfl
   have hes (s : LinearMap.range z) : z (e.symm s) = (s : Fin 3 → F) :=
     LinearEquiv.ofInjective_symm_apply z s
-  have hzero (v : V) : e v ≠ 0 ↔ v ≠ 0 := by
-    constructor
-    · intro h hv
-      apply h
-      rw [hv, map_zero]
-    · intro h hv
-      apply h
-      apply e.injective
-      simpa only [map_zero] using hv
   constructor
   · intro s t hs ht hprop
-    have hs' : e.symm s ≠ 0 := by
-      intro h
-      apply hs
-      have hh := congrArg e h
-      simpa only [e.apply_symm_apply, map_zero] using hh
-    have ht' : e.symm t ≠ 0 := by
-      intro h
-      apply ht
-      have hh := congrArg e h
-      simpa only [e.apply_symm_apply, map_zero] using hh
-    have hinput : e.symm s = e.symm t := by
-      apply hseparate _ _ hs' ht'
-      simpa only [hes] using hprop
-    exact e.symm.injective hinput
+    apply e.symm.injective
+    apply hseparate _ _ (e.symm.map_ne_zero_iff.mpr hs) (e.symm.map_ne_zero_iff.mpr ht)
+    simpa only [hes] using hprop
   · intro g
     have hevent (v : V) :
         v ∈ alignmentEvent z (g.comp e.toLinearMap)
@@ -666,34 +434,15 @@ theorem isGeneric_range_of_injective
         e v ∈ alignmentEvent (fun s : LinearMap.range z => (s : Fin 3 → F)) g
           (fun s : LinearMap.range z => alignmentRightHandSide (s : Fin 3 → F)) := by
       simp only [alignmentEvent, Finset.mem_filter, Finset.mem_univ, true_and,
-        LinearMap.comp_apply, LinearEquiv.coe_coe, he, hzero]
-    have hcard :
-        (alignmentEvent z (g.comp e.toLinearMap)
-          (fun v => alignmentRightHandSide (z v))).card =
-        (alignmentEvent (fun s : LinearMap.range z => (s : Fin 3 → F)) g
-          (fun s : LinearMap.range z => alignmentRightHandSide (s : Fin 3 → F))).card := by
-      apply Finset.card_bij (fun v _ => e v)
-      · intro v hv
-        exact (hevent v).mp hv
-      · intro v hv w hw h
-        exact e.injective h
-      · intro s hs
-        refine ⟨e.symm s, (hevent (e.symm s)).mpr ?_, e.apply_symm_apply s⟩
-        simpa only [e.apply_symm_apply] using hs
+        LinearMap.comp_apply, LinearEquiv.coe_coe, he, e.map_ne_zero_iff]
     calc
       _ = (alignmentEvent z (g.comp e.toLinearMap)
-          (fun v => alignmentRightHandSide (z v))).card := hcard.symm
+          (fun v => alignmentRightHandSide (z v))).card :=
+        (Finset.card_equiv e.toEquiv hevent).symm
       _ ≤ 3 * Module.finrank (ZMod 2) V := halign _
       _ = 3 * Module.finrank (ZMod 2) (LinearMap.range z) :=
         congrArg (fun d : ℕ => 3 * d) e.finrank_eq
 
-omit [Fintype F] [CharP F 2] in
-/-- In the basis-parametrized case, the image rank is the number of binary
-input coordinates. -/
-theorem finrank_range_binary_parameters {J : Type*} [Fintype J]
-    (z : (J → ZMod 2) →ₗ[ZMod 2] (Fin 3 → F)) (hz : Function.Injective z) :
-    Module.finrank (ZMod 2) (LinearMap.range z) = Fintype.card J := by
-  rw [LinearMap.finrank_range_of_inj hz, Module.finrank_fintype_fun_eq_card]
 
 end
 

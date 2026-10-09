@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Decoding.IncidenceGap
 import OAI.Computability.UniqueGames.PCP.Clone100
 import OAI.Computability.UniqueGames.PCP.TableGapReductionLemmas
@@ -52,7 +53,7 @@ theorem paritySuccess_eq (S : Source) (a : Fin S.variables → Bool) :
     have hb : ∀ x y : Bool, decide (x = y) = (x == y) := by decide
     exact hb _ _
   simp_rw [hevent]
-  rw [IncidenceProbability.expect_bool_indicator_eq_count_ofFn]
+  rw [SourceCounting.expect_bool_indicator_eq_count_ofFn]
   congr 2
   have hm : List.ofFn (S.satisfied a) =
       S.sourceList.map (fun e => CloneGap.satisfied e a) := by
@@ -81,55 +82,6 @@ theorem source_distinct (H : RoundTables.BaseTable) (ξ : ℚ) (hξ : 0 < ξ)
     (F : Formula) : (source H ξ hξ F).DistinctNames :=
   Clone100.clonedSource_distinct (HastadSource.output H ξ hξ F)
 
-theorem source_complete (H : RoundTables.BaseTable) (ξ : ℚ) (hξ : 0 < ξ)
-    (F : Formula) (hF : F.Satisfiable) :
-    ∃ a, 1 - (ξ : ℝ) ≤ paritySuccess (incidence (source H ξ hξ F))
-      (FiniteDistribution.uniform (Fin (source H ξ hξ F).occurrences)) a := by
-  obtain ⟨a, ha⟩ := HastadSource.complete H ξ hξ F hF
-  refine ⟨Clone100.lift a, ?_⟩
-  have hvalue : 1 - ξ ≤ Clone100.success (input H ξ hξ F).equations
-      (Clone100.lift a) := by
-    change 1 - ξ ≤ Clone100.success
-      (Clone100.clonedInput (HastadSource.output H ξ hξ F)).equations (Clone100.lift a)
-    rw [Clone100.completeness]
-    exact ha
-  have hreal : 1 - (ξ : ℝ) ≤
-      (Clone100.success (input H ξ hξ F).equations (Clone100.lift a) : ℝ) := by
-    exact_mod_cast hvalue
-  exact hreal.trans_eq (paritySuccess_input (input H ξ hξ F) (Clone100.lift a)).symm
-
-theorem source_sound (H : RoundTables.BaseTable)
-    (certificate : SpectralReturn.SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (ξ : ℚ) (hξ : 0 < ξ) (hξsmall : ξ < 1 / 100)
-    (F : Formula) (hF : ¬ F.Satisfiable) :
-    parityValue (incidence (source H ξ hξ F))
-      (FiniteDistribution.uniform (Fin (source H ξ hξ F).occurrences)) ≤ 4 / 5 := by
-  unfold parityValue
-  apply Finset.sup'_le
-  intro a _
-  have h := Clone100.soundness_four_fifths (HastadSource.output H ξ hξ F) ξ hξsmall
-    (HastadSource.sound H certificate ξ hξ F hF) a
-  have hq : Clone100.success (input H ξ hξ F).equations a ≤ (4 / 5 : ℚ) := h
-  have hreal : (Clone100.success (input H ξ hξ F).equations a : ℝ) ≤ 4 / 5 := by
-    simpa only [Rat.cast_div, Rat.cast_ofNat] using ((Rat.cast_le (K := ℝ)).mpr hq)
-  exact (paritySuccess_input (input H ξ hξ F) a).trans_le hreal
-
-def ordinaryGame (H : RoundTables.BaseTable) (ξ : ℚ) (hξ : 0 < ξ) (F : Formula) :=
-  fourAnswerGame (incidence (source H ξ hξ F))
-    (FiniteDistribution.uniform (Fin (source H ξ hξ F).occurrences))
-
-theorem ordinaryGame_projection (H : RoundTables.BaseTable) (ξ : ℚ) (hξ : 0 < ξ)
-    (F : Formula) : UniqueGamesTheorem.Repetition.IsProjection (ordinaryGame H ξ hξ F) :=
-  fourAnswerGame_isProjection _ _ (names_distinct _ (source_distinct H ξ hξ F))
-
-theorem ordinaryGame_sound (H : RoundTables.BaseTable)
-    (certificate : SpectralReturn.SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (ξ : ℚ) (hξ : 0 < ξ) (hξsmall : ξ < 1 / 100)
-    (F : Formula) (hF : ¬ F.Satisfiable) :
-    (ordinaryGame H ξ hξ F).value ≤ 14 / 15 :=
-  fourAnswerGame_value_le_fourteen_fifteenths _ _
-    (names_distinct _ (source_distinct H ξ hξ F))
-    (source_sound H certificate ξ hξ hξsmall F hF)
 
 end
 end UniqueGamesTheorem.Outer.SourceIncidence

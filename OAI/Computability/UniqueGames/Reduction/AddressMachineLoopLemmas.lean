@@ -1,5 +1,5 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Reduction.AddressMachineInitial
-import OAI.Computability.UniqueGames.Reduction.AddressOutputSize
 import OAI.Computability.UniqueGames.Reduction.AddressTuplePolynomialLemmas
 import OAI.Computability.UniqueGames.Reduction.CanonicalBodyTemplateLemmas
 
@@ -65,27 +65,11 @@ theorem stateTapes_ready (F : SourceEncoding.Input)
     AddressTupleBody.Ready F (OccurrenceTupleOrder.readCoordinates digits)
       (stateTapes k T F digits output) := by
   constructor
-  · rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_source k T F
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
-  · intro j
-    exact stateTapes_savedIndex k T F digits output j
-  · rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_index k T F
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
-  · rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_work k T F
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
-  · rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_scratch k T F
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
-  · rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_copyScratch k T F
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
-  · intro j slot
-    rw [stateTapes_frame]
-    · exact AddressMachineInitial.initialized_field k T F j slot
-    all_goals simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
+  case saved => exact fun j => stateTapes_savedIndex k T F digits output j
+  all_goals
+    intros
+    rw [stateTapes_frame] <;>
+      simp [AddressMachineSpace.current, AddressMachineSpace.remaining, AddressMachineSpace.headerTape]
 
 theorem stateTapes_clean (F : SourceEncoding.Input)
     (digits : Fin k → Fin F.equations.length) (output : List Bool) :
@@ -112,17 +96,6 @@ theorem stateTapes_base (F : SourceEncoding.Input)
   simp [MachineAddressHeaders.radix, MachineAddressHeaders.baseConstant,
     CanonicalAddress.base_eq, Nat.add_assoc]
 
-theorem stateTapes_capacity (F : SourceEncoding.Input)
-    (digits : Fin k → Fin F.equations.length) (output : List Bool) :
-    stateTapes k T F digits output (AddressMachineSpace.headerTape k s d T.vectors.length .capacity) =
-      encodeWord (AddressGame.bodyCapacity (AddressTupleBody.source F) k s d) := by
-  rw [stateTapes_header _ _ _ _ _ _ (by decide), AddressMachineInitial.initialized_capacity]
-  congr 1
-  change MachineAddressHeaders.capacity k s d F.variables F.equations.length =
-    CanonicalAddress.capacity F.variables F.equations.length k s d
-  simp [MachineAddressHeaders.capacity, MachineAddressHeaders.radix,
-    MachineAddressHeaders.baseConstant, CanonicalAddress.capacity,
-    CanonicalAddress.base_eq, Nat.add_assoc]
 
 /-- Appending actual tuple bytes is exactly the schedule's accumulator update. -/
 theorem appended_stateTapes (F : SourceEncoding.Input)
@@ -150,7 +123,7 @@ theorem bodyTrace (F : SourceEncoding.Input) :
   have actual := AddressTuplePolynomial.run_actual T (AddressMachineProgram.bodyLabels k T) (some (AddressMachineProgram.next k T 0))
     (AddressMachineProgram.program k T) (AddressMachineProgram.atBody k T) F
     (OccurrenceTupleOrder.readCoordinates digits) base ready clean (fun _ => false)
-    (stateTapes_base k T F digits output) (stateTapes_capacity k T F digits output)
+    (stateTapes_base k T F digits output)
   refine ⟨actual.steps, actual.steps_le_m, ?_⟩
   have hemit : MachineAddressEdge.appended (AddressTupleBody.Slots k s d T.vectors.length)
       base (AddressOutcomeSpecs.tupleBits (AddressTupleBody.source F) k T
@@ -166,21 +139,15 @@ theorem setDigits_initialized_zero (F : SourceEncoding.Input) :
     AddressOdometerSchedule.setDigits F.equations.length (fun _ : Fin k => 0)
       (AddressMachineInitial.initialized k T F) = AddressMachineInitial.initialized k T F := by
   funext tape
-  cases tape with
-  | savedIndex j =>
-    rw [AddressOdometerSchedule.setDigits_savedIndex, AddressMachineInitial.initialized_savedIndex]
-  | extra e =>
-    rcases e with e | e
-    · rfl
-    · rcases e with e | e
-      · rfl
-      · rcases e with j | e
-        · change AddressOdometerSchedule.setDigits F.equations.length (fun _ : Fin k => 0)
-            (AddressMachineInitial.initialized k T F) (AddressOdometerSchedule.remaining k s d T.vectors.length j) = _
-          simp only [AddressOdometerSchedule.setDigits_remaining, Fin.isLt, dite_eq_left, Nat.sub_zero]
-          exact (AddressMachineInitial.initialized_remaining k T F j).symm
-        · rfl
-  | _ => rfl
+  apply AddressOdometerSchedule.digitCases tape
+  · intro j
+    rw [AddressOdometerSchedule.setDigits_current, dite_eq_left j.isLt]
+    exact (AddressMachineInitial.initialized_current k T F j).symm
+  · intro j
+    rw [AddressOdometerSchedule.setDigits_remaining, dite_eq_left j.isLt, Nat.sub_zero]
+    exact (AddressMachineInitial.initialized_remaining k T F j).symm
+  · intro tape hc hr
+    exact AddressOdometerSchedule.setDigits_other _ _ _ tape hc hr
 
 def finalTapes (F : SourceEncoding.Input) : AddressMachineProgram.Tape k T → List Bool :=
   (AddressOdometerSchedule.finalConfiguration (AddressMachineProgram.next k T k) (AddressMachineSpace.initialState k).1
@@ -225,7 +192,7 @@ def traversal (F : SourceEncoding.Input) :
 
 /-- Exact output order, including repeated constraints and the original header. -/
 theorem allBits_eq (F : SourceEncoding.Input) :
-    AddressOdometerSchedule.allBits (bits k T F) =
+    Foundations.Hastad.SourceOdometerSchedule.allBits (bits k T F) =
       (FixedOutcomes.occurrenceTuples F.equations.length k).flatMap
         (AddressOutcomeSpecs.tupleBits (AddressTupleBody.source F) k T) := by
   exact (OccurrenceTupleOrder.functions_flatMap F.equations.length k _).symm
@@ -238,7 +205,7 @@ theorem allBits_eq (F : SourceEncoding.Input) :
         F.variables F.equations.length).reverse := by
   change (AddressOdometerSchedule.finalConfiguration _ _ _ _).stk (AddressOdometerSchedule.accumulator _ _ _ _) = _
   rw [AddressOdometerSchedule.final_accumulator]
-  change (AddressOdometerSchedule.allBits (bits k T F)).reverse ++ _ = _
+  change (Foundations.Hastad.SourceOdometerSchedule.allBits (bits k T F)).reverse ++ _ = _
   rw [allBits_eq]
   congr 1
   exact AddressMachineInitial.initialized_reversed k T F
@@ -247,18 +214,21 @@ theorem allBits_eq (F : SourceEncoding.Input) :
 theorem headerBits_eq (F : SourceEncoding.Input) :
     MachineAddressHeaders.Arithmetic.headerBits k s d T.vectors.length
       F.variables F.equations.length =
-      encodeWords [(AddressGame.tableOutput (AddressTupleBody.source F) k T).vertices, 2^s,
-        (AddressGame.tableOutput (AddressTupleBody.source F) k T).constraints.length] := by
+      encodeWords [(Decoder.TableKeysAddressGame.tableOutput (AddressTupleBody.source F) k T).vertices, 2^s,
+        (Decoder.TableKeysAddressGame.tableOutput (AddressTupleBody.source F) k T).constraints.length] := by
   have hcap : MachineAddressHeaders.capacity k s d F.variables F.equations.length =
-      AddressGame.bodyCapacity (AddressTupleBody.source F) k s d := by
+      Decoder.TableKeysAddressGame.vertexCount (AddressTupleBody.source F) k s d := by
     change MachineAddressHeaders.capacity k s d F.variables F.equations.length =
       CanonicalAddress.capacity F.variables F.equations.length k s d
     simp [MachineAddressHeaders.capacity, MachineAddressHeaders.radix,
       MachineAddressHeaders.baseConstant, CanonicalAddress.capacity,
       CanonicalAddress.base_eq, Nat.add_assoc]
   have hedge : MachineAddressHeaders.edgeCount k s d T.vectors.length F.equations.length =
-      (AddressGame.tableOutput (AddressTupleBody.source F) k T).constraints.length := by
-    rw [AddressOutputSize.table_constraints_eq]
+      (Decoder.TableKeysAddressGame.tableOutput (AddressTupleBody.source F) k T).constraints.length := by
+    unfold Decoder.TableKeysAddressGame.tableOutput
+    erw [Decoder.TableKeysAddressGame.outputInstance_length]
+    simp only [TableReduction.tableEnumeration]
+    erw [List.length_finRange]
     change MachineAddressHeaders.edgeCount k s d T.vectors.length F.equations.length =
       Explicit.edgeCount F.equations.length k (s+d) T.vectors.length
     unfold MachineAddressHeaders.edgeCount MachineAddressHeaders.edgeFactor Explicit.edgeCount
@@ -269,7 +239,7 @@ theorem headerBits_eq (F : SourceEncoding.Input) :
 /-- The final reversed tape is exactly the complete encoded actual instance. -/
 theorem final_accumulator (F : SourceEncoding.Input) :
     finalTapes k T F (AddressMachineProgram.accumulator k T) =
-      (gameBits (AddressGame.tableOutput (AddressTupleBody.source F) k T)).reverse := by
+      (gameBits (Decoder.TableKeysAddressGame.tableOutput (AddressTupleBody.source F) k T)).reverse := by
   rw [AddressOutcomeSpecs.gameBits_factor, ← headerBits_eq k T F, List.reverse_append]
   exact final_reversed k T F
 
@@ -290,14 +260,6 @@ theorem final_other (F : SourceEncoding.Input) (tape : AddressMachineProgram.Tap
     exact Ne.symm (AddressMachineSpace.remaining_ne_finalOutput k s d T.vectors.length j)
   · exact Ne.symm (AddressMachineSpace.headerTape_ne_finalOutput k s d T.vectors.length .reversed)
 
-@[simp] theorem final_current (F : SourceEncoding.Input) (j : Fin k) :
-    finalTapes k T F (AddressMachineSpace.current k s d T.vectors.length j) = encodeWord 0 :=
-  AddressOdometerSchedule.final_current _ _ _ _ j
-
-@[simp] theorem final_remaining (F : SourceEncoding.Input) (j : Fin k) :
-    finalTapes k T F (AddressMachineSpace.remaining k s d T.vectors.length j) =
-      encodeWord (F.equations.length-1) :=
-  AddressOdometerSchedule.final_remaining _ _ _ _ j
 
 /-- The exponent and coefficients depend only on fixed reduction parameters. -/
 def timePolynomial : Polynomial Nat :=
@@ -323,7 +285,6 @@ end
 end UniqueGamesTheorem.Reduction.AddressMachineLoop
 
 
-
 /-!
 # The complete addressed outer-reduction machine
 
@@ -343,7 +304,7 @@ noncomputable section
 variable (k : Nat) {s d : Nat} (T : Integration.NoiseTables.Table s d)
 
 def output (input : SourceEncoding.Input) : Foundations.Target.Instance (2 ^ s) :=
-  AddressGame.tableOutput
+  Decoder.TableKeysAddressGame.tableOutput
     (ActualSource.Source.ofList input.equations input.nonempty) k T
 
 def prefixPolynomial : Polynomial Nat :=

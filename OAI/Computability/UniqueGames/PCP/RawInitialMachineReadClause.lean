@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.PCP.RawInitialMachinePhases
 
@@ -34,23 +35,6 @@ def recordTapes {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
     (c : Target.Clause n) (suffix : List Bool) (j : Fin 6) :
     recordTapes base c suffix (.field j) = encodeWord (fieldValue c j) := rfl
 
-theorem recordTapes_other {n : ℕ} (base : Tape → List Bool)
-    (c : Target.Clause n) (suffix : List Bool) (k : Tape)
-    (hi : k ≠ .input) (hf : ∀ j, k ≠ .field j) :
-    recordTapes base c suffix k = base k := by
-  cases k <;> try rfl
-  · exact (hi rfl).elim
-  · exact (hf _ rfl).elim
-
-@[simp] theorem recordTapes_name {n : ℕ} (base : Tape → List Bool)
-    (c : Target.Clause n) (suffix : List Bool) (j : Fin 3) :
-    recordTapes base c suffix (.field (nameField j)) =
-      encodeWord ((c)[j].variableIndex.val) := by
-  fin_cases j <;> rfl
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : ℕ} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 /-- Six actual field routines, stopping directly at the global sign loader. -/
 theorem fieldsTrace {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
@@ -128,8 +112,7 @@ theorem fieldsTrace {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
   change (MachineComposition.advance (TM2.step program))^[g + 2]
     (some ⟨some (.fieldStart 5), (state.1, none), t5⟩) =
     some ⟨some .loadSigns, (state.1, none), t6⟩ at h6
-  have total := trace_trans _ (trace_trans _ (trace_trans _
-    (trace_trans _ (trace_trans _ h1 h2) h3) h4) h5) h6
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans h1 h2) h3) h4) h5) h6
   have htime : (((((a + 2) + (b + 2)) + (d + 2)) + (e + 2)) + (f + 2)) + (g + 2) =
       (encodeWords (Complexity.clauseWords c)).length + 6 := by
     rw [hwords, encodeWords_length]
@@ -165,22 +148,10 @@ theorem readClauseTrace {n : ℕ} (base : Tape → List Bool) (c : Target.Clause
       (some ⟨some .loadSigns, (state.1, none), recordTapes base c suffix⟩) =
       some ⟨some (.scan (.tailVariables 0)), (RawInitialRows.clauseSigns c, none),
         recordTapes base c suffix⟩ := last
-  have total := trace_trans _ first lastTrace
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first lastTrace
   simpa only [show (encodeWords (Complexity.clauseWords c)).length + 6 + 1 =
     (encodeWords (Complexity.clauseWords c)).length + 7 by omega] using total
 
-def readClauseInTime {n : ℕ} (base : Tape → List Bool) (c : Target.Clause n)
-    (suffix : List Bool)
-    (hinput : base .input = encodeWords (Complexity.clauseWords c) ++ suffix)
-    (hempty : ∀ j, base (.field j) = []) (state : State) :
-    StateTransition.EvalsToInTime (TM2.step program)
-      ⟨some (.fieldStart 0), state, base⟩
-      (some ⟨some (.scan (.tailVariables 0)), (RawInitialRows.clauseSigns c, none),
-        recordTapes base c suffix⟩)
-      ((encodeWords (Complexity.clauseWords c)).length + 7) where
-  steps := (encodeWords (Complexity.clauseWords c)).length + 7
-  evals_in_steps := readClauseTrace base c suffix hinput hempty state
-  steps_le_m := Nat.le_refl _
 
 end UniqueGamesTheorem.Foundations.PCP.RawInitialMachineReadClause
 

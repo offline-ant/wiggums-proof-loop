@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.Linarith
 import OAI.Computability.UniqueGames.Inverse.KMSAnalyticHybridEnergyImageTransportCoreLemmas
 import OAI.Computability.UniqueGames.Inverse.KMSFourthMomentMixedScalarLemmas
@@ -169,18 +170,8 @@ theorem fixedFrequencyEnergy_block (ι : (J × F2) →ₗ[F2] E)
   let e := compatibleBlockFrequencyEquiv π A
   calc
     _ = ∑ T : CompatibleBlockFrequency π A, linearCoeff f (ι.comp T.val) ^ 2 := by
-      unfold fixedFrequencyEnergy
-      rw [← Finset.sum_subtype (Finset.univ.filter (fun T : (B × F2) →ₗ[F2] (J × F2) =>
-          Function.Surjective T ∧
-            (π.prodMap (LinearMap.id : F2 →ₗ[F2] F2)).comp T =
-              A.prodMap (LinearMap.id : F2 →ₗ[F2] F2))) (by simp)
-          (fun T => linearCoeff f (ι.comp T) ^ 2),
-        Finset.sum_filter, Finset.sum_filter]
-      apply Finset.sum_congr rfl
-      intro T _
-      by_cases hs : Function.Surjective T <;>
-        by_cases hp : (π.prodMap (LinearMap.id : F2 →ₗ[F2] F2)).comp T =
-            A.prodMap (LinearMap.id : F2 →ₗ[F2] F2) <;> simp [smallCoeff, hs, hp]
+      rw [fixedFrequencyEnergy_eq]
+      exact Finset.sum_subtype _ (by simp [and_comm]) _
     _ = ∑ p : CompatibleOldFrequency π A × π.ker,
         linearCoeff f (ι.comp (blockFrequency p.1.val p.2.val)) ^ 2 := by
       apply Fintype.sum_equiv e
@@ -298,11 +289,8 @@ def codomainTransport (e : F ≃ₗ[F2] F') (f : (E →ₗ[F2] F) → ℝ) :
     (E →ₗ[F2] F') → ℝ := fun X => f (e.symm.toLinearMap.comp X)
 
 /-- Actual dual frequencies are reindexed by precomposition with the inverse. -/
-def codomainFrequencyEquiv (e : F ≃ₗ[F2] F') : (F →ₗ[F2] I) ≃ (F' →ₗ[F2] I) where
-  toFun T := T.comp e.symm.toLinearMap
-  invFun T := T.comp e.toLinearMap
-  left_inv T := by ext x; simp
-  right_inv T := by ext x; simp
+def codomainFrequencyEquiv (e : F ≃ₗ[F2] F') : (F →ₗ[F2] I) ≃ (F' →ₗ[F2] I) :=
+  (LinearEquiv.arrowCongr e (LinearEquiv.refl F2 I)).toEquiv
 
 @[simp] theorem codomainFrequencyEquiv_apply (e : F ≃ₗ[F2] F') (T : F →ₗ[F2] I) :
     codomainFrequencyEquiv e T = T.comp e.symm.toLinearMap := rfl
@@ -312,38 +300,20 @@ def codomainFrequencyEquiv (e : F ≃ₗ[F2] F') : (F →ₗ[F2] I) ≃ (F' →�
 
 theorem surjective_comp_codomainEquiv_iff (e : F ≃ₗ[F2] F') (T : F' →ₗ[F2] I) :
     Function.Surjective (T.comp e.toLinearMap) ↔ Function.Surjective T := by
-  constructor
-  · intro h y
-    obtain ⟨x, hx⟩ := h y
-    exact ⟨e x, hx⟩
-  · intro h y
-    obtain ⟨x, hx⟩ := h y
-    refine ⟨e.symm x, ?_⟩
-    simpa using hx
+  exact e.toEquiv.surjective_comp T
 
 variable [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
   [Fintype (E →ₗ[F2] F')] [Fintype (F' →ₗ[F2] E)]
 
-omit [Fintype (F' →ₗ[F2] E)] in
+omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
+  [Fintype (F →ₗ[F2] E)] [Fintype (F' →ₗ[F2] E)] in
 /-- The Fourier pullback fiber of a codomain equivalence has a single term. -/
 theorem linearCoeff_codomainTransport (e : F ≃ₗ[F2] F')
     (f : (E →ₗ[F2] F) → ℝ) (S' : F' →ₗ[F2] E) :
     linearCoeff (codomainTransport e f) S' = linearCoeff f (S'.comp e.toLinearMap) := by
-  unfold codomainTransport
-  rw [KMSFourthMoment.coefficient_codomain_pullback]
-  have hc : (S'.comp e.toLinearMap).comp e.symm.toLinearMap = S' := by ext x; simp
-  rw [Finset.sum_eq_single (S'.comp e.toLinearMap)]
-  · rw [ite_eq_left hc]
-  · intro S _ hS
-    apply ite_eq_right
-    intro h
-    apply hS
-    apply LinearMap.ext
-    intro x
-    simpa using congrArg (fun R : F' →ₗ[F2] E => R (e x)) h
-  · intro h
-    exact (h (Finset.mem_univ _)).elim
+  exact UniqueGamesTheorem.Appendix.NaturalTransport.linearCoeff_pullback
+    (LinearEquiv.refl F2 E) e.symm f S'
 
 omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
   [Fintype (E →ₗ[F2] F)] [Fintype (F →ₗ[F2] E)]
@@ -353,16 +323,14 @@ theorem basisInvariant_codomainTransport (e : F ≃ₗ[F2] F')
     (f : (E →ₗ[F2] F) → ℝ) (hf : KMSBasisInvariant.IsBasisInvariant f) :
     KMSBasisInvariant.IsBasisInvariant (codomainTransport e f) := by
   intro g X
-  change f (e.symm.toLinearMap.comp (X.comp g.toLinearMap)) =
-    f (e.symm.toLinearMap.comp X)
-  rw [← LinearMap.comp_assoc]
   exact hf g (e.symm.toLinearMap.comp X)
 
 variable [FiniteDimensional F2 I]
   [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)]
   [Fintype (I →ₗ[F2] F')] [Fintype (F' →ₗ[F2] I)]
 
-omit [FiniteDimensional F2 I] [Fintype (F' →ₗ[F2] E)]
+omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
+  [FiniteDimensional F2 I] [Fintype (F →ₗ[F2] E)] [Fintype (F' →ₗ[F2] E)]
   [Fintype (I →ₗ[F2] F)] [Fintype (F →ₗ[F2] I)]
   [Fintype (I →ₗ[F2] F')] [Fintype (F' →ₗ[F2] I)] in
 theorem smallCoeff_codomainTransport (e : F ≃ₗ[F2] F') (ι : I →ₗ[F2] E)
@@ -375,18 +343,9 @@ theorem smallCoeff_codomainTransport (e : F ≃ₗ[F2] F') (ι : I →ₗ[F2] E)
   · rw [linearCoeff_codomainTransport, LinearMap.comp_assoc]
   · rfl
 
-omit [Fintype (F' →ₗ[F2] E)] in
-/-- The synthesized small component itself commutes with codomain transport. -/
-theorem smallComponent_codomainTransport (e : F ≃ₗ[F2] F') (ι : I →ₗ[F2] E)
-    (f : (E →ₗ[F2] F) → ℝ) :
-    smallComponent ι (codomainTransport e f) =
-      codomainTransport e (smallComponent ι f) := by
-  apply eq_of_coeff_eq
-  intro T
-  rw [coeff_smallComponent, linearCoeff_codomainTransport, coeff_smallComponent,
-    smallCoeff_codomainTransport]
 
-omit [FiniteDimensional F2 I] [Fintype (F' →ₗ[F2] E)]
+omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [FiniteDimensional F2 F']
+  [FiniteDimensional F2 I] [Fintype (F →ₗ[F2] E)] [Fintype (F' →ₗ[F2] E)]
   [Fintype (I →ₗ[F2] F)] [Fintype (I →ₗ[F2] F')] in
 /-- Transport the prescribed partial frequency together with the primal
 codomain; the normalized energy remains exactly unchanged. -/
@@ -402,7 +361,7 @@ theorem fixedFrequencyEnergy_codomainTransport (e : F ≃ₗ[F2] F') (ι : I →
   have hp : π.comp (T.comp e.symm.toLinearMap) = A.comp e.symm.toLinearMap ↔
       π.comp T = A := by
     rw [← LinearMap.comp_assoc]
-    exact (codomainFrequencyEquiv (I := J) e).injective.eq_iff
+    exact LinearMap.cancel_right e.symm.surjective
   simp only [codomainFrequencyEquiv_apply, smallCoeff_codomainTransport,
     codomainFrequency_cancel, hp]
 
@@ -469,28 +428,15 @@ theorem dependent_extension_energy_le
     (∑ z : B →ₗ[F2] J with π.comp z = A0 ∧ Function.Surjective z,
       linearCoeff f (ι.comp (hyperplaneExtend z w)) ^ 2) ≤
         fixedFrequencyEnergy ι f π (hyperplaneExtend A0 (π w)) := by
-  let P : Finset (B →ₗ[F2] J) :=
-    Finset.univ.filter fun z => π.comp z = A0 ∧ Function.Surjective z
-  let Q : Finset ((B × F2) →ₗ[F2] J) :=
-    Finset.univ.filter fun T =>
-      π.comp T = hyperplaneExtend A0 (π w) ∧ Function.Surjective T
-  have hsub : P.image (fun z => hyperplaneExtend z w) ⊆ Q := by
-    intro T hT
-    obtain ⟨z, hz, rfl⟩ := Finset.mem_image.mp hT
-    have hp := (Finset.mem_filter.mp hz).2
-    apply Finset.mem_filter.mpr
-    refine ⟨Finset.mem_univ _, ?_, hyperplaneExtend_surjective hp.2 w⟩
-    rw [comp_hyperplaneExtend, hp.1]
   rw [fixedFrequencyEnergy_eq]
-  change (∑ z ∈ P, linearCoeff f (ι.comp (hyperplaneExtend z w)) ^ 2) ≤
-    ∑ T ∈ Q, linearCoeff f (ι.comp T) ^ 2
-  calc
-    _ = ∑ T ∈ P.image (fun z => hyperplaneExtend z w),
-        linearCoeff f (ι.comp T) ^ 2 := by
-      rw [Finset.sum_image]
-      exact fun z _ z' _ h => hyperplaneExtend_old_injective w h
-    _ ≤ _ := Finset.sum_le_sum_of_subset_of_nonneg hsub
-      (fun T _ _ => sq_nonneg _)
+  apply Finset.sum_le_sum_of_injOn (g := fun T => linearCoeff f (ι.comp T) ^ 2)
+    (fun z => hyperplaneExtend z w)
+    (hyperplaneExtend_old_injective w).injOn ?_ (fun _ _ => le_rfl)
+    (fun _ _ _ => sq_nonneg _)
+  intro T hT
+  obtain ⟨z, hz, rfl⟩ := Finset.mem_image.mp hT
+  simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hz ⊢
+  exact ⟨by rw [comp_hyperplaneExtend, hz.1], hyperplaneExtend_surjective hz.2 w⟩
 
 end Energy
 end
@@ -551,13 +497,7 @@ theorem fixedFrequencyEnergy_postcomp_injective (ι : I →ₗ[F2] E)
   congr 1
   ext T
   simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-  constructor
-  · intro h
-    apply LinearMap.ext
-    intro x
-    exact he (congrArg (fun L : F →ₗ[F2] J' => L x) h)
-  · intro h
-    rw [LinearMap.comp_assoc, h]
+  rw [LinearMap.comp_assoc, LinearMap.cancel_left he]
 
 end
 end UniqueGamesTheorem.Inverse.KMSAnalytic
@@ -589,26 +529,15 @@ variable {E F I I' J : Type*}
   [AddCommGroup J] [Module F2 J]
 
 /-- Reindex the actual dual frequency maps by an equivalence of their targets. -/
-def smallFrequencyEquiv (e : I ≃ₗ[F2] I') : (F →ₗ[F2] I) ≃ (F →ₗ[F2] I') where
-  toFun T := e.toLinearMap.comp T
-  invFun T := e.symm.toLinearMap.comp T
-  left_inv T := by ext x; simp
-  right_inv T := by ext x; simp
+def smallFrequencyEquiv (e : I ≃ₗ[F2] I') : (F →ₗ[F2] I) ≃ (F →ₗ[F2] I') :=
+  (LinearEquiv.arrowCongr (LinearEquiv.refl F2 F) e).toEquiv
 
 @[simp] theorem smallFrequencyEquiv_apply (e : I ≃ₗ[F2] I') (T : F →ₗ[F2] I) :
     smallFrequencyEquiv e T = e.toLinearMap.comp T := rfl
 
 theorem surjective_smallFrequencyEquiv_iff (e : I ≃ₗ[F2] I') (T : F →ₗ[F2] I) :
     Function.Surjective (e.toLinearMap.comp T) ↔ Function.Surjective T := by
-  constructor
-  · intro h y
-    obtain ⟨x, hx⟩ := h (e y)
-    exact ⟨x, e.injective hx⟩
-  · intro h y
-    obtain ⟨x, hx⟩ := h (e.symm y)
-    refine ⟨x, ?_⟩
-    change e (T x) = y
-    rw [hx, e.apply_symm_apply]
+  exact e.toEquiv.comp_surjective T
 
 /-- Transporting the outer map in the opposite direction cancels the
 frequency-coordinate change. -/

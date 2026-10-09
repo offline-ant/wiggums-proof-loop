@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Lean.Elab.Tactic.Omega
 import Mathlib.Algebra.Order.BigOperators.Ring.Finset
 import Mathlib.Basic.Real.Basic
@@ -111,24 +112,6 @@ section
 
 namespace UniqueGamesTheorem.Appendix.Induction
 
-/-- The corrected outer-order cutoff (A.14), with natural subtraction explicit. -/
-theorem outer_order_cutoff (d i j k a b : Nat)
-    (ha : i + k ≤ a) (hb : j + k ≤ b) (ht : i + j + k ≤ d)
-    (ho : (a - i - k) + (b - j - k) ≤ d - (i + j + k)) :
-    a + b ≤ d + k := by
-  omega
-
-/-- Each complementary-space dimension is at most the original degree. -/
-theorem complement_dimension_bounds (d i j k a b : Nat)
-    (ha : i + k ≤ a) (hb : j + k ≤ b) (h : a + b ≤ d + k) :
-    a - i ≤ d ∧ b - j ≤ d := by
-  omega
-
-/-- Recombination preserves the required derivative degree cutoff. -/
-theorem recombined_order_cutoff (d k a b : Nat)
-    (ha : k ≤ a) (hb : k ≤ b) (h : a + b ≤ d + k) :
-    (a - k) + (b - k) + k ≤ d := by
-  omega
 
 theorem square_remainder_budget (d t : Nat) (ht : t ≤ d) :
     (d - t) * (d - t) + d * t ≤ d * d := by
@@ -157,18 +140,6 @@ theorem antecedent_exponent_budget (d i j k t : Nat)
     rw [ht, Nat.mul_add]
   omega
 
-/-- The factor from the fourth-power triangle inequality fits inside the
-12d(i+j) budget used before (A.13). -/
-theorem first_triangle_exponent_budget (d i j : Nat) (hi : i ≤ d) :
-    7 * (d * (i + j)) + 3 * (i * j) ≤ 12 * (d * (i + j)) := by
-  have hm := Nat.mul_le_mul_right j hi
-  have he : d * (i + j) = d * i + d * j := Nat.mul_add d i j
-  omega
-
-/-- The derivative order t is at least half the original pair order. -/
-theorem initial_order_bound (i j k : Nat) (hi : k ≤ i) (hj : k ≤ j) :
-    i + j ≤ 2 * (i + j - k) := by
-  omega
 
 /-- For positive k the geometric-series exponent has at least d of slack. -/
 theorem positive_rank_geometric_slack (d k : Nat) (hk : 1 ≤ k) :
@@ -177,29 +148,6 @@ theorem positive_rank_geometric_slack (d k : Nat) (hk : 1 ≤ k) :
   have he : d * (k + 1) = d * k + d := by simp [Nat.mul_add]
   omega
 
-/-- The rank-dependent decay in (A.16) contains the corrected 8dk weight. -/
-theorem corrected_weight_exponent (d k : Nat) :
-    31 * (d * (k + 1)) + 4 * (d * k) =
-      31 * d + 27 * (d * k) + 8 * (d * k) := by
-  simp only [Nat.mul_add, Nat.mul_one]
-  omega
-
-/-- When B′ plus the prescribed kernel spans the domain, the map on B′
-determines its extension. Thus fixing image and kernel in the antecedent
-count leaves no additional induced-isomorphism choice. -/
-theorem extension_unique {B V : Type} [Add B] [Add V]
-    (zero : V) (X₁ X₂ : B → V) (B' K : B → Prop)
-    (right_zero : ∀ v : V, v + zero = v)
-    (add₁ : ∀ x y, X₁ (x + y) = X₁ x + X₁ y)
-    (add₂ : ∀ x y, X₂ (x + y) = X₂ x + X₂ y)
-    (span : ∀ x, ∃ b z, B' b ∧ K z ∧ x = b + z)
-    (agree : ∀ b, B' b → X₁ b = X₂ b)
-    (kill₁ : ∀ z, K z → X₁ z = zero)
-    (kill₂ : ∀ z, K z → X₂ z = zero) : X₁ = X₂ := by
-  funext x
-  obtain ⟨b, z, hb, hz, hx⟩ := span x
-  rw [hx, add₁, add₂, kill₁ z hz, kill₂ z hz, right_zero, right_zero]
-  exact agree b hb
 
 end UniqueGamesTheorem.Appendix.Induction
 
@@ -209,122 +157,6 @@ section
 
 namespace UniqueGamesTheorem.Appendix.Level
 
-/-- The unselected multiplier in factored form, after multiplying numerator
-and denominator by `2^(2*r)`. Selected characters have multiplier one. -/
-def rankFilter (d r : Nat) (selected : Bool) : Rat :=
-  if selected then 1 else
-    (((2 : Rat) ^ r - 2 ^ d) * (2 ^ r - 2 ^ (d - 1))) / ((2 : Rat) ^ r) ^ 2
-
-theorem filter_polynomial_algebra (q x y : Rat) (hq : q ≠ 0) :
-    (q - x) * (q - y) / q ^ 2 = 1 - (x + y) / q + x * y / q ^ 2 := by
-  grind
-
-theorem rankFilter_selected (d r : Nat) : rankFilter d r true = 1 := by
-  simp [rankFilter]
-
-theorem rankFilter_zero_at_d (d : Nat) : rankFilter d d false = 0 := by
-  simp only [rankFilter, Bool.false_eq_true, ↓reduceIte]
-  grind
-
-theorem rankFilter_zero_at_pred (d : Nat) : rankFilter d (d - 1) false = 0 := by
-  simp only [rankFilter, Bool.false_eq_true, ↓reduceIte]
-  grind
-
-/-- Only ranks `d-1` and `d` can restrict to rank `d-1`; no degree
-bound on the original function is needed. -/
-theorem only_two_source_ranks {d r s : Nat} (hd : 1 ≤ d)
-    (hlo : s ≤ r) (hhi : r ≤ s + 1) (hs : s + 1 = d) :
-    r = d ∨ r = d - 1 := by
-  omega
-
-/-- Selected characters lose exactly one rank. On an unselected character,
-the two roots of the filter remove every possible unwanted contribution. -/
-theorem rank_filter_character {d r s : Nat} (hd : 1 ≤ d)
-    (selected : Bool) (c : Rat)
-    (hlo : s ≤ r) (hhi : r ≤ s + 1)
-    (hselected : selected = true → r = s + 1) :
-    (if selected then if r = d then c else 0 else 0) =
-      (if s + 1 = d then rankFilter d r selected * c else 0) := by
-  cases selected with
-  | true =>
-    have hr := hselected rfl
-    simp [rankFilter, hr]
-  | false =>
-    by_cases hs : s + 1 = d
-    · have hr := only_two_source_ranks hd hlo hhi hs
-      rcases hr with hr | hr
-      · simp [hs, hr, rankFilter_zero_at_d]
-      · simp [hs, hr, rankFilter_zero_at_pred]
-    · simp [hs]
-
-/-- A finite merged coefficient. `phase` can incorporate a translation
-character and the indicator of one restriction fiber. -/
-def mergedCoefficient {α : Type} (indices : List α)
-    (phase coefficient : α → Rat) : Rat :=
-  (indices.map (fun x => phase x * coefficient x)).sum
-
-/-- The character identity survives arbitrary merging, signs, and
-cancellation. No injectivity of the restriction of frequencies is assumed. -/
-theorem rank_filter_commutes_with_merge {α : Type} (indices : List α)
-    (d : Nat) (hd : 1 ≤ d) (rank restrictedRank : α → Nat)
-    (selected : α → Bool) (phase coefficient : α → Rat)
-    (hlo : ∀ x, restrictedRank x ≤ rank x)
-    (hhi : ∀ x, rank x ≤ restrictedRank x + 1)
-    (hselected : ∀ x, selected x = true → rank x = restrictedRank x + 1) :
-    mergedCoefficient indices phase
-        (fun x => if selected x then if rank x = d then coefficient x else 0 else 0) =
-      mergedCoefficient indices phase
-        (fun x => if restrictedRank x + 1 = d
-          then rankFilter d (rank x) (selected x) * coefficient x else 0) := by
-  unfold mergedCoefficient
-  congr 1
-  apply List.map_congr_left
-  intro x _
-  exact congrArg (fun c : Rat => phase x * c)
-    (rank_filter_character hd (selected x) (coefficient x) (hlo x) (hhi x)
-      (hselected x))
-
-theorem higher_ranks_cannot_contaminate {d r s : Nat}
-    (hhi : r ≤ s + 1) (hr : d < r) : s + 1 ≠ d := by
-  omega
-
-/-- Arithmetic in the iterated globality parameter
-`4^k * 2^(4*k*d - 2*k*(k-1))`. -/
-theorem iterated_globality_exponent {d k : Nat} (hd : 1 ≤ d) (hk : k ≤ d) :
-    2 * k + 4 * k * d - 2 * k * (k - 1) ≤ 10 * d * d := by
-  have hkd : k * d ≤ d * d := Nat.mul_le_mul_right d hk
-  have hdd : d ≤ d * d := by
-    have := Nat.mul_le_mul_left d hd
-    simpa using this
-  have hbasic : 2 * k + 4 * k * d ≤ 6 * d * d := by
-    grind
-  grind
-
-theorem successor_le_two_pow (d : Nat) : d + 1 ≤ 2 ^ d := by
-  induction d with
-  | zero => decide
-  | succ d ih =>
-    rw [Nat.pow_succ]
-    omega
-
-/-- A deliberately coarse bound for the number of dimension-indexed
-selector choices. The geometric subspace count is an explicit hypothesis. -/
-theorem selector_multiplicity_bound {d count : Nat} (hd : 1 ≤ d)
-    (hcount : count ≤ (d + 1) ^ 2 * 2 ^ (d * d)) :
-    count ≤ 2 ^ (3 * d * d) := by
-  have hs := Nat.pow_le_pow_left (successor_le_two_pow d) 2
-  have hdd : d ≤ d * d := by
-    have := Nat.mul_le_mul_left d hd
-    simpa using this
-  calc
-    count ≤ (d + 1) ^ 2 * 2 ^ (d * d) := hcount
-    _ ≤ (2 ^ d) ^ 2 * 2 ^ (d * d) := Nat.mul_le_mul_right _ hs
-    _ = 2 ^ (d * 2 + d * d) := by rw [← Nat.pow_mul, ← Nat.pow_add]
-    _ ≤ 2 ^ (3 * d * d) := Nat.pow_le_pow_right (by decide) (by grind)
-
-/-- The final fourth-root exponent has the advertised slack. -/
-theorem final_exponent_slack (d : Nat) : 113 * d * d ≤ 4 * (30 * d * d) := by
-  grind
 
 end UniqueGamesTheorem.Appendix.Level
 
@@ -482,48 +314,6 @@ theorem hybrid_rank_loss_iff (A : Submodule K V) (B : Submodule K W)
   · rintro ⟨hA, hB⟩
     exact hybrid_rank_loss A B Y hA hB
 
-/-- Instantiation of (A.17)'s rank filter for quotient by an actual line.
-The only dimension hypothesis is the line's dimension; no rank cutoff is
-imposed on the original map `Y`. -/
-theorem line_rank_filter (A : Submodule K V) (Y : W →ₗ[K] V)
-    (hline : finrank K A = 1) (d : Nat) (hd : 1 ≤ d) (c : Rat) :
-    (if A ≤ range Y then
-      if finrank K (range Y) = d then c else 0 else 0) =
-      (if finrank K (range (A.mkQ.comp Y)) + 1 = d then
-        UniqueGamesTheorem.Appendix.Level.rankFilter d (finrank K (range Y))
-          (decide (A ≤ range Y)) * c else 0) := by
-  classical
-  have hb := quotient_rank_bounds A Y
-  have hhi : finrank K (range Y) ≤ finrank K (range (A.mkQ.comp Y)) + 1 := by
-    simpa only [hline] using hb.2
-  have hs : decide (A ≤ range Y) = true →
-      finrank K (range Y) = finrank K (range (A.mkQ.comp Y)) + 1 := by
-    intro h
-    have hl := quotient_rank_selected A Y (of_decide_eq_true h)
-    omega
-  simpa only [decide_eq_true_eq] using
-    UniqueGamesTheorem.Appendix.Level.rank_filter_character hd (decide (A ≤ range Y)) c hb.1 hhi hs
-
-omit [FiniteDimensional K V] in
-/-- The dual order-one instance: restriction to an actual hyperplane. -/
-theorem hyperplane_rank_filter (B : Submodule K W) (Y : W →ₗ[K] V)
-    (hhyperplane : finrank K (W ⧸ B) = 1) (d : Nat) (hd : 1 ≤ d) (c : Rat) :
-    (if ker Y ≤ B then
-      if finrank K (range Y) = d then c else 0 else 0) =
-      (if finrank K (range (Y.comp B.subtype)) + 1 = d then
-        UniqueGamesTheorem.Appendix.Level.rankFilter d (finrank K (range Y))
-          (decide (ker Y ≤ B)) * c else 0) := by
-  classical
-  have hb := domain_rank_bounds B Y
-  have hhi : finrank K (range Y) ≤ finrank K (range (Y.comp B.subtype)) + 1 := by
-    simpa only [hhyperplane] using hb.2
-  have hs : decide (ker Y ≤ B) = true →
-      finrank K (range Y) = finrank K (range (Y.comp B.subtype)) + 1 := by
-    intro h
-    have hl := domain_rank_selected B Y (of_decide_eq_true h)
-    omega
-  simpa only [decide_eq_true_eq] using
-    UniqueGamesTheorem.Appendix.Level.rank_filter_character hd (decide (ker Y ≤ B)) c hb.1 hhi hs
 
 end UniqueGamesTheorem.Appendix.Level.LinearRank
 

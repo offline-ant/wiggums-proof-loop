@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineLookupCore
 
 namespace OAI
@@ -17,14 +18,6 @@ open Turing
 
 variable {K Λ σ : Type} [DecidableEq K]
 
-private theorem discard_update_twice (source : K) (base : K → List Bool)
-    (input replacement : List Bool) :
-    Function.update (Function.update base source input) source replacement =
-      Function.update base source replacement := by
-  funext p
-  by_cases hp : p = source
-  · subst p; simp
-  · simp [hp]
 
 theorem discardStep_delimiter (source : K) (loopLabel returnLabel : Λ)
     (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))

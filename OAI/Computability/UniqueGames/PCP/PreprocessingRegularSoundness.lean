@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.PCP.CloudRoundingLemmas
 import OAI.Computability.UniqueGames.PCP.PoweringTableSemanticsLemmas
 import OAI.Computability.UniqueGames.PCP.PreprocessingRegularTablesLemmas
@@ -101,61 +102,21 @@ theorem soundness (H : BaseTable)
     (fun v => Fin (padding t v)) (cloudGraphs t (padding t) (familyCloudTable H t))
     (cloud_expansion H certificate t) (fun z => labels (vertexOrder t (padding t) z))
 
-theorem exists_rounding (H : BaseTable)
-    (certificate : SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (t : GraphTables.Table)
-    (labels : Fin (vertexCount t (padding t)) → GraphTables.Label) :
-    ∃ original : Fin t.vertices → GraphTables.Label,
-      (GraphTables.semantics t).rejectionCount original ≤
-        (PortTables.baseGraph (regularize H t)).rejectionCount labels :=
-  ⟨roundLabels t labels, soundness H certificate t labels⟩
-
-/-- Completeness preserves the number of rejected original dart occurrences. -/
-theorem lift_rejectionCount (H : BaseTable) (t : GraphTables.Table)
-    (labels : Fin t.vertices → GraphTables.Label) :
-    (PortTables.baseGraph (regularize H t)).rejectionCount
-        (liftedLabel t (padding t) labels) = (GraphTables.semantics t).rejectionCount labels :=
-  rejectionCount_liftedLabel t (padding t) (familyCloudTable H t) labels
 
 theorem completeness (H : BaseTable) (t : GraphTables.Table)
     (h : (GraphTables.semantics t).Satisfiable) :
     (PortTables.baseGraph (regularize H t)).Satisfiable := by
   obtain ⟨labels, hlabels⟩ := h
   refine ⟨liftedLabel t (padding t) labels, ?_⟩
-  intro e
-  obtain ⟨z, rfl⟩ :=
-    (Equiv.prodCongr (vertexOrder t (padding t)) (portOrder internalDegree)).surjective e
-  rcases z with ⟨v, p⟩
-  change (PortTables.baseGraph (regularize H t)).edgeSatisfied
-    (liftedLabel t (padding t) labels)
-    (vertexOrder t (padding t) v, portOrder internalDegree p) = true
-  rw [regularize, edgeSatisfied_ofCloudTables]
+  apply (ConstraintGraph.rejectionCount_eq_zero_iff _ _).mp
+  rw [regularize, rejectionCount_ofCloudTables]
   simp only [liftedLabel, Equiv.symm_apply_apply]
-  have hcomplete := replacement_complete
+  apply (ConstraintGraph.rejectionCount_eq_zero_iff _ _).mpr
+  exact replacement_complete
     (paddedGraph (GraphTables.semantics t) (fun v => Fin (padding t v)))
     (cloudGraphs t (padding t) (familyCloudTable H t)) labels
     (padded_complete (GraphTables.semantics t) (fun v => Fin (padding t v)) labels hlabels)
-    (v, p)
-  convert hcomplete using 1
-  rfl
 
-theorem soundness_of_uniform_lower_bound (H : BaseTable)
-    (certificate : SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (t : GraphTables.Table) (k : Nat)
-    (lower : ∀ original : Fin t.vertices → GraphTables.Label,
-      k ≤ (GraphTables.semantics t).rejectionCount original)
-    (labels : Fin (vertexCount t (padding t)) → GraphTables.Label) :
-    k ≤ (PortTables.baseGraph (regularize H t)).rejectionCount labels :=
-  (lower (roundLabels t labels)).trans (soundness H certificate t labels)
-
-theorem soundness_of_uniform_real_lower_bound (H : BaseTable)
-    (certificate : SpectralCertificate (ExpanderTables.graph H) (1 / 100 : ℝ))
-    (t : GraphTables.Table) (k : ℝ)
-    (lower : ∀ original : Fin t.vertices → GraphTables.Label,
-      k ≤ ((GraphTables.semantics t).rejectionCount original : ℝ))
-    (labels : Fin (vertexCount t (padding t)) → GraphTables.Label) :
-    k ≤ ((PortTables.baseGraph (regularize H t)).rejectionCount labels : ℝ) :=
-  (lower (roundLabels t labels)).trans (Nat.cast_le.mpr (soundness H certificate t labels))
 
 end UniqueGamesTheorem.Foundations.PCP.PreprocessingRegularSoundness
 

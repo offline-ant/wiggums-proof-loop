@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLookupLemmas
@@ -42,10 +43,6 @@ theorem inheritedRow_eq (H : BaseTable) (t : Table) (e : Fin t.darts) :
   simp only [inheritedRow, PortTables.flatRows, Fin.getElem_fin,
     Vector.getElem_ofFn, Fin.eta]
 
-@[simp] theorem inheritedRow_tail (H : BaseTable) (t : Table) (e : Fin t.darts) :
-    (inheritedRow H t e).tail.val = e.val := by
-  simp only [inheritedRow_eq, inheritedIndex, Equiv.symm_apply_apply,
-    vertexOrder_original]
 
 @[simp] theorem inheritedRow_reverse (H : BaseTable) (t : Table) (e : Fin t.darts) :
     (inheritedRow H t e).reverseIndex.val =
@@ -60,25 +57,6 @@ theorem inheritedRow_eq (H : BaseTable) (t : Table) (e : Fin t.darts) :
   rw [PortTables.rowIndex_val, vertexOrder_original, portOrder_inherited]
   exact Nat.add_comm _ _
 
-@[simp] theorem inheritedRow_relation (H : BaseTable) (t : Table) (e : Fin t.darts) :
-    (inheritedRow H t e).relation = t.rows[e].relation := by
-  rw [inheritedRow_eq]
-  apply Vector.ext
-  intro i hi
-  let j : Fin 4096 := ⟨i, hi⟩
-  let ab := relationIndex.symm j
-  have h := accepts_original t (padding t) (familyCloudTable H t) e ab.1 ab.2
-  change relationAt ((regularize H t).relations[inheritedIndex H t e]) ab.1 ab.2 =
-    relationAt t.rows[e].relation ab.1 ab.2 at h
-  have hj : relationIndex (ab.1, ab.2) = j := relationIndex.apply_symm_apply j
-  simpa only [relationAt, hj, Fin.getElem_fin, j] using h
-
-theorem inheritedRow_words (H : BaseTable) (t : Table) (e : Fin t.darts) :
-    rowWords (inheritedRow H t e) = e.val ::
-      ((internalDegree + 1) * t.rows[e].reverseIndex.val + internalDegree) ::
-        relationWords t.rows[e].relation := by
-  simp only [rowWords, inheritedRow_tail, inheritedRow_reverse, inheritedRow_relation,
-    List.cons_append, List.nil_append]
 
 def prefixWords (t : Table) (e : Fin t.darts) : List Nat :=
   [t.vertices, t.darts] ++ ((rowList t).take e.val).flatMap rowWords
@@ -278,10 +256,6 @@ theorem relationCopy_step {K Λ σ : Type} [DecidableEq K]
     copyStateEquiv, zeroBuffer]
   rfl
 
-theorem relationCopy_pushBound {K Λ σ : Type} (src dst : K) (exit : Option Λ) :
-    Runtime.statementPushBound (relationCopyAt (σ := σ) src dst exit) = 8192 := by
-  rw [relationCopyAt, MachineStateEquiv.statementPushBound,
-    PoweringMachineRow.statementPushBound_encodedBlockAt]
 
 theorem copied_other (t : Table) (e : Fin t.darts) (base : Tape → List Bool)
     (k : Tape) (h₂ : k ≠ 2) (h₃ : k ≠ 3) (h₄ : k ≠ 4) (h₇ : k ≠ 7) :
@@ -348,10 +322,6 @@ def finalTapes (q : Nat) (t : Table) (e : Fin t.darts) (base : Tape → List Boo
 section Execution
 
 variable {Λ σ : Type}
-
-private theorem join_trace {A : Type*} {f : A → A} {m n : Nat} {a b c : A}
-    (first : f^[m] a = b) (second : f^[n] b = c) : f^[m + n] a = c := by
-  rw [Nat.add_comm m n, Function.iterate_add_apply, first, second]
 
 theorem lookupTrace (q : Nat) (labels : Label → Λ) (exit : Option Λ)
     (program : Λ → TM2.Stmt Alphabet Λ (State σ))
@@ -442,7 +412,7 @@ theorem traceAt (q : Nat) (labels : Label → Λ) (exit : Option Λ)
   have hcopy := copyTrace q labels exit program code t e base ambient
   have haffine := affineTrace q labels exit program code t e base input ambient
   have hemit := emitTrace q labels exit program code t e base input ambient
-  exact join_trace (join_trace (join_trace hlookup hcopy) haffine) hemit
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hlookup hcopy) haffine) hemit
 
 end Execution
 
@@ -466,22 +436,6 @@ theorem steps_le (q : Nat) (t : Table) (e : Fin t.darts) (base : Tape → List B
   simp only [encodeWords, List.length_append, encodeWord_length]
   nlinarith
 
-/-- Concrete finite-machine execution for the actual regularized input row. -/
-def machineInTime (H : BaseTable) (t : Table) (e : Fin t.darts)
-    (base : Tape → List Bool) (input : Input t e base) (register : Option Bool) :
-    StateTransition.EvalsToInTime (machine internalDegree).step
-      ⟨some (.lookup .seed), (((), zeroBuffer), register), base⟩
-      (some ⟨none, (((), zeroBuffer), none),
-        Function.update (affined internalDegree t e base) (9 : Tape)
-          (base (9 : Tape) ++ encodeWords (rowWords (inheritedRow H t e)))⟩)
-      (timeBound internalDegree (tableBits t).length (base (9 : Tape)).length) where
-  steps := steps internalDegree t e base
-  evals_in_steps := by
-    change (advance (TM2.step (instruction internalDegree id none)))^[_] _ = _
-    rw [inheritedRow_words]
-    exact traceAt internalDegree id none (instruction internalDegree id none)
-      (fun _ => rfl) t e base input () register
-  steps_le_m := steps_le internalDegree t e base
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularOriginalRow
 

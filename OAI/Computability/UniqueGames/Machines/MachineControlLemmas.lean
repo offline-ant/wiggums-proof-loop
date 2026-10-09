@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Computability.TuringMachine.StackTuringMachine
 import Mathlib.Logic.Equiv.Basic
 
@@ -181,21 +182,6 @@ theorem stepAux_simulation (haltTarget : Option (Λ ⊕ Λextra))
   | goto f => rfl
   | halt => cases haltTarget <;> rfl
 
-theorem stepAux_preserves_extra_state (haltTarget : Option (Λ ⊕ Λextra))
-    (extraState : τ) (extraTapes : ∀ e, List (Δ e))
-    (q : Stmt Γ Λ σ) (state : σ) (source : ∀ k, List (Γ k)) :
-    (stepAux (statement haltTarget q) (state, extraState)
-      (tapes source extraTapes)).var.2 = extraState := by
-  rw [stepAux_simulation]
-  rfl
-
-theorem stepAux_preserves_extra_tape (haltTarget : Option (Λ ⊕ Λextra))
-    (extraState : τ) (extraTapes : ∀ e, List (Δ e))
-    (q : Stmt Γ Λ σ) (state : σ) (source : ∀ k, List (Γ k)) (e : E) :
-    (stepAux (statement haltTarget q) (state, extraState)
-      (tapes source extraTapes)).stk (.inr e) = extraTapes e := by
-  rw [stepAux_simulation]
-  rfl
 
 def program (haltTarget : Option (Λ ⊕ Λextra)) (source : Λ → Stmt Γ Λ σ)
     (extra : Λextra → Stmt (Alphabet Γ Δ) (Λ ⊕ Λextra) (σ × τ)) :
@@ -266,10 +252,6 @@ def tapes (source : ∀ k, List (Alphabet ΓA ΓB ΓC k)) :
 @[simp] theorem tapes_third (source : ∀ k, List (Alphabet ΓA ΓB ΓC k)) (c : C) :
     tapes source (.inr (.inr c)) = source (.inr (.inr c)) := rfl
 
-theorem tapes_involutive (source : ∀ k, List (Alphabet ΓA ΓB ΓC k)) :
-    tapes (tapes source) = source := by
-  funext k
-  rcases k with a | b | c <;> rfl
 
 def configuration (c : Cfg (Alphabet ΓA ΓB ΓC) Λ σ) :
     Cfg (Alphabet ΓB ΓA ΓC) Λ σ where

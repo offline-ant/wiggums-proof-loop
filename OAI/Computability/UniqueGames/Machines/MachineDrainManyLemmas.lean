@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Data.List.OfFn
 import OAI.Computability.UniqueGames.Machines.MachineCompare
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -177,6 +178,29 @@ def execution (chosen : List K) (labels : Label chosen → Λ) (exit : Option Λ
   evals_in_steps := trace chosen labels exit program atLabels base ambient register
   steps_le_m := steps_le chosen base
 
+/-- A caller's final reset is one real transition after the entire drain
+schedule. This also handles an empty schedule and arbitrary dirty registers. -/
+def executionWithReset (chosen : List K) (labels : Label chosen → Λ) (reset : Λ)
+    (program : Λ → TM2.Stmt (Alphabet (K := K)) Λ (σ × Option Bool))
+    (atLabels : ∀ l, program (labels l) = instruction chosen labels (some reset) l)
+    (initial : σ × Option Bool)
+    (atReset : program reset = .load (fun _ => initial) .halt)
+    (base : Tapes K) (state : σ × Option Bool) :
+    StateTransition.EvalsToInTime (TM2.step program)
+      ⟨entry chosen labels (some reset), state, base⟩
+      (some ⟨none, initial, finalTapes chosen base⟩) (steps chosen base + 1) where
+  steps := steps chosen base + 1
+  evals_in_steps := by
+    have drains := trace chosen labels (some reset) program atLabels base state.1 state.2
+    have resetStep : (advance (TM2.step program))^[1]
+        (some ⟨some reset, (state.1, finalRegister chosen state.2), finalTapes chosen base⟩) =
+        some ⟨none, initial, finalTapes chosen base⟩ := by
+      change some (TM2.stepAux (program reset) _ _) = _
+      rw [atReset]
+      rfl
+    exact iterate_trans drains resetStep
+  steps_le_m := le_rfl
+
 /-- An executable complete cleanup list from an explicit finite enumeration. -/
 def workTapes {N : Nat} (enumeration : Fin N ≃ K) (output : K) : List K :=
   (List.ofFn (fun i => enumeration i)).filter (fun k => decide (k ≠ output))
@@ -255,7 +279,7 @@ omit [DecidableEq K] in
 theorem statement_roundtrip (e : σ ≃ τ)
     (q : TM2.Stmt (fun _ : K => Bool) Λ τ) :
     MachineControl.statement id e (MachineControl.statement id e.symm q) = q := by
-  induction q <;> simp_all [MachineControl.statement]
+  exact MachineStateEquiv.statement_symm_statement e.symm q
 
 def copyStateEquiv (σ : Type) :
     ((σ × Bool × Option Bool) × Option Bool) ≃ MachineCompare.State σ where
@@ -286,32 +310,24 @@ def copyInCompareState (source destination scratch : K)
         Function.update base destination (base source ++ base destination)⟩)
       (2 * ((base source).length + 1)) := by
   let e := copyStateEquiv σ
-  let view := MachineControl.program (Equiv.refl Λ) e.symm program
+  let view := MachineStateEquiv.program e.symm program
   have hfirst : view firstLabel =
       Reduction.MachineTransfer.loopAt source scratch id false firstLabel (some secondLabel) := by
-    dsimp [view, MachineControl.program]
+    dsimp [view, MachineStateEquiv.program, MachineStateEquiv.statement]
     rw [atFirst]
     exact statement_roundtrip e.symm _
   have hsecond : view secondLabel =
       MachineCopy.forkLoop scratch source destination false secondLabel exit := by
-    dsimp [view, MachineControl.program]
+    dsimp [view, MachineStateEquiv.program, MachineStateEquiv.statement]
     rw [atSecond]
     exact statement_roundtrip e.symm _
   let run := MachineCopy.copyInTime source destination scratch hSD hST hDT false
     firstLabel secondLabel exit view hfirst hsecond base hScratch (ambient, false, none) none
-  have hprogram : MachineControl.program (Equiv.refl Λ) e view = program := by
-    funext label
-    exact statement_roundtrip e (program label)
-  have hsim (a b : TM2.Cfg (fun _ : K => Bool) Λ ((σ × Bool × Option Bool) × Option Bool))
-      (hab : TM2.step view a = some b) :
-      TM2.step program (MachineControl.configuration id e a) =
-        some (MachineControl.configuration id e b) := by
-    have hh := MachineControl.step_simulation (Equiv.refl Λ) e view a
-    rw [hprogram, hab] at hh
-    exact hh
-  have lifted := MachineComposition.liftExecutionInTime (TM2.step view) (TM2.step program)
-    (MachineControl.configuration id e) hsim run
-  simpa [MachineControl.configuration, copyStateEquiv, normalState, e] using lifted
+  have lifted := MachineStateEquiv.execution e view run
+  have back : MachineStateEquiv.program e view = program :=
+    MachineStateEquiv.program_symm_program e.symm program
+  rw [back] at lifted
+  simpa [MachineStateEquiv.configuration, copyStateEquiv, normalState, e] using lifted
 
 end Transport
 

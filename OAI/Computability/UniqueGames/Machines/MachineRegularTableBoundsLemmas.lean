@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineRegularOriginalBodyBounds
 import OAI.Computability.UniqueGames.Machines.MachineRegularOwnerBodyBounds
@@ -123,7 +124,6 @@ noncomputable def machineInTime (H : BaseTable) (t : GraphTables.Table) :
   steps_le_m := totalTime_le H t
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularTable.Top
-
 
 
 namespace UniqueGamesTheorem.Foundations.Complexity.MachineRegularTableRuntime

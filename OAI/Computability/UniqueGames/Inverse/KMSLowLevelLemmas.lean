@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Order.Archimedean.Real.Basic
 import Mathlib.FieldTheory.Finiteness
 import Mathlib.LinearAlgebra.Basis.VectorSpace
@@ -131,32 +132,7 @@ theorem rankEnergy_eq (f : (E →ₗ[F2] F) → ℝ) (i : ℕ) :
   rw [rankComponent_energy, Finset.sum_filter]
   rfl
 
-omit [Fintype F] [Fintype (E →ₗ[F2] F2)] in
-/-- The scalar fourth-moment argument applied to genuine rank projections. -/
-theorem rankComponent_bound (f : (E →ₗ[F2] F) → ℝ) (hf : IsBoolean f)
-    (r i : ℕ) (ε : ℝ) (hε : 0 ≤ ε)
-    (hupper : (𝔼 X, rankComponent i f X ^ 4) ≤
-      (2 : ℝ) ^ (25 * r ^ 3) * (𝔼 X, rankComponent i f X ^ 2) * ε) :
-    (𝔼 X, rankComponent i f X ^ 2) ≤
-      (2 : ℝ) ^ (7 * r ^ 3 + 3) * ε ^ ((1 : ℝ) / 4) * (𝔼 X, f X) := by
-  apply lowLevel_bound_of_fourthMoment hf (rankComponent i f) r ε hε _ hupper
-  exact (component_inner_self _ f).symm
 
-/-- The KMS spectral conclusion once the actual pseudorandom upper fourth
-moments have been proved. The error, cutoff and constants precede dimensions. -/
-theorem uniformNoise_bound_of_fourthMoments (f : (E →ₗ[F2] F) → ℝ)
-    (hf : IsBoolean f) (r : ℕ) (ε : ℝ) (hε : 0 ≤ ε)
-    (hupper : ∀ i ≤ r, (𝔼 X, rankComponent i f X ^ 4) ≤
-      (2 : ℝ) ^ (25 * r ^ 3) * (𝔼 X, rankComponent i f X ^ 2) * ε) :
-    (𝔼 X, f X * uniformNoise f X) ≤
-      ((r + 1 : ℕ) * ((2 : ℝ) ^ (7 * r ^ 3 + 3) * ε ^ ((1 : ℝ) / 4)) +
-        ((2 : ℝ) ^ (r + 1))⁻¹) * (𝔼 X, f X) := by
-  rw [uniformNoise_energy]
-  apply spectral_cutoff_of_level_bounds
-  · rw [linear_parseval, boolean_squared_average hf]
-  · intro i hi
-    rw [rankEnergy_eq]
-    exact rankComponent_bound f hf r i ε hε (hupper i hi)
 end ActualFourier
 
 end
@@ -800,29 +776,6 @@ theorem UniformMixedBound.pullback {r : ℕ} {L : ℝ}
   exact hf A I J (a.toLinearMap.comp ι) (a.injective.comp hι)
     (b.toLinearMap.comp u) π hπ (ν.comp b.symm.toLinearMap) hr
 
-omit [FiniteDimensional F2 E] [FiniteDimensional F2 E'] in
-/-- The uniform mixed property is independent of both ambient coordinate
-choices. The reverse direction is pullback by the inverse equivalences. -/
-theorem UniformMixedBound.pullback_iff {r : ℕ} {L : ℝ}
-    (a : E ≃ₗ[F2] E') (b : F ≃ₗ[F2] F')
-    (f : (E' →ₗ[F2] F') → ℝ) :
-    UniformMixedBound r L (fun M => f (LinearEquiv.arrowCongr a b M)) ↔
-      UniformMixedBound r L f := by
-  constructor
-  · intro hf
-    have h := UniformMixedBound.pullback a.symm b.symm
-      (fun M => f (LinearEquiv.arrowCongr a b M)) hf
-    have he : (fun M : E' →ₗ[F2] F' =>
-        f (LinearEquiv.arrowCongr a b (LinearEquiv.arrowCongr a.symm b.symm M))) = f := by
-      funext M
-      apply congrArg f
-      apply LinearMap.ext
-      intro x
-      change b (b.symm (M (a (a.symm x)))) = M x
-      simp
-    rw [he] at h
-    exact h
-  · exact UniformMixedBound.pullback a b f
 
 end Transport
 

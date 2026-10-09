@@ -1,8 +1,9 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineCloudRankLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
-import OAI.Computability.UniqueGames.Machines.MachineDrain
+import OAI.Computability.UniqueGames.Research.R22MachinesRegular
 import OAI.Computability.UniqueGames.Machines.MachineFixedDivMod
 import OAI.Computability.UniqueGames.Machines.MachineLookupLemmas
 import OAI.Computability.UniqueGames.Machines.MachineUnaryLessAtLemmas
@@ -158,10 +159,6 @@ theorem finishSteps_le (q x z r outputLength : Nat) :
   unfold finishSteps
   nlinarith
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 /-- Actual final arithmetic, full relation emission, row append and cleanup.
 The only changed tape is the accumulated output; both physical target fields
 and all metadata are preserved. No execution hypothesis is supplied. -/
@@ -277,7 +274,7 @@ theorem finishTrace (q : Nat) (tape : Fin 8 → K) (distinct : Function.Injectiv
       (code .clearEquality) drained (drained (tape 5)) ambient none
     rw [Function.update_eq_self, hequality, finalFrame] at h
     exact h
-  exact joinTrace (joinTrace (joinTrace (joinTrace (joinTrace
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
     copyRun affineRun) initRun) rowRun) reverseRun) equalityRun
 
 inductive RotorLabel (q : Nat)
@@ -409,7 +406,7 @@ theorem rotorTrace {n q : Nat} (positive : 0 < q) (table : ExpanderTables.Table 
         (hd 4 6 (by decide)) (hd 4 7 (by decide)) (hd 6 7 (by decide))
         (labels .divide) (fun r => labels (.emit r)) exit program (code .divide)
         (fun r => code (.emit r)) looked a [] [] [] ambient none
-  exact joinTrace (joinTrace lookupRun initRun) divideRun
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans lookupRun initRun) divideRun
 
 theorem rotorSteps_le {n q : Nat} (table : ExpanderTables.Table n q) (i : Fin n) (p : Fin q) :
     rotorSteps table i p ≤ 2 * i.val +
@@ -426,60 +423,42 @@ inductive SelectExtraTape
   | savedLeft | savedRight | localWork | sizeWork
   deriving DecidableEq
 
-protected abbrev SelectExtraTape.enumList : List SelectExtraTape := [.localIndex, .owner,
-  .cloudSize, .prefixOffset, .darts, .savedLeft, .savedRight, .localWork, .sizeWork]
-
-protected theorem SelectExtraTape.enumList_getElem?_ctorIdx_eq (x : SelectExtraTape) :
-    SelectExtraTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem SelectExtraTape.enumList_nodup : SelectExtraTape.enumList.Nodup := by decide
-
 instance : Fintype SelectExtraTape where
-  elems := ⟨SelectExtraTape.enumList, SelectExtraTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.localIndex, .owner, .cloudSize, .prefixOffset, .darts,
+    .savedLeft, .savedRight, .localWork, .sizeWork}
+  complete x := by cases x <;> simp
 
 abbrev SelectTape := MachineCloudSelect.Tape ⊕ SelectExtraTape
-abbrev RawSelectAlphabet : SelectTape → Type :=
-  MachineEmbedding.Alphabet MachineCloudSelect.Alphabet (fun _ : SelectExtraTape => Bool)
 abbrev SelectAlphabet (_ : SelectTape) := Bool
-
-theorem selectAlphabet_eq : RawSelectAlphabet = SelectAlphabet := by
-  funext k
-  cases k with
-  | inl k => cases k <;> rfl
-  | inr k => rfl
-
-def selectToBoolWord : (k : SelectTape) → List (RawSelectAlphabet k) → List Bool
-  | .inl (.inl _), word => word
-  | .inl (.inr _), word => word
-  | .inr _, word => word
-
-def selectToBoolTapes (base : ∀ k, List (RawSelectAlphabet k)) : SelectTape → List Bool :=
-  fun k => selectToBoolWord k (base k)
-
-private theorem alphabet_tapes_apply {K : Type} {Γ Δ : K → Type}
-    (h : Γ = Δ) (base : ∀ k, List (Γ k)) (k : K) :
-    MachineAlphabetTransport.tapes h base k =
-      Eq.mp (congrArg (fun alphabet => List (alphabet k)) h) (base k) := by
-  cases h
-  rfl
-
-theorem selectToBoolTapes_eq (base : ∀ k, List (RawSelectAlphabet k)) :
-    selectToBoolTapes base = MachineAlphabetTransport.tapes selectAlphabet_eq base := by
-  funext k
-  rw [alphabet_tapes_apply]
-  cases k with
-  | inl k => cases k <;> rfl
-  | inr k => rfl
-
 abbrev SelectState (σ : Type) := MachineUnaryLessAt.State (σ × MachineCloudSelect.Phase)
 
-def selectStateEquiv (σ : Type) : (MachineCloudSelect.State σ × Unit) ≃ SelectState σ where
-  toFun s := (((s.1.1.1.1, s.1.2), s.1.1.1.2), s.1.1.2)
-  invFun s := ((((s.1.1.1, s.1.2), s.2), s.1.1.2), ())
-  left_inv s := by rcases s with ⟨⟨⟨⟨a, b⟩, c⟩, d⟩, ⟨⟩⟩; rfl
-  right_inv s := by rcases s with ⟨⟨⟨a, b⟩, c⟩, d⟩; rfl
+/-- Normalize the selector's homogeneous alphabet before placing it. -/
+theorem cloudAlphabet_eq : MachineCloudSelect.Alphabet = fun _ => Bool := by
+  funext k
+  cases k <;> rfl
+
+def cloudMemory (graph query output : List Bool) : MachineCloudSelect.Tape → List Bool :=
+  Sum.elim (MachineCloudCount.memory graph [] query [] [] []) (fun _ => output)
+
+theorem cloudMemory_eq (graph query output : List Bool) :
+    MachineAlphabetTransport.tapes cloudAlphabet_eq
+      (MachineCloudSelect.memory graph [] query [] [] [] output) =
+        cloudMemory graph query output := by
+  have apply {K : Type} {Γ Δ : K → Type} (h : Γ = Δ)
+      (base : ∀ k, List (Γ k)) (k : K) :
+      MachineAlphabetTransport.tapes h base k =
+        Eq.mp (congrArg (fun alphabet => List (alphabet k)) h) (base k) := by
+    cases h
+    rfl
+  funext k
+  rw [apply]
+  cases k <;> rfl
+
+def selectStateEquiv (σ : Type) : MachineCloudSelect.State σ ≃ SelectState σ where
+  toFun s := (((s.1.1.1, s.2), s.1.1.2), s.1.2)
+  invFun s := (((s.1.1.1, s.1.2), s.2), s.1.1.2)
+  left_inv _ := rfl
+  right_inv _ := rfl
 
 def selectScratch : SelectTape := .inl (.inl .scratch)
 def selectQuery : SelectTape := .inl (.inl .target)
@@ -497,50 +476,25 @@ inductive SelectCopy
   | oldLocal | oldOwner | dummyLocal | dummySize | dummyDifference
   deriving DecidableEq
 
-protected abbrev SelectCopy.enumList : List SelectCopy := [.oldLocal, .oldOwner, .dummyLocal,
-  .dummySize, .dummyDifference]
-
-protected theorem SelectCopy.enumList_getElem?_ctorIdx_eq (x : SelectCopy) :
-    SelectCopy.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem SelectCopy.enumList_nodup : SelectCopy.enumList.Nodup := by decide
-
 instance : Fintype SelectCopy where
-  elems := ⟨SelectCopy.enumList, SelectCopy.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.oldLocal, .oldOwner, .dummyLocal, .dummySize, .dummyDifference}
+  complete x := by cases x <;> simp
 
 inductive SelectAdd
   | prefixOffset | darts
   deriving DecidableEq
 
-protected abbrev SelectAdd.enumList : List SelectAdd := [.prefixOffset, .darts]
-
-protected theorem SelectAdd.enumList_getElem?_ctorIdx_eq (x : SelectAdd) :
-    SelectAdd.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem SelectAdd.enumList_nodup : SelectAdd.enumList.Nodup := by decide
-
 instance : Fintype SelectAdd where
-  elems := ⟨SelectAdd.enumList, SelectAdd.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.prefixOffset, .darts}
+  complete x := by cases x <;> simp
 
 inductive SelectAddStage
   | scan | restore
   deriving DecidableEq
 
-protected abbrev SelectAddStage.enumList : List SelectAddStage := [.scan, .restore]
-
-protected theorem SelectAddStage.enumList_getElem?_ctorIdx_eq (x : SelectAddStage) :
-    SelectAddStage.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem SelectAddStage.enumList_nodup : SelectAddStage.enumList.Nodup := by decide
-
 instance : Fintype SelectAddStage where
-  elems := ⟨SelectAddStage.enumList, SelectAddStage.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.scan, .restore}
+  complete x := by cases x <;> simp
 
 inductive SelectControl
   | compare (stage : MachineUnaryLessAt.Label)
@@ -608,28 +562,17 @@ def selectControl : SelectControl → TM2.Stmt SelectAlphabet SelectLabel (Selec
       id false (.inr (.add kind .restore)) (some (afterAdd kind))
   | .cleanup i => MachineDrain.drain (cleanupTape i) (.inr (.cleanup i)) (afterCleanup i)
 
-/-- All arithmetic is on extra tapes. The old-dart branch literally contains
-the shared selector program, with only static tape, label and state transport. -/
-def rawSelectProgram : SelectLabel → TM2.Stmt RawSelectAlphabet SelectLabel (SelectState σ) :=
-  MachineStateEquiv.program (selectStateEquiv σ)
-    (MachineEmbedding.program (some (.inr (.cleanup 0))) MachineCloudSelect.program
-      (fun control => MachineStateEquiv.statement (selectStateEquiv σ).symm
-        (MachineAlphabetTransport.statement selectAlphabet_eq.symm (selectControl control))))
-
-def selectProgram : SelectLabel → TM2.Stmt SelectAlphabet SelectLabel (SelectState σ) :=
-  MachineAlphabetTransport.program selectAlphabet_eq rawSelectProgram
+/-- Only the old-dart branch is transported. Arithmetic controls already use
+the caller's tapes and registers, so they need no inverse transports. -/
+def selectProgram : SelectLabel → TM2.Stmt SelectAlphabet SelectLabel (SelectState σ)
+  | .inl l => MachineCloudPadding.Placement.statement Sum.inl Sum.inl
+      (some (.inr (.cleanup 0)))
+      (MachineStateEquiv.statement (selectStateEquiv σ)
+        (MachineAlphabetTransport.statement cloudAlphabet_eq (MachineCloudSelect.program l)))
+  | .inr l => selectControl l
 
 @[simp] theorem selectProgram_control (l : SelectControl) :
-    selectProgram (σ := σ) (.inr l) = selectControl l := by
-  change MachineAlphabetTransport.statement selectAlphabet_eq
-    (MachineStateEquiv.statement (selectStateEquiv σ)
-      (MachineStateEquiv.statement (selectStateEquiv σ).symm
-        (MachineAlphabetTransport.statement selectAlphabet_eq.symm (selectControl l)))) = _
-  have h := MachineStateEquiv.statement_symm_statement (selectStateEquiv σ).symm
-    (MachineAlphabetTransport.statement selectAlphabet_eq.symm (selectControl (σ := σ) l))
-  simp only [Equiv.symm_symm] at h
-  rw [h]
-  exact MachineAlphabetTransport.statement_roundtrip selectAlphabet_eq _
+    selectProgram (σ := σ) (.inr l) = selectControl l := rfl
 
 def selectCleanState (ambient : σ) (register : Option Bool) : SelectState σ :=
   (((ambient, .checking), false), register)
@@ -720,39 +663,35 @@ inductive CoreLabel (q : Nat)
 
 def coreEntry (q : Nat) : CoreLabel q := .rotor (.lookup .seed)
 
-/-- The shared cloud-selector trace is preserved exactly by static tape,
-register and alphabet transport. These transports add no transition. -/
+/-- Static placement of the shared selector preserves every extra tape and
+adds no transition or dummy register. -/
 theorem selectCloudTrace (t : GraphTables.Table) (v : Fin t.vertices)
     (i : Fin (PreprocessingCloudIndex.cloudSize t v))
     (extra : SelectExtraTape → List Bool) (ambient : σ) (register : Option Bool) :
     (advance (TM2.step selectProgram))^[MachineCloudSelect.cloudSelectSteps t v i []]
       (some ⟨some (.inl (.inr .initialize)), selectCleanState ambient register,
-        selectToBoolTapes (MachineEmbedding.tapes
-          (MachineCloudSelect.memory (GraphTables.tableBits t) []
-            (MachineCloudSelect.queryWord v.val i.val []) [] [] [] []) extra)⟩) =
+        Sum.elim (cloudMemory (GraphTables.tableBits t)
+          (MachineCloudSelect.queryWord v.val i.val []) []) extra⟩) =
       some ⟨some (.inr (.cleanup 0)), selectCleanState ambient none,
-        selectToBoolTapes (MachineEmbedding.tapes
-          (MachineCloudSelect.memory (GraphTables.tableBits t) []
-            (MachineCloudSelect.queryWord v.val i.val []) [] [] []
-            (encodeWord (PreprocessingCloudIndex.cloudSelect t v i).val.val)) extra)⟩ := by
-  let source := MachineCloudSelect.program (σ := σ)
-  let more := fun c => MachineStateEquiv.statement (selectStateEquiv σ).symm
-    (MachineAlphabetTransport.statement selectAlphabet_eq.symm (selectControl (σ := σ) c))
-  let caller := MachineEmbedding.program (some (.inr (.cleanup 0))) source more
-  let embed := MachineEmbedding.configuration (K := MachineCloudSelect.Tape)
-    (Γ := MachineCloudSelect.Alphabet) (σ := MachineCloudSelect.State σ)
-    (some (Sum.inr (SelectControl.cleanup 0)) : Option SelectLabel) () extra
-  have sourceRun := MachineCloudSelect.cloudSelectTrace t v i [] [] ambient register
-  have lifted := liftSuccessfulTrace (TM2.step source) (TM2.step caller) embed
-    (MachineEmbedding.step_simulation (some (.inr (.cleanup 0))) () extra source more)
-    _ _ _ sourceRun
-  have transported := MachineStateEquiv.trace (selectStateEquiv σ) caller _ _ _ lifted
-  have boolean := MachineAlphabetTransport.successfulTrace selectAlphabet_eq
-    (MachineStateEquiv.program (selectStateEquiv σ) caller) _ _ _ transported
-  simp only [embed, MachineCloudSelect.cfg, MachineStateEquiv.configuration, MachineEmbedding.configuration,
-    MachineEmbedding.label, selectStateEquiv, List.append_nil,
-    MachineAlphabetTransport.configuration_mk, ← selectToBoolTapes_eq] at boolean
-  convert boolean using 1 <;> rfl
+        Sum.elim (cloudMemory (GraphTables.tableBits t)
+          (MachineCloudSelect.queryWord v.val i.val [])
+          (encodeWord (PreprocessingCloudIndex.cloudSelect t v i).val.val)) extra⟩ := by
+  have boolean := MachineAlphabetTransport.successfulTrace cloudAlphabet_eq
+    MachineCloudSelect.program _ _ _ (MachineCloudSelect.cloudSelectTrace t v i [] [] ambient register)
+  have transported := MachineStateEquiv.trace (selectStateEquiv σ) _ _ _ _ boolean
+  have placed := MachineCloudPadding.Placement.trace Sum.inl Sum.getLeft?
+    (fun _ => rfl) (by intro j k h; cases j <;> simp_all)
+    Sum.inl (some (.inr (.cleanup 0))) (Sum.elim (fun _ => []) extra)
+    _ selectProgram (fun _ => rfl) _ _ _ transported
+  have frame (source : MachineCloudSelect.Tape → List Bool) :
+      MachineCloudPadding.Placement.tapes Sum.getLeft? source (Sum.elim (fun _ => []) extra) =
+        Sum.elim source extra := by
+    funext k
+    cases k <;> rfl
+  simpa [MachineCloudPadding.Placement.configuration, MachineCloudPadding.Placement.label,
+    frame, MachineStateEquiv.configuration,
+    MachineAlphabetTransport.configuration_mk, MachineCloudSelect.cfg, cloudMemory_eq,
+    selectCleanState, selectStateEquiv, List.append_nil, Sum.getLeft?] using placed
 
 def selectExtraMemory (j v k offset m : Nat)
     (savedLeft savedRight localWork sizeWork : List Bool) :
@@ -770,9 +709,8 @@ def selectExtraMemory (j v k offset m : Nat)
 def selectMemory (graph : List Bool) (j v k offset m : Nat)
     (query output savedLeft savedRight localWork sizeWork : List Bool) :
     SelectTape → List Bool :=
-  selectToBoolTapes (MachineEmbedding.tapes
-    (MachineCloudSelect.memory graph [] query [] [] [] output)
-    (selectExtraMemory j v k offset m savedLeft savedRight localWork sizeWork))
+  Sum.elim (cloudMemory graph query output)
+    (selectExtraMemory j v k offset m savedLeft savedRight localWork sizeWork)
 
 @[simp] theorem selectMemory_query (graph : List Bool) (j v k o m : Nat)
     (query output a b c d : List Bool) :
@@ -870,41 +808,20 @@ theorem selectCleanupTrace (graph : List Bool) (j v k o m : Nat)
         selectMemory graph j v k o m query output a b c d⟩) =
       some ⟨none, selectCleanState ambient none,
         selectMemory graph j v k o m [] output [] [] [] []⟩ := by
-  have h0 := MachineDrain.drainTrace selectQuery (.inr (.cleanup 0))
-    (some (.inr (.cleanup 1))) selectProgram
-    (by rw [selectProgram_control]; rfl)
-    (selectMemory graph j v k o m query output a b c d) query
+  let chosen : List SelectTape :=
+    [selectQuery, .inr .localWork, .inr .sizeWork, .inr .savedLeft, .inr .savedRight]
+  let drainLabels := fun l : MachineDrainMany.Label chosen =>
+    (Sum.inr (.cleanup (MachineDrainMany.labelIndex chosen l)) : SelectLabel)
+  have run := MachineDrainMany.trace chosen drainLabels none selectProgram
+    (by
+      intro l
+      rcases l with (_ | _ | _ | _ | _ | l)
+      all_goals first | exact nomatch l | rw [selectProgram_control]; rfl)
+    (selectMemory graph j v k o m query output a b c d)
     ((ambient, MachineCloudSelect.Phase.checking), false) none
-  simp only [update_selectMemory_query] at h0
-  have h1 := MachineDrain.drainTrace (.inr .localWork) (.inr (.cleanup 1))
-    (some (.inr (.cleanup 2))) selectProgram
-    (by rw [selectProgram_control]; rfl)
-    (selectMemory graph j v k o m [] output a b c d) c
-    ((ambient, MachineCloudSelect.Phase.checking), false) none
-  simp only [update_selectMemory_local] at h1
-  have h2 := MachineDrain.drainTrace (.inr .sizeWork) (.inr (.cleanup 2))
-    (some (.inr (.cleanup 3))) selectProgram
-    (by rw [selectProgram_control]; rfl)
-    (selectMemory graph j v k o m [] output a b [] d) d
-    ((ambient, MachineCloudSelect.Phase.checking), false) none
-  simp only [update_selectMemory_size] at h2
-  have h3 := MachineDrain.drainTrace (.inr .savedLeft) (.inr (.cleanup 3))
-    (some (.inr (.cleanup 4))) selectProgram
-    (by rw [selectProgram_control]; rfl)
-    (selectMemory graph j v k o m [] output a b [] []) a
-    ((ambient, MachineCloudSelect.Phase.checking), false) none
-  simp only [update_selectMemory_left] at h3
-  have h4 := MachineDrain.drainTrace (.inr .savedRight) (.inr (.cleanup 4))
-    none selectProgram (by rw [selectProgram_control]; rfl)
-    (selectMemory graph j v k o m [] output [] b [] []) b
-    ((ambient, MachineCloudSelect.Phase.checking), false) none
-  simp only [update_selectMemory_right] at h4
-  have total := joinTrace (joinTrace (joinTrace (joinTrace h0 h1) h2) h3) h4
-  have hn : query.length + c.length + d.length + a.length + b.length + 5 =
-      ((((query.length + 1) + (c.length + 1)) + (d.length + 1)) + (a.length + 1)) +
-        (b.length + 1) := by omega
-  rw [hn]
-  exact total
+  simpa [MachineDrainMany.steps, MachineDrainMany.finalTapes, MachineDrainMany.entry,
+    MachineFiniteSequence.entry, MachineDrainMany.labelIndex, chosen, drainLabels,
+    selectExtraMemory, selectCleanState, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using run
 
 def oldSelectSteps (t : GraphTables.Table) (v : Fin t.vertices)
     (i : Fin (PreprocessingCloudIndex.cloudSize t v)) : Nat :=
@@ -953,7 +870,7 @@ theorem selectOldTrace (t : GraphTables.Table) (v : Fin t.vertices)
     simp only [List.length_append, encodeWord_length, List.length_nil]
     omega
   rw [hn] at hd
-  exact joinTrace (joinTrace (joinTrace hi hv) hc) hd
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hi hv) hc) hd
 
 def dummySelectSteps (j k o m : Nat) : Nat :=
   (2 * (j + 1) + 1) + (2 * (k + 1) + 1) + (k + 1) +
@@ -1022,7 +939,7 @@ theorem selectDummyTrace (graph : List Bool) (j v k o m : Nat) (hk : k ≤ j)
     simp only [List.length_nil, encodeWord_length, List.length_replicate]
     omega
   rw [hcleanSteps] at hcleanup
-  exact joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace
+  exact UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans
     hjcopy hkcopy) hscan) hdiffcopy) hprefix) hm) hcleanup
 
 def selectionSteps (t : GraphTables.Table) (padding : Fin t.vertices → Nat)
@@ -1058,14 +975,14 @@ theorem selectionTrace (t : GraphTables.Table) (padding : Fin t.vertices → Nat
     have hb := selectOldTrace t v ⟨i.val, hi⟩
       (PreprocessingPaddingOffsets.offset padding v.val) ambient
     simpa only [selectionSteps, dite_eq_left hi,
-      PreprocessingInternalRows.selectedIndex_old t padding v i hi] using joinTrace hc hb
+      PreprocessingInternalRows.selectedIndex_old t padding v i hi] using UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hc hb
   · simp only [ite_eq_right hi] at hc
     have hb := selectDummyTrace (GraphTables.tableBits t) i.val v.val
       (PreprocessingCloudIndex.cloudSize t v)
       (PreprocessingPaddingOffsets.offset padding v.val) t.darts (Nat.le_of_not_gt hi) ambient
     simpa only [selectionSteps, dite_eq_right hi,
       PreprocessingInternalRows.selectedIndex_dummy t padding v i (Nat.le_of_not_gt hi)]
-      using joinTrace hc hb
+      using UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hc hb
 
 theorem selectionSteps_le (t : GraphTables.Table) (padding : Fin t.vertices → Nat)
     (v : Fin t.vertices) (i : Fin (PreprocessingCloudIndex.cloudSize t v + padding v)) :
@@ -1088,36 +1005,6 @@ theorem selectionSteps_le (t : GraphTables.Table) (padding : Fin t.vertices → 
     unfold MachineUnaryLessAt.steps
     omega
 
-def selectorMachine : FinTM2 where
-  K := SelectTape
-  k₀ := .inl (.inl .original)
-  k₁ := selectOutput
-  Γ := SelectAlphabet
-  Λ := SelectLabel
-  main := .inr (.compare .scan)
-  σ := SelectState Unit
-  initialState := selectCleanState () none
-  m := selectProgram
-
-def selectionInTime (t : GraphTables.Table) (padding : Fin t.vertices → Nat)
-    (v : Fin t.vertices) (i : Fin (PreprocessingCloudIndex.cloudSize t v + padding v))
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime selectorMachine.step
-      ⟨some (.inr (.compare .scan)), selectCleanState () register,
-        selectMemory (GraphTables.tableBits t) i.val v.val
-          (PreprocessingCloudIndex.cloudSize t v)
-          (PreprocessingPaddingOffsets.offset padding v.val) t.darts [] [] [] [] [] []⟩
-      (some ⟨none, selectCleanState () none,
-        selectMemory (GraphTables.tableBits t) i.val v.val
-          (PreprocessingCloudIndex.cloudSize t v)
-          (PreprocessingPaddingOffsets.offset padding v.val) t.darts []
-          (encodeWord (PreprocessingInternalRows.selectedIndex t padding v i)) [] [] [] []⟩)
-      (10 * (GraphTables.tableBits t).length + 16 * i.val + 13 * v.val +
-        5 * PreprocessingCloudIndex.cloudSize t v +
-        2 * PreprocessingPaddingOffsets.offset padding v.val + 2 * t.darts + 57) where
-  steps := selectionSteps t padding v i
-  evals_in_steps := selectionTrace t padding v i () register
-  steps_le_m := selectionSteps_le t padding v i
 
 /-- The fixed core rotor roles use the agreed reusable 27-tape frame. -/
 def coreRotorTapes : Fin 8 → CoreTape := ![3, 7, 10, 11, 12, 9, 13, 14]
@@ -1206,16 +1093,6 @@ def coreInitialState (q : Nat) (positive : 0 < q) (ambient : σ) : CoreState σ 
   ((ambient, (MachineFixedBlockMap.emptyBuffer 4096,
     (MachineFixedDivMod.residue q positive 0, (false, MachineCloudSelect.Phase.checking)))), none)
 
-def coreMachine (q : Nat) (positive : 0 < q) (p : Fin q) : FinTM2 where
-  K := CoreTape
-  k₀ := 0
-  k₁ := 8
-  Γ _ := Bool
-  Λ := CoreLabel q
-  main := coreEntry q
-  σ := CoreState Unit q
-  initialState := coreInitialState q positive ()
-  m := coreInstruction q positive p id none
 
 def coreMemory (graph : List Bool) (x v i k o m : Nat) (rotor output : List Bool)
     (query scan flat localIndex returnPort selected : List Bool) : CoreTape → List Bool :=
@@ -1259,72 +1136,25 @@ theorem coreCleanupTrace (q : Nat) (positive : 0 < q) (p : Fin q)
     (advance (TM2.step program))^[coreCleanupSteps base]
       (some ⟨some (labels (.cleanup 0)), (ambient, none), base⟩) =
       some ⟨exit, (ambient, none), coreCleaned base⟩ := by
-  let b1 := Function.update base (10 : CoreTape) []
-  have h0 := MachineDrain.drainTrace (10 : CoreTape) (labels (.cleanup 0))
-    (some (labels (.cleanup 1))) program (code (.cleanup 0)) base (base 10) ambient none
-  rw [Function.update_eq_self] at h0
-  let b2 := Function.update b1 (11 : CoreTape) []
-  have h1 := MachineDrain.drainTrace (11 : CoreTape) (labels (.cleanup 1))
-    (some (labels (.cleanup 2))) program (code (.cleanup 1)) b1 (b1 11) ambient none
-  rw [Function.update_eq_self] at h1
-  have hw1 : b1 11 = base 11 := by simp [b1]
-  rw [hw1] at h1
-  let b3 := Function.update b2 (12 : CoreTape) []
-  have h2 := MachineDrain.drainTrace (12 : CoreTape) (labels (.cleanup 2))
-    (some (labels (.cleanup 3))) program (code (.cleanup 2)) b2 (b2 12) ambient none
-  rw [Function.update_eq_self] at h2
-  have hw2 : b2 12 = base 12 := by simp [b1, b2]
-  rw [hw2] at h2
-  let b4 := Function.update b3 (13 : CoreTape) []
-  have h3 := MachineDrain.drainTrace (13 : CoreTape) (labels (.cleanup 3))
-    (some (labels (.cleanup 4))) program (code (.cleanup 3)) b3 (b3 13) ambient none
-  rw [Function.update_eq_self] at h3
-  have hw3 : b3 13 = base 13 := by simp [b1, b2, b3]
-  rw [hw3] at h3
-  let b5 := Function.update b4 (14 : CoreTape) []
-  have h4 := MachineDrain.drainTrace (14 : CoreTape) (labels (.cleanup 4))
-    (some (labels (.cleanup 5))) program (code (.cleanup 4)) b4 (b4 14) ambient none
-  rw [Function.update_eq_self] at h4
-  have hw4 : b4 14 = base 14 := by simp [b1, b2, b3, b4]
-  rw [hw4] at h4
-  let b6 := Function.update b5 (15 : CoreTape) []
-  have h5 := MachineDrain.drainTrace (15 : CoreTape) (labels (.cleanup 5))
-    (some (labels (.cleanup 6))) program (code (.cleanup 5)) b5 (b5 15) ambient none
-  rw [Function.update_eq_self] at h5
-  have hw5 : b5 15 = base 15 := by simp [b1, b2, b3, b4, b5]
-  rw [hw5] at h5
-  let b7 := Function.update b6 (9 : CoreTape) []
-  have h6 := MachineDrain.drainTrace (9 : CoreTape) (labels (.cleanup 6))
-    (some (labels (.cleanup 7))) program (code (.cleanup 6)) b6 (b6 9) ambient none
-  rw [Function.update_eq_self] at h6
-  have hw6 : b6 9 = base 9 := by simp [b1, b2, b3, b4, b5, b6]
-  rw [hw6] at h6
-  let b8 := Function.update b7 (16 : CoreTape) []
-  have h7 := MachineDrain.drainTrace (16 : CoreTape) (labels (.cleanup 7))
-    (some (labels (.cleanup 8))) program (code (.cleanup 7)) b7 (b7 16) ambient none
-  rw [Function.update_eq_self] at h7
-  have hw7 : b7 16 = base 16 := by simp [b1, b2, b3, b4, b5, b6, b7]
-  rw [hw7] at h7
-  let b9 := Function.update b8 (17 : CoreTape) []
-  have h8 := MachineDrain.drainTrace (17 : CoreTape) (labels (.cleanup 8))
-    (some (labels (.cleanup 9))) program (code (.cleanup 8)) b8 (b8 17) ambient none
-  rw [Function.update_eq_self] at h8
-  have hw8 : b8 17 = base 17 := by simp [b1, b2, b3, b4, b5, b6, b7, b8]
-  rw [hw8] at h8
-  let b10 := Function.update b9 (18 : CoreTape) []
-  have h9 := MachineDrain.drainTrace (18 : CoreTape) (labels (.cleanup 9))
-    exit program (code (.cleanup 9)) b9 (b9 18) ambient none
-  rw [Function.update_eq_self] at h9
-  have hw9 : b9 18 = base 18 := by simp [b1, b2, b3, b4, b5, b6, b7, b8, b9]
-  rw [hw9] at h9
-  have total := (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace (joinTrace h0 h1) h2) h3) h4) h5) h6) h7) h8) h9)
-  have hn : coreCleanupSteps base =
-      (base 10).length + 1 + ((base 11).length + 1) + ((base 12).length + 1) +
-      ((base 13).length + 1) + ((base 14).length + 1) + ((base 15).length + 1) +
-      ((base 9).length + 1) + ((base 16).length + 1) + ((base 17).length + 1) +
-      ((base 18).length + 1) := by unfold coreCleanupSteps; omega
-  rw [hn]
-  exact total
+  let chosen : List CoreTape := [10, 11, 12, 13, 14, 15, 9, 16, 17, 18]
+  let drainLabels := fun l : MachineDrainMany.Label chosen =>
+    labels (.cleanup (MachineDrainMany.labelIndex chosen l))
+  have run := MachineDrainMany.trace chosen drainLabels exit program
+    (by
+      intro l
+      rw [MachineDrainMany.instruction_labelIndex chosen (fun i => labels (.cleanup i)) exit l]
+      have tapes (i : Fin 10) : chosen[i.val] = coreCleanupTape i := by
+        fin_cases i <;> rfl
+      rw [tapes]
+      exact code (.cleanup _))
+    base ambient none
+  have hsteps : MachineDrainMany.steps chosen base = coreCleanupSteps base := by
+    rw [MachineDrainMany.steps_of_nodup chosen (by decide)]
+    simp only [chosen, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+    unfold coreCleanupSteps
+    omega
+  rw [hsteps] at run
+  exact run
 
 theorem coreCleaned_memory (graph : List Bool) (x v i k o m : Nat)
     (rotor output query scan flat localIndex returnPort selected : List Bool) :
@@ -1551,7 +1381,7 @@ theorem coreTrace (q : Nat) (positive : 0 < q) (p : Fin q)
     (ambient, (MachineFixedBlockMap.emptyBuffer 4096,
       (MachineFixedDivMod.residue q positive 0, (false, MachineCloudSelect.Phase.checking))))
   rw [coreCleanupSteps_memory, coreCleaned_memory] at hc
-  have h := joinTrace (joinTrace (joinTrace hr hs) hf) hc
+  have h := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans hr hs) hf) hc
   have hbits : emittedBits q X z step.2.val =
       encodeWords (GraphTables.rowWords (PreprocessingInternalRows.row t padding tables v x p)) :=
     emittedBits_eq_row t padding tables v x p
@@ -1589,7 +1419,7 @@ theorem rotorSize_le_encodedLength {n q : Nat} (positive : 0 < q)
 
 /-- For fixed cloud degree q this is affine in the lengths and unary values
 on the actual input tapes. All relation/cleanup constants are included. -/
-def coreTimeBound (q graphLength rotorLength x v i k o m outputLength : Nat) : Nat :=
+def coreTimeBound {R : Type*} [Semiring R] (q graphLength rotorLength x v i k o m outputLength : R) : R :=
   (5 * q + 32) * rotorLength + 10 * graphLength + 2 * i + 13 * v + 5 * k +
     (5 * q + 10) * (m + o) + 4 * x + 2 * outputLength + 8 * q + 41066
 
@@ -1626,58 +1456,20 @@ theorem coreSteps_le (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
     dsimp only [R, k]
     rw [encodeWords_length, ExpanderTableWords.rotationWords_length]
     omega
-  have hrotor : rotorSteps (tables v) rank p ≤ 2 * rank.val + 6 * R + 8 := by
-    have h := rotorSteps_le (tables v) rank p
-    change rotorSteps (tables v) rank p ≤ 2 * rank.val + 5 * R + (k + padding v) * q + 8 at h
-    omega
-  have hselect : selectionSteps t padding v step.1 ≤
-      10 * L + 16 * R + 13 * v.val + 5 * k + 2 * o + 2 * t.darts + 57 := by
-    have h := selectionSteps_le t padding v step.1
-    change selectionSteps t padding v step.1 ≤
-      10 * L + 16 * step.1.val + 13 * v.val + 5 * k + 2 * o + 2 * t.darts + 57 at h
-    omega
-  have hfinish : finishSteps q X z step.2.val outputLength ≤
-      (5 * q + 7) * (t.darts + o + R) + 7 * q + 4 * X + 2 * outputLength + 40986 := by
-    have h := finishSteps_le q X z step.2.val outputLength
-    have hm := Nat.mul_le_mul_left (5 * q + 7) hz
-    omega
+  have hrotor := rotorSteps_le (tables v) rank p
+  have hselect := selectionSteps_le t padding v step.1
+  have hfinish := finishSteps_le q X z step.2.val outputLength
   have htail : tailBits.length ≤ R := encodedDrop_length_le
     (ExpanderTableWords.rotationWords (tables v)) (q * rank.val + p.val + 1)
-  have hcleanup : tailBits.length + step.1.val + step.2.val + z + 15 ≤
-      R + R + q + (t.darts + o + R) + 15 := by omega
-  calc
-    coreSteps t padding tables v x p outputLength
-        ≤ (2 * rank.val + 6 * R + 8) +
-          (10 * L + 16 * R + 13 * v.val + 5 * k + 2 * o + 2 * t.darts + 57) +
-          ((5 * q + 7) * (t.darts + o + R) + 7 * q + 4 * X + 2 * outputLength + 40986) +
-          (R + R + q + (t.darts + o + R) + 15) :=
-      Nat.add_le_add (Nat.add_le_add (Nat.add_le_add hrotor hselect) hfinish) hcleanup
-    _ = _ := by
-      change _ = coreTimeBound q L R X v.val rank.val k o t.darts outputLength
-      unfold coreTimeBound
-      ring
+  have hz' := Nat.mul_le_mul_left (5 * q + 7) hz
+  change rotorSteps (tables v) rank p + selectionSteps t padding v step.1 +
+    finishSteps q X z step.2.val outputLength +
+    (tailBits.length + step.1.val + step.2.val + z + 15) ≤
+      coreTimeBound q L R X v.val rank.val k o t.darts outputLength
+  unfold coreTimeBound
+  dsimp only [L, R, k, o] at *
+  nlinarith
 
-/-- The concrete finite machine executes the actual internal row in the
-proved affine budget and returns the reusable clean frame. -/
-def coreMachineInTime (q : Nat) (positive : 0 < q) (t : GraphTables.Table)
-    (padding : Fin t.vertices → Nat)
-    (tables : ∀ v, ExpanderTables.Table (PreprocessingCloudIndex.cloudSize t v + padding v) q)
-    (v : Fin t.vertices) (x : PreprocessingCloudIndex.PaddedCloud t padding v)
-    (p : Fin q) (output : List Bool) :
-    StateTransition.EvalsToInTime (coreMachine q positive p).step
-      ⟨some (coreEntry q), coreInitialState q positive (), coreInputTapes t padding tables v x output⟩
-      (some ⟨none, coreInitialState q positive (), coreInputTapes t padding tables v x
-        (output ++ encodeWords (GraphTables.rowWords (PreprocessingInternalRows.row t padding tables v x p)))⟩)
-      (coreTimeBound q (GraphTables.tableBits t).length
-        (encodeWords (ExpanderTableWords.rotationWords (tables v))).length
-        (PreprocessingRegularTables.vertexOrder t padding x.val).val v.val
-        (PreprocessingCloudIndex.paddedCloudRank t padding v x).val
-        (PreprocessingCloudIndex.cloudSize t v)
-        (PreprocessingPaddingOffsets.offset padding v.val) t.darts output.length) where
-  steps := coreSteps t padding tables v x p output.length
-  evals_in_steps := coreTrace q positive p id none (coreMachine q positive p).m
-    (fun _ => rfl) t padding tables v x output ()
-  steps_le_m := coreSteps_le q positive t padding tables v x p output.length
 
 end UniqueGamesTheorem.Foundations.Complexity.MachineRegularInternalRow
 

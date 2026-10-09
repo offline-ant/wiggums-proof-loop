@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.GraphCounterStartLemmas
 import OAI.Computability.UniqueGames.Machines.MachineSubroutineLemmas
@@ -16,33 +17,17 @@ inductive ExtraTape
   | counter | temporary | output
   deriving DecidableEq
 
-protected abbrev ExtraTape.enumList : List ExtraTape := [.counter, .temporary, .output]
-
-protected theorem ExtraTape.enumList_getElem?_ctorIdx_eq (x : ExtraTape) :
-    ExtraTape.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem ExtraTape.enumList_nodup : ExtraTape.enumList.Nodup := by decide
-
 instance : Fintype ExtraTape where
-  elems := ⟨ExtraTape.enumList, ExtraTape.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.counter, .temporary, .output}
+  complete x := by cases x <;> simp
 inductive Phase
   | parse | guard | bodyToTemp | tempToBody | finalToTemp | tempToOutput
   deriving DecidableEq
 
-protected abbrev Phase.enumList : List Phase := [.parse, .guard, .bodyToTemp, .tempToBody,
-  .finalToTemp, .tempToOutput]
-
-protected theorem Phase.enumList_getElem?_ctorIdx_eq (x : Phase) :
-    Phase.enumList[x.ctorIdx]? = some x := by
-  cases x <;> rfl
-
-protected theorem Phase.enumList_nodup : Phase.enumList.Nodup := by decide
-
 instance : Fintype Phase where
-  elems := ⟨Phase.enumList, Phase.enumList_nodup⟩
-  complete x := by cases x <;> decide
+  elems := {.parse, .guard, .bodyToTemp, .tempToBody,
+  .finalToTemp, .tempToOutput}
+  complete x := by cases x <;> simp
 
 abbrev Tape (M : FinTM2) := M.K ⊕ ExtraTape
 abbrev Symbols (M : FinTM2) := MachineEmbedding.Alphabet M.Γ (fun _ : ExtraTape => M.Γ M.k₀)
@@ -452,17 +437,6 @@ theorem loopBudget_eq_sum (count : Nat) (words : Nat → List Bool) (budgets : N
     simp only [Nat.zero_add]
     omega
 
-/-- The sum of supplied body budgets and explicit linear transfer overheads. -/
-def executeSequenceSum (count : Nat) (words : Nat → List Bool) (budgets : Nat → Nat)
-    (runs : ∀ i, i < count → TM2OutputsInTime M ((words i).map input.symm)
-      (some ((words (i+1)).map output.symm)) (budgets i)) :
-    TM2OutputsInTime (machine M input output)
-      ((encodeWord count ++ words 0).map input.symm)
-      (some ((words count).map input.symm))
-      (count+1 + ((∑ i ∈ Finset.range count, (budgets i+2*(words (i+1)).length+3)) +
-        2*(words count).length+3)) := by
-  rw [← loopBudget_eq_sum]
-  exact executeSequence M input output count words budgets runs
 
 omit M input output in
 /-- A uniform bound along the executed sequence is enough to bound the actual

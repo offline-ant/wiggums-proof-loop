@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineProductFieldLemmas
 import OAI.Computability.UniqueGames.Machines.MachineProductProgram
 
@@ -35,8 +36,6 @@ def baseTapes {q : Nat} (H : Instance q) (t : Nat) : Tape t → List Bool :=
 @[simp] theorem frame_accumulator {q : Nat} (H : Instance q) (t : Nat) (emitted : List Bool) :
     frame H t emitted (accumulator t) = emitted.reverse := by simp [frame, accumulator, auxiliary]
 
-@[simp] theorem frame_output {q : Nat} (H : Instance q) (t : Nat) (emitted : List Bool) :
-    frame H t emitted (output t) = [] := by simp [frame, output, auxiliary]
 
 @[simp] theorem frame_radix {q : Nat} (H : Instance q) (t : Nat) (emitted : List Bool)
     (edgeCount : Bool) :
@@ -95,11 +94,7 @@ theorem initialized_eq {q : Nat} (H : Instance q) (t : Nat) :
     rfl
 
 
-
-
 /-! The three actual output-header emissions of the product controller. -/
-
-
 
 
 noncomputable section
@@ -157,7 +152,6 @@ def powersInTime {q : Nat} (H : Instance q) (t : Nat) :
 
 end
 end UniqueGamesTheorem.Explicit.MachineProductHeaders
-
 
 
 /-! Three actual header reads for the fixed-alphabet, fixed-power product
@@ -308,7 +302,6 @@ end
 end UniqueGamesTheorem.Explicit.MachineProductHeadersRead
 
 
-
 /-! Actual literal initialization of the finitely many product power digits. -/
 
 namespace UniqueGamesTheorem.Explicit.MachineProductHeaders
@@ -393,12 +386,7 @@ def seedInTime {q : Nat} (H : Instance q) (t : Nat) :
     steps_le_m := by have h := whole.steps_le_m; omega }
 
 
-
-
 /-! Complete actual initialization of the independent-product machine. -/
-
-
-
 
 
 def initializeInTime {q : Nat} (H : Instance q) (t : Nat) :
@@ -470,7 +458,6 @@ def inPolynomialTime {q : Nat} (H : Instance q) (t : Nat) :
 
 end
 end UniqueGamesTheorem.Explicit.MachineProductHeaders
-
 
 
 /-! Whole tuple traversal of the concrete product program. The odometer theorem
@@ -664,7 +651,6 @@ end
 end UniqueGamesTheorem.Explicit.MachineProductLoop
 
 
-
 /-! Exact final cleanup and binary-output identification for the product
 controller. The final runtime bound is derived from actual stack lengths. -/
 
@@ -742,17 +728,6 @@ def finishInTime (base : Tape t → List Bool) (emptyOutput : base (output t) = 
   exact { toEvalsTo := joined.toEvalsTo
           steps_le_m := by simpa only [Nat.add_comm] using joined.steps_le_m }
 
-/-- A uniform bound on the real cleanup work, from bounds on actual stacks. -/
-theorem finishCost_le_uniform (base : Tape t → List Bool) (bound : Nat)
-    (bounded : ∀ k, (base k).length ≤ bound) :
-    SourceRuntimeFinish.finishCost (clearKeys t) (accumulator t) base ≤
-      ((clearKeys t).length + 1) * bound + (clearKeys t).length + 2 := by
-  have clear := MachineDrainMany.steps_le_uniform (clearKeys t) base bound bounded
-  have acc := bounded (accumulator t)
-  unfold SourceRuntimeFinish.finishCost
-  rw [Nat.add_mul, Nat.one_mul]
-  rw [Nat.mul_add, Nat.mul_one] at clear
-  omega
 
 theorem finish_afterRows (H : Target.Instance q)
     (presentation : MachineOutputContract.SimpleBipartite H) (t : Nat) (ht : 0 < t) :

@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.DeriveFintype
 import OAI.Computability.UniqueGames.Machines.MachineBinaryFormulaLemmas
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -196,10 +197,6 @@ theorem literalTrace (slot : Fin 3) (literal : Literal)
   rw [nameTrace]
   simp only [nameBits, List.reverse_cons, List.append_assoc, List.singleton_append]
 
-private theorem joinTrace {X : Type*} {f : X → X} {a b c : X} {n m : Nat}
-    (first : f^[n] a = b) (second : f^[m] b = c) : f^[n + m] a = c := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
-
 /-- Three literal subroutines return to the next clause boundary. -/
 theorem clauseTrace (clause : Clause) (suffix reversed output : List Bool)
     (register : Option Bool) :
@@ -214,7 +211,7 @@ theorem clauseTrace (clause : Clause) (suffix reversed output : List Bool)
     ((literalBits clause[1]).reverse ++ ((literalBits clause[0]).reverse ++ reversed)) output none
   simp only [afterName_zero, afterName_one, afterName_two, List.append_assoc]
     at first second third
-  have full := joinTrace (joinTrace first second) third
+  have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second) third
   have htime : (clause[0].name.size + 2 + (clause[1].name.size + 2)) +
       (clause[2].name.size + 2) = clauseNameSize clause + 6 := by
     simp [clauseNameSize, clauseNames]
@@ -262,7 +259,7 @@ theorem stripTrace (clauses : List Clause) (suffix reversed output : List Bool)
           clauseStep (clauseBits clause ++ (clausesBits clauses ++ suffix)) reversed output register
       have second := clauseTrace clause (clausesBits clauses ++ suffix) reversed output none
       have third := ih ((clauseBits clause).reverse ++ reversed) none
-      have full := joinTrace (joinTrace first second) third
+      have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second) third
       have htime : (1 + (clauseNameSize clause + 6)) +
           (7 * clauses.length + namesBitSize clauses + 1) =
           7 * (clause :: clauses).length + namesBitSize (clause :: clauses) + 1 := by
@@ -312,7 +309,7 @@ theorem acceptTrace (formula : Formula) :
   simp only [List.append_nil] at first
   have second := restoreTrace (tokens formula.clauses) [] [] none
   simp only [List.append_nil] at second
-  have full := joinTrace first second
+  have full := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans first second
   have htime : (7 * formula.clauses.length + namesBitSize formula.clauses + 1) +
       ((tokens formula.clauses).length + 1) =
       13 * formula.clauses.length + 3 * namesBitSize formula.clauses + 2 := by

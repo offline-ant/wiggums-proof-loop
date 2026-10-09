@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCanonicalOutputLemmas
 import OAI.Computability.UniqueGames.Machines.MachineLazyTable
 import OAI.Computability.UniqueGames.PCP.PreprocessingTablesLemmas
@@ -23,9 +24,6 @@ def rawProgram (d : Nat) (positive : 0 < d) :
   initial := MachineLazyTable.clean d positive
   code := MachineLazyTable.program d positive
 
-theorem sourceMachine_eq (d : Nat) (positive : 0 < d) :
-    MachineCanonicalOutput.sourceMachine (rawProgram d positive) =
-      MachineLazyTable.machine d positive := rfl
 
 /-- A fixed explicit list of every non-output tape, independent of input data. -/
 def cleanupTapes : List Tape :=

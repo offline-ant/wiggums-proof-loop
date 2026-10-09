@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineCeilingPower
 import OAI.Computability.UniqueGames.Machines.MachineCloudPadding
 import OAI.Computability.UniqueGames.Machines.MachineCompositionLemmas
@@ -49,45 +50,12 @@ theorem combinedCost_le (k : Nat) :
   unfold timeCoefficient
   nlinarith only [h]
 
-theorem familyCost_le
-    (H : Table (cloudSize PCP.Expanders.baseDegree) PCP.Expanders.baseDegree) (k : Nat) :
-    (MachineCeilingPower.timePolynomial PCP.ExpanderFamily.growth).eval
-        (encodeWord k).length +
-      MachineExpanderFamilyBounds.familyBudget H (PCP.PreprocessingLevels.boundedLevel k) ≤
-        timePolynomial.eval (encodeWord k).length := by
-  exact (Nat.add_le_add_left
-    (MachineExpanderFamilyBounds.familyBudget_at_boundedLevel_le H k) _).trans
-      (combinedCost_le k)
 
 def outputWord
     (H : Table (cloudSize PCP.Expanders.baseDegree) PCP.Expanders.baseDegree) (k : Nat) :
     List Bool :=
   encodeWords (rotationWords (family H (PCP.PreprocessingLevels.boundedLevel k)))
 
-def outputCoefficient : Nat :=
-  (PCP.ExpanderFamily.growth * degree PCP.Expanders.baseDegree + 1)^2
-
-/-- Complete unary rotation-table output, including every delimiter. -/
-theorem outputWord_length_le
-    (H : Table (cloudSize PCP.Expanders.baseDegree) PCP.Expanders.baseDegree) (k : Nat) :
-    (outputWord H k).length ≤ outputCoefficient * (k + 1)^2 := by
-  let q := degree PCP.Expanders.baseDegree
-  let N := vertexCount q (PCP.PreprocessingLevels.boundedLevel k)
-  have sizeBound : N ≤ PCP.ExpanderFamily.growth * (k + 1) := by
-    change vertexCount (PCP.Expanders.baseDegree * PCP.Expanders.baseDegree)
-      (PCP.PreprocessingLevels.boundedLevel k) ≤ _
-    rw [PCP.PreprocessingLevels.table_vertexCount_eq_paddedSize]
-    exact MachineExpanderFamilyBounds.paddedSize_le_succ_input k
-  have rowBound := Nat.mul_le_mul_right q sizeBound
-  have rowSuccBound : N * q + 1 ≤ (PCP.ExpanderFamily.growth * q + 1) * (k + 1) := by
-    nlinarith only [rowBound, Nat.zero_le k]
-  have lengthBound : (outputWord H k).length ≤ (N * q) * (N * q + 1) :=
-    encode_rotationWords_length_le (family H (PCP.PreprocessingLevels.boundedLevel k))
-  calc
-    _ ≤ (N * q + 1)^2 := by nlinarith only [lengthBound, Nat.zero_le (N * q)]
-    _ ≤ ((PCP.ExpanderFamily.growth * q + 1) * (k + 1))^2 :=
-      Nat.pow_le_pow_left rowSuccBound 2
-    _ = _ := by unfold outputCoefficient; dsimp [q]; ring
 
 end UniqueGamesTheorem.Foundations.Complexity.MachinePaddedExpanderFamilyBounds
 
@@ -348,12 +316,6 @@ theorem family_final_configuration {ρ : Type} (H : SmallTable) (requested : Nat
   simp only [MachineStateFrame.frameConfiguration, Placement.configuration, Placement.label,
     family_final_tapes, finalState]
 
-@[simp] theorem handoffTapes_level (requested : Nat) :
-    handoffTapes requested (ceilingTape .level) =
-      encodeWord (PCP.PreprocessingLevels.boundedLevel requested) := by
-  simp [handoffTapes, ceilingTape, MachineExpanderFamily.toBoolTapes,
-    MachineExpanderFamily.toBoolWord, MachineExpanderFamily.initialTapes,
-    MachineEmbedding.tapes]
 
 @[simp] theorem handoffTapes_level_shadow (requested : Nat) :
     handoffTapes requested (.inr .level) = [] := rfl
@@ -460,27 +422,6 @@ noncomputable def paddedInTime (H : SmallTable) (requested : Nat)
         (by simpa only [Nat.add_comm] using
           MachinePaddedExpanderFamilyBounds.combinedCost_le requested) }
 
-/-- Static placements of the complete computation into a larger caller
-preserve every complement tape and consume exactly the same runtime budget. -/
-noncomputable def placedInTime {K Λ : Type} [DecidableEq K]
-    (tape : Tape → K) (view : K → Option Tape)
-    (left : ∀ t, view (tape t) = some t)
-    (right : ∀ j t, view j = some t → tape t = j)
-    (labels : Label → Λ) (exit : Option Λ) (extra : K → List Bool)
-    (H : SmallTable) (target : Λ → TM2.Stmt (fun _ : K => Bool) Λ (State ρ))
-    (code : ∀ l, target (labels l) = Placement.statement tape labels exit (program H l))
-    (requested : Nat) (state : MachineExpanderFamily.State ρ fixedDegree)
-    (register : Option Bool) :
-    StateTransition.EvalsToInTime (TM2.step target)
-      (Placement.configuration view labels exit extra
-        ⟨some main, initialState state register, initialTapes requested⟩)
-      (some (Placement.configuration view labels exit extra
-        ⟨none, finalState H state, finalTapes H requested⟩))
-      (MachinePaddedExpanderFamilyBounds.timePolynomial.eval (encodeWord requested).length) :=
-  liftExecutionInTime (TM2.step (program H)) (TM2.step target)
-    (Placement.configuration view labels exit extra)
-    (Placement.step_simulation tape view left right labels exit extra (program H) target code)
-    (paddedInTime H requested state register)
 
 end UniqueGamesTheorem.Foundations.Complexity.MachinePaddedExpanderFamily
 

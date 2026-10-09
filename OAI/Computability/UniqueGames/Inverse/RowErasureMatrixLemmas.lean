@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Inverse.RowErasureLemmas
 import OAI.Computability.UniqueGames.Inverse.RowErasureTail
 import OAI.Computability.UniqueGames.Inverse.ShortcodeInterfaceLemmas
@@ -55,10 +56,8 @@ theorem expect_prod {X Y : Type*} [Fintype X] [Fintype Y]
     (f : X × Y → ℝ) :
     Finset.univ.expect f =
       Finset.univ.expect (fun x => Finset.univ.expect fun y => f (x, y)) := by
-  simp only [Finset.expect_eq_sum_div_card, Finset.card_univ,
-    Fintype.card_prod, Nat.cast_mul, Fintype.sum_prod_type]
-  simp only [div_eq_mul_inv, ← Finset.sum_mul, mul_inv_rev]
-  ring
+  simpa only [Finset.univ_product_univ] using
+    Finset.expect_product (Finset.univ : Finset X) (Finset.univ : Finset Y) f
 
 theorem left_uniform {ell m : ℕ} (B : Mat ell m → Prop) :
     uniformMass (fun e : Samples ell m => B (left e)) = uniformMass B := by
@@ -123,25 +122,6 @@ theorem described_inverse {ell m r : ℕ} (α η : ℝ)
     simpa only [describe_toSlice, describe_coefficient, describe_intercept,
       padSlice_affineAgreement S hrows hcols] using hagree
 
-/-- Concrete fixed-context advice lower bound. All full matrix and row-map
-samples are uniform. The still-required mathematical premises are visible:
-the actual shortcode inverse and a simultaneous small-replacement witness. -/
-theorem advice_mass_ge_of_inverse_and_erasure {ell m r : ℕ}
-    (f : Mat ell m → Vector ell) (η α : ℝ) (hη : 0 < η) (hα : 0 < α)
-    (haccept : 4 * η ≤ Shortcode.equalityAcceptance f)
-    (inverse : ∀ g : Mat ell m → Vector ell,
-      η ≤ Shortcode.equalityAcceptance g → HasAffineSlice g α r)
-    (erasure : ∃ replacement : Mat ell m → Vector ell,
-      ∀ d : Description ell m r, ((family ell m r).points d).Nonempty →
-        (family ell m r).randomizedAgreement
-          ((family ell m r).erasedUnion f α) replacement d < α / 4) :
-    η / (2 ^ (ell * r) : ℝ) ≤ adviceMass ((family ell m r).goodAt f α) := by
-  have hmass := (family ell m r).union_mass_ge_of_inverse_and_erasure
-    left right f η α hη hα
-    (by simpa only [acceptance_eq] using haccept)
-    left_uniform right_uniform (described_inverse α η inverse) erasure
-  have h := adviceMass_ge_of_union_mass ((family ell m r).goodAt f α) η hmass
-  simpa only [card_rowMap, Nat.cast_pow, Nat.cast_ofNat] using h
 
 end
 end UniqueGamesTheorem.Inverse.RowErasureMatrix
@@ -187,22 +167,6 @@ theorem exists_replacement_of_budget {ell m r : ℕ}
         (-(α ^ 2 * (2 : ℝ) ^ ((ell - r) * (m - r))) / 32)).le
   · simpa only [card_description, Nat.cast_pow, Nat.cast_ofNat] using hbudget
 
-/-- The random-erasure obligation is discharged here by proved finite product
-concentration and concrete slice counts. The inverse hypothesis is still the
-genuine new-route mathematical input. -/
-theorem advice_mass_ge_of_inverse_and_budget {ell m r : ℕ}
-    (f : Mat ell m → Vector ell) (η α : ℝ) (hη : 0 < η)
-    (hα : 0 < α) (hαone : α ≤ 1)
-    (halphabet : 1 / (2 ^ ell : ℝ) ≤ α / 8)
-    (haccept : 4 * η ≤ Shortcode.equalityAcceptance f)
-    (inverse : ∀ g : Mat ell m → Vector ell,
-      η ≤ Shortcode.equalityAcceptance g → HasAffineSlice g α r)
-    (hbudget : (2 : ℝ) ^ ((2 * r + 1) * (ell + m)) *
-      Real.exp (-(α ^ 2 * (2 : ℝ) ^ ((ell - r) * (m - r))) / 32) < 1) :
-    η / (2 ^ (ell * r) : ℝ) ≤ adviceMass ((family ell m r).goodAt f α) := by
-  exact advice_mass_ge_of_inverse_and_erasure f η α hη hα haccept inverse
-    (exists_replacement_of_budget ((family ell m r).erasedUnion f α)
-      α hα hαone halphabet hbudget)
 
 end
 end UniqueGamesTheorem.Inverse.RowErasureMatrix
@@ -235,22 +199,6 @@ theorem exists_erasure_threshold (α : ℝ) (hα : 0 < α) (hαone : α ≤ 1)
   apply exists_replacement_of_budget B α hα hαone halphabet
   simpa only [neg_mul] using (hm₀ m hm).2
 
-/-- For sufficiently many columns, every accepted function has a positive
-measure of good row advice, assuming the genuine bounded-slice inverse. -/
-theorem exists_fixed_context_advice_threshold (η α : ℝ)
-    (hη : 0 < η) (hα : 0 < α) (hαone : α ≤ 1)
-    (ell r : ℕ) (hr : r < ell) (halphabet : 1 / (2 ^ ell : ℝ) ≤ α / 8) :
-    ∃ m₀ : ℕ, ∀ m : ℕ, m₀ ≤ m →
-      (∀ g : Mat ell m → Vector ell,
-        η ≤ Shortcode.equalityAcceptance g → HasAffineSlice g α r) →
-      ∀ f : Mat ell m → Vector ell,
-        4 * η ≤ Shortcode.equalityAcceptance f →
-          η / (2 ^ (ell * r) : ℝ) ≤ adviceMass ((family ell m r).goodAt f α) := by
-  obtain ⟨m₀, hm₀⟩ := exists_erasure_threshold α hα hαone ell r hr halphabet
-  refine ⟨m₀, ?_⟩
-  intro m hm inverse f haccept
-  exact advice_mass_ge_of_inverse_and_erasure f η α hη hα haccept inverse
-    (hm₀ m hm ((family ell m r).erasedUnion f α))
 
 theorem exists_contextual_advice_threshold (η α : ℝ)
     (hη : 0 < η) (hα : 0 < α) (hαone : α ≤ 1)
@@ -313,15 +261,6 @@ theorem SliceFamily.chosenDescription_spec (F : SliceFamily X Y A S D)
       α / 2 ≤ F.agreement f (F.chosenDescription f α a s hgood) :=
   Classical.choose_spec hgood
 
-theorem SliceFamily.chosenDescription_congr (F : SliceFamily X Y A S D)
-    (f : X → Y) (α : ℝ) {a a' : A} {s s' : S}
-    (hgood : F.GoodAdvice f α a s) (hgood' : F.GoodAdvice f α a' s')
-    (ha : a = a') (hs : s = s') :
-    F.chosenDescription f α a s hgood =
-      F.chosenDescription f α a' s' hgood' := by
-  subst a'
-  subst s'
-  rfl
 
 /-- A total visible selector. Bad advice has no selected witness. -/
 def SliceFamily.selectedDescription (F : SliceFamily X Y A S D)
@@ -356,13 +295,6 @@ theorem SliceFamily.selectedDescription_spec (F : SliceFamily X Y A S D)
   rw [← hd]
   exact F.chosenDescription_spec f α a s hgood
 
-theorem SliceFamily.selectedDescription_congr (F : SliceFamily X Y A S D)
-    (f : X → Y) (α : ℝ) {a a' : A} {s s' : S}
-    (ha : a = a') (hs : s = s') :
-    F.selectedDescription f α a s = F.selectedDescription f α a' s' := by
-  subst a'
-  subst s'
-  rfl
 
 /-- Good visible advice and the selected column restrictions on the hidden
 matrix. The selector receives only its observed row value. -/
@@ -712,9 +644,8 @@ end
 section
 
 /-!
-Exact uniform parametrization of the concrete row/column slice.  The quotient
-parameter describes every point, not only a lower-bounding subfamily.  Affine
-targets retain the base-point contribution and their original intercept.
+Exact cardinality of a concrete row/column slice, using the quotient
+parametrization from the shortcode interface.
 -/
 
 namespace UniqueGamesTheorem.Inverse.Shortcode.Slice
@@ -723,70 +654,6 @@ noncomputable section
 open scoped BigOperators Matrix
 
 variable {ell m : ℕ}
-
-theorem difference_row_zero (S : Slice ell m) {M M₀ : Mat ell m}
-    (hM : S.Contains M) (h₀ : S.Contains M₀) :
-    S.rowMap.comp (Matrix.toLin' (M - M₀)) = 0 := by
-  apply LinearMap.toMatrix'.injective
-  rw [LinearMap.toMatrix'_comp, LinearMap.toMatrix'_toLin']
-  have hrow : LinearMap.toMatrix' S.rowMap = S.rowCoefficient :=
-    LinearMap.toMatrix'_toLin' S.rowCoefficient
-  rw [hrow]
-  ext i j
-  change (∑ a, S.rowCoefficient i a * (M - M₀) a j) = 0
-  simp only [Matrix.sub_apply, mul_sub, Finset.sum_sub_distrib]
-  rw [hM.1 i j, h₀.1 i j, sub_self]
-
-theorem difference_range_le (S : Slice ell m) {M M₀ : Mat ell m}
-    (hM : S.Contains M) (h₀ : S.Contains M₀) :
-    LinearMap.range (Matrix.toLin' (M - M₀)) ≤ S.rowMap.ker := by
-  rintro _ ⟨v, rfl⟩
-  have h := LinearMap.congr_fun (S.difference_row_zero hM h₀) v
-  exact h
-
-theorem difference_vanishes_columns (S : Slice ell m) {M M₀ : Mat ell m}
-    (hM : S.Contains M) (h₀ : S.Contains M₀) :
-    S.columnSpan ≤ LinearMap.ker (Matrix.toLin' (M - M₀)) := by
-  apply Submodule.span_le.mpr
-  rintro _ ⟨i, rfl⟩
-  change Matrix.toLin' (M - M₀) (S.columnCoefficient i) = 0
-  have he : Matrix.toLin' (M - M₀) (S.columnCoefficient i) =
-      evaluate M (S.columnCoefficient i) - evaluate M₀ (S.columnCoefficient i) := by
-    rw [map_sub, LinearMap.sub_apply]
-    rfl
-  rw [he, hM.2 i, h₀.2 i, sub_self]
-
-/-- Every actual slice point differs from the base by a unique quotient map. -/
-theorem directionEmbedding_surjective (S : Slice ell m)
-    (M₀ : Mat ell m) (h₀ : S.Contains M₀) :
-    Function.Surjective (S.directionEmbedding M₀ h₀) := by
-  intro M
-  have hM : S.Contains M.val := by
-    simpa only [points, Finset.mem_filter, Finset.mem_univ, true_and] using M.property
-  obtain ⟨N, hN⟩ :=
-    RowErasureSliceQuotient.exists_direction_of_row_and_column
-      S.rowMap S.columnSpan (Matrix.toLin' (M.val - M₀))
-      (S.difference_vanishes_columns hM h₀) (S.difference_range_le hM h₀)
-  have hdir : S.directionMap N = Matrix.toLin' (M.val - M₀) := hN
-  have hmat : S.directionMatrix N = M.val - M₀ := by
-    unfold directionMatrix
-    rw [hdir, LinearMap.toMatrix'_toLin']
-  refine ⟨N, ?_⟩
-  apply Subtype.ext
-  change M₀ + S.directionMatrix N = M.val
-  rw [hmat]
-  abel
-
-/-- The concrete simultaneous slice is exactly an affine copy of
-`Hom(domain / columnSpan, commonRowKernel)`. -/
-def directionEquiv (S : Slice ell m) (M₀ : Mat ell m) (h₀ : S.Contains M₀) :
-    S.Directions ≃ S.points :=
-  Equiv.ofBijective (S.directionEmbedding M₀ h₀)
-    ⟨(S.directionEmbedding M₀ h₀).injective, S.directionEmbedding_surjective M₀ h₀⟩
-
-@[simp] theorem directionEquiv_val (S : Slice ell m) (M₀ : Mat ell m)
-    (h₀ : S.Contains M₀) (N : S.Directions) :
-    (S.directionEquiv M₀ h₀ N).val = M₀ + S.directionMatrix N := rfl
 
 instance directionsFintype (S : Slice ell m) : Fintype S.Directions := by
   classical
@@ -800,45 +667,6 @@ theorem card_points_eq_directions (S : Slice ell m) (M₀ : Mat ell m)
     (h₀ : S.Contains M₀) : S.points.card = Nat.card S.Directions := by
   rw [← Nat.card_eq_finsetCard, Nat.card_congr (S.directionEquiv M₀ h₀).symm]
 
-/-- Uniform quotient parameters give precisely the uniform measure on the
-actual finite slice, including all its inhomogeneous row/column equations. -/
-theorem points_expect_eq_directions (S : Slice ell m) (M₀ : Mat ell m)
-    (h₀ : S.Contains M₀) (f : Mat ell m → ℝ) :
-    S.points.expect f = 𝔼 N : S.Directions, f (M₀ + S.directionMatrix N) := by
-  have h := Fintype.expect_equiv (S.directionEquiv M₀ h₀)
-    (fun N => f (M₀ + S.directionMatrix N)) (fun M => f M.val) (fun _ => rfl)
-  rw [h, Fintype.expect_eq_sum_div_card, Finset.expect_eq_sum_div_card]
-  simp only [Fintype.card_coe, Finset.sum_coe_sort]
-
-theorem directionMatrix_evaluate (S : Slice ell m) (N : S.Directions) (z : Vector m) :
-    evaluate (S.directionMatrix N) z = (N (S.columnSpan.mkQ z) : Vector ell) := by
-  change (S.directionMatrix N) *ᵥ z = _
-  rw [directionMatrix, LinearMap.toMatrix'_mulVec]
-  rfl
-
-/-- The decoder's affine offset is the original intercept plus the base
-matrix evaluated at the target; it is not silently replaced by zero. -/
-theorem direction_affine_target (S : Slice ell m) (M₀ : Mat ell m)
-    (N : S.Directions) (z : Vector m) (u : Vector ell) :
-    evaluate (M₀ + S.directionMatrix N) z + u =
-      (N (S.columnSpan.mkQ z) : Vector ell) + (evaluate M₀ z + u) := by
-  have he : evaluate (M₀ + S.directionMatrix N) z =
-      evaluate M₀ z + evaluate (S.directionMatrix N) z := by
-    ext i
-    simp [evaluate, add_mul, Finset.sum_add_distrib]
-  rw [he, S.directionMatrix_evaluate]
-  abel
-
-theorem affineAgreement_eq_directions (S : Slice ell m) (M₀ : Mat ell m)
-    (h₀ : S.Contains M₀) (f : Mat ell m → Vector ell)
-    (z : Vector m) (u : Vector ell) :
-    S.affineAgreement f z u = 𝔼 N : S.Directions,
-      if f (M₀ + S.directionMatrix N) =
-        (N (S.columnSpan.mkQ z) : Vector ell) + (evaluate M₀ z + u)
-      then (1 : ℝ) else 0 := by
-  classical
-  rw [affineAgreement, S.points_expect_eq_directions M₀ h₀]
-  simp only [S.direction_affine_target]
 
 end
 end UniqueGamesTheorem.Inverse.Shortcode.Slice

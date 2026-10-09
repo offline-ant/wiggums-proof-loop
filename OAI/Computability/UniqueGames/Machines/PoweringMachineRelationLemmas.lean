@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.MachineLookupLemmas
 import OAI.Computability.UniqueGames.PCP.PortTableLookup
@@ -71,11 +72,6 @@ theorem steps_le (table : PortTables.Table n d) (vertex : Fin n) (port : Fin d)
     (selected table vertex port position)
     (Nat.le_trans (Nat.le_of_lt vertex.isLt) (PortTables.vertices_le_tableBits_length table))
 
-/-- The semantic two-label predicate is the field used by the row producer. -/
-theorem value_eq_accepts (table : PortTables.Table n d) (vertex : Fin n) (port : Fin d)
-    (left right : PortTables.Label) :
-    value table vertex port (GraphTables.relationIndex (left, right)) =
-      GraphTables.bitWord (PortTables.accepts table (vertex, port) left right) := rfl
 
 def machine (degree : Nat) (port : Fin degree) (position : Fin 4096) : FinTM2 :=
   MachineAffineLookup.machine (4098 * degree) (4098 * port.val + 4 + position.val)
@@ -253,19 +249,6 @@ theorem steps_le (table : PortTables.Table n d) (vertex : Fin n) (port : Fin d) 
   unfold steps
   omega
 
-/-- Its finite description depends on the fixed degree and selected port;
-the vertex count and graph table are runtime tape data. -/
-def machine (degree port : Nat) : FinTM2 where
-  K := Fin 7
-  k₀ := 0
-  k₁ := 5
-  Γ _ := Bool
-  Λ := Label
-  main := .reverse .seed
-  σ := Unit × Option Bool
-  initialState := ((),none)
-  m := instruction id degree port id none
-
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineRotor
 
 /-! Fixed port words are executed by a finite chain of actual rotor programs.
@@ -290,8 +273,7 @@ def first (t : Nat) : Fin (t + 1) := ⟨0, by omega⟩
 def shift (t : Nat) : Tape t → Tape (t + 1) := Sum.map id Fin.succ
 
 theorem shift_injective (t : Nat) : Function.Injective (shift t) := by
-  intro a b h
-  cases a <;> cases b <;> simp_all [shift]
+  exact Function.Injective.sumMap Function.injective_id (Fin.succ_injective (t + 1))
 
 def rotorRole (t : Nat) (i : Fin 7) : Tape (t + 1) :=
   if i = 0 then .inl 0 else if i = 1 then .inr (first (t + 1)) else
@@ -469,17 +451,6 @@ theorem steps_le (table : PortTables.Table n d) (t : Nat)
       simp only [steps, Nat.mul_add, Nat.add_mul, Nat.mul_one, Nat.mul_assoc] at ht ⊢
       omega
 
-def machine (degree t : Nat) (ports : Fin t → Fin degree) : FinTM2 where
-  K := Tape t
-  k₀ := .inl 0
-  k₁ := .inl 5
-  Γ _ := Bool
-  Λ := Label t
-  main := entry t
-  σ := Unit × Option Bool
-  initialState := ((),none)
-  m := instruction t id ports id none
-
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineWord
 
 /-! A fixed shared tape layout for the actual powering field subroutines.
@@ -519,9 +490,8 @@ def trajectoryPlacement {t max : Nat} (h : t ≤ max) : Fin (t + 1) → Tape max
   Fin.cases (start max) (fun i => .inr (Fin.castLE h i))
 
 def wordPlacement {t max : Nat} (h : t ≤ max) (target : Bool) :
-    PoweringMachineWord.Tape t → Tape max
-  | .inl i => .inl (wordSharedRole target i)
-  | .inr i => trajectoryPlacement h i
+    PoweringMachineWord.Tape t → Tape max :=
+  Sum.elim (Sum.inl ∘ wordSharedRole target) (trajectoryPlacement h)
 
 @[simp] theorem wordPlacement_inl_zero {t max : Nat} (h : t ≤ max) (target : Bool) :
     wordPlacement h target (.inl 0) = table max := rfl
@@ -569,30 +539,11 @@ theorem wordSharedRole_ne_start (target : Bool) :
     ∀ i : Fin 6, wordSharedRole target i ≠ 1 := by
   cases target <;> decide
 
-theorem wordSharedRole_ne_rowOutput (target : Bool) :
-    ∀ i : Fin 6, wordSharedRole target i ≠ 10 := by
-  cases target <;> decide
 
 theorem trajectoryPlacement_injective {t max : Nat} (ht : t ≤ max) :
     Function.Injective (trajectoryPlacement ht) := by
-  intro a b
-  refine Fin.cases ?_ (fun i => ?_) a
-  · refine Fin.cases ?_ (fun j => ?_) b
-    · intro _
-      rfl
-    · intro h
-      change (Sum.inl (1 : Fin 11) : Tape max) = .inr (Fin.castLE ht j) at h
-      cases h
-  · refine Fin.cases ?_ (fun j => ?_) b
-    · intro h
-      change (Sum.inr (Fin.castLE ht i) : Tape max) = .inl (1 : Fin 11) at h
-      cases h
-    · intro h
-      change (Sum.inr (Fin.castLE ht i) : Tape max) = .inr (Fin.castLE ht j) at h
-      have hc : Fin.castLE ht i = Fin.castLE ht j := Sum.inr.inj h
-      have hv : i.val = j.val := congrArg (fun x : Fin max => x.val) hc
-      have hij : i = j := Fin.ext hv
-      exact congrArg Fin.succ hij
+  exact Fin.cons_injective_of_injective (by simp [start])
+    (Sum.inr_injective.comp (Fin.castLE_injective ht))
 
 theorem wordShared_ne_trajectory {t max : Nat} (ht : t ≤ max) (target : Bool)
     (i : Fin 6) :
@@ -610,20 +561,8 @@ theorem wordShared_ne_trajectory {t max : Nat} (ht : t ≤ max) (target : Bool)
 /-- Every tape used by a bounded word is placed on its own physical tape. -/
 theorem wordPlacement_injective {t max : Nat} (ht : t ≤ max) (target : Bool) :
     Function.Injective (wordPlacement ht target) := by
-  intro a b h
-  cases a with
-  | inl i =>
-      cases b with
-      | inl j =>
-          exact congrArg Sum.inl (wordSharedRole_injective target (Sum.inl.inj h))
-      | inr j =>
-          exact False.elim (wordShared_ne_trajectory ht target i j h)
-  | inr i =>
-      cases b with
-      | inl j =>
-          exact False.elim (wordShared_ne_trajectory ht target j i h.symm)
-      | inr j =>
-          exact congrArg Sum.inr (trajectoryPlacement_injective ht h)
+  exact (Sum.inl_injective.comp (wordSharedRole_injective target)).sumElim
+    (trajectoryPlacement_injective ht) (wordShared_ne_trajectory ht target)
 
 theorem relationPlacement_injective (max : Nat) : Function.Injective (relationPlacement max) := by
   intro i j h
@@ -633,31 +572,6 @@ theorem equalityPlacement_injective (max : Nat) : Function.Injective (equalityPl
   intro i j h
   fin_cases i <;> fin_cases j <;> simp_all [equalityPlacement]
 
-/-- Word subroutines cannot use the row-output tape, even temporarily. -/
-theorem wordPlacement_ne_rowOutput {t max : Nat} (ht : t ≤ max) (target : Bool)
-    (i : PoweringMachineWord.Tape t) : wordPlacement ht target i ≠ rowOutput max := by
-  cases i with
-  | inl i =>
-      intro h
-      exact wordSharedRole_ne_rowOutput target i (Sum.inl.inj h)
-  | inr j =>
-      refine Fin.cases ?_ (fun i => ?_) j
-      · intro h
-        change (Sum.inl (1 : Fin 11) : Tape max) = .inl (10 : Fin 11) at h
-        have hne : (1 : Fin 11) ≠ 10 := by decide
-        exact hne (Sum.inl.inj h)
-      · intro h
-        change (Sum.inr (Fin.castLE ht i) : Tape max) = .inl (10 : Fin 11) at h
-        cases h
-
-/-- A shared role is disjoint from every trajectory tape. This supplies the
-position-frame premise of `PoweringMachineWord.finalTapes_other`. -/
-theorem shared_ne_wordPlacement_succ {t max : Nat} (ht : t ≤ max) (target : Bool)
-    (role : Fin 11) (i : Fin t) :
-    (Sum.inl role : Tape max) ≠ wordPlacement ht target (.inr i.succ) := by
-  intro h
-  change (Sum.inl role : Tape max) = .inr (Fin.castLE ht i) at h
-  cases h
 
 end UniqueGamesTheorem.Foundations.Complexity.PoweringMachineTapes
 

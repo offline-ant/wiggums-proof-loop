@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Tactic.FinCases
 import OAI.Computability.UniqueGames.Machines.GraphCounterModel
 
@@ -20,10 +21,6 @@ def frame (input archive counter reversed output : List Bool) : Tape → List Bo
   | .inr .archive => archive
   | .inr .scratch => reversed
   | .inr .output => output
-
-private theorem trace_trans {α : Type*} (f : α → α) {a b : Nat} {x y z : α}
-    (first : f^[a] x = y) (second : f^[b] y = z) : f^[a + b] x = z := by
-  rw [Nat.add_comm, Function.iterate_add_apply, first, second]
 
 theorem start_eq (counter rest original : List Bool) :
     clockConfiguration (extraTapes rest original) none
@@ -141,8 +138,7 @@ theorem finishTrace (counter rest original : List Bool) :
         (haltList MachineLogCounter.machine counter))) =
       some (haltList machine (counter ++ original)) := by
   rw [start_eq]
-  have total := trace_trans _
-    (trace_trans _ (trace_trans _ (drainTrace rest original counter)
+  have total := UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (UniqueGamesTheorem.Foundations.Complexity.MachineComposition.iterate_trans (drainTrace rest original counter)
       (clockCopyTrace original counter)) (archiveCopyTrace original counter))
     (reverseTrace original counter)
   simpa only [show rest.length + 1 + (counter.length + 1) + (original.length + 1) +

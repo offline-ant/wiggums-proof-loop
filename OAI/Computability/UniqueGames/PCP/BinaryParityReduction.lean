@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import OAI.Computability.UniqueGames.Machines.MachineBinaryInputReductionLemmas
 import OAI.Computability.UniqueGames.Machines.MachineClone100
 import OAI.Computability.UniqueGames.PCP.SourceIncidence
@@ -114,14 +115,6 @@ theorem parity_soundness {ξ : ℚ} (R : Reduction ξ) (word : List Bool)
     simpa only [Rat.cast_div, Rat.cast_ofNat] using ((Rat.cast_le (K := ℝ)).mpr hq)
   exact (SourceIncidence.paritySuccess_input (R.reduce word) a).trans_le hreal
 
-theorem ordinaryGame_soundness {ξ : ℚ} (R : Reduction ξ) (word : List Bool)
-    (no : ¬ BinaryLanguage.language word) :
-    (UniqueGamesTheorem.Clean.IncidenceGap.fourAnswerGame
-      (SourceIncidence.incidence (HastadSource.asSource (R.reduce word)))
-      (UniqueGamesTheorem.Foundations.Games.FiniteDistribution.uniform
-        (Fin (HastadSource.asSource (R.reduce word)).occurrences))).value ≤ 14 / 15 :=
-  UniqueGamesTheorem.Clean.IncidenceGap.fourAnswerGame_value_le_fourteen_fifteenths _ _
-    (SourceIncidence.names_distinct _ (R.distinct word)) (parity_soundness R word no)
 
 end
 end UniqueGamesTheorem.Outer.BinaryParityReduction

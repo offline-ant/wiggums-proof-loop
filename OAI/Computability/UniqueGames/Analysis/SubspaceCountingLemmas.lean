@@ -1,3 +1,4 @@
+/- Modified 2026-10-09: AI-assisted proof simplification; see MODIFICATIONS.md. -/
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.FieldTheory.Finiteness
@@ -725,14 +726,6 @@ theorem lowerInterval_finrank (I : Submodule 𝕜 V)
 open scoped BigOperators
 attribute [local instance] Classical.propDecidable
 
-theorem sum_lowerInterval {R : Type*} [AddCommMonoid R]
-    (I : Submodule 𝕜 V) [Fintype {A : Submodule 𝕜 V // A ≤ I}]
-    [Fintype (Submodule 𝕜 I)] (weight : Nat → R) :
-    (∑ A : {A : Submodule 𝕜 V // A ≤ I}, weight (finrank 𝕜 A.val)) =
-      ∑ B : Submodule 𝕜 I, weight (finrank 𝕜 B) := by
-  apply Fintype.sum_equiv (lowerIntervalEquiv I)
-  intro A
-  rw [lowerInterval_finrank]
 
 local instance submoduleFinite [Finite V] : Finite (Submodule 𝕜 V) :=
   Finite.of_injective (fun S : Submodule 𝕜 V => (S : Set V)) SetLike.coe_injective
@@ -830,11 +823,6 @@ noncomputable def remainder (S : RestrictionSystem Ω Row Witness)
   classical
   exact if DeletedSet S H p q x then false else H x
 
-/-- The Boolean part removed from the original function. -/
-noncomputable def removed (S : RestrictionSystem Ω Row Witness)
-    (H : Ω → Bool) (p q : Nat) (x : Ω) : Bool := by
-  classical
-  exact if DeletedSet S H p q x then H x else false
 
 theorem remainder_le_original (S : RestrictionSystem Ω Row Witness)
     (H : Ω → Bool) (p q : Nat) (x : Ω)
@@ -887,30 +875,6 @@ theorem remainder_restrictionGlobal
         (trueCount_mono (remainder S H p q) H
           (remainder_le_original S H p q) (S.samples t))) hn
 
-/-- Retained and removed contributions form a disjoint Boolean partition. -/
-theorem boolean_partition (S : RestrictionSystem Ω Row Witness)
-    (H : Ω → Bool) (p q : Nat) (x : Ω) :
-    (remainder S H p q x || removed S H p q x) = H x ∧
-    (remainder S H p q x && removed S H p q x) = false := by
-  classical
-  by_cases hd : DeletedSet S H p q x <;> simp [remainder, removed, hd]
-
-/-- Exact conservation of retained and removed mass on any sampling list. -/
-theorem trueCount_partition (S : RestrictionSystem Ω Row Witness)
-    (H : Ω → Bool) (p q : Nat) (xs : List Ω) :
-    trueCount H xs = trueCount (remainder S H p q) xs +
-      trueCount (removed S H p q) xs := by
-  classical
-  induction xs with
-  | nil => rfl
-  | cons x xs ih =>
-    by_cases hd : DeletedSet S H p q x
-    · simp only [trueCount, remainder, removed, ite_eq_left hd, Bool.false_eq_true,
-        ↓reduceIte, Nat.zero_add]
-      omega
-    · simp only [trueCount, remainder, removed, ite_eq_right hd, Bool.false_eq_true,
-        ↓reduceIte, Nat.zero_add]
-      omega
 
 end UniqueGamesTheorem.Fourier.Deletion
 
