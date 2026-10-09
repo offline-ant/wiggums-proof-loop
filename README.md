@@ -8,6 +8,9 @@ is simple: make changes, check them, save the working version, and repeat.
 The starting point was the Unique Games proof from
 [openai/math](https://github.com/openai/math).
 
+This was a side project over a few hours. A few prompts set up the loop, then
+the agents worked through repeated rounds of changes and checks.
+
 ## Progress
 
 Each row uses the same counting method. It counts the proof and the local files
