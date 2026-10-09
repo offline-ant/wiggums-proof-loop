@@ -1,0 +1,4 @@
+cd /home/devops/Projects/unique-games-lean-public
+set -o pipefail
+./scripts/build.sh --publish --no-build 2>&1 | tee .git/publication-verification/cache-publish.log
+rc=${PIPESTATUS[0]}; echo CACHE_PUBLISH_EXIT=$rc | tee -a .git/publication-verification/cache-publish.log; exit "$rc"

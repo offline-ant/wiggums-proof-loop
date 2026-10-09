@@ -1,0 +1,4 @@
+set -o pipefail
+cd /home/devops/Projects/unique-games-lean-public
+./scripts/build.sh OAI.Computability.UniqueGames.Main ComparatorChallenges.UniqueGamesTheorem 2>&1 | tee /home/devops/Projects/unique-games-lean-public/.git/publication-verification/simplified-build.log
+rc=${PIPESTATUS[0]}; echo BUILD_EXIT=$rc | tee -a /home/devops/Projects/unique-games-lean-public/.git/publication-verification/simplified-build.log; exit "$rc"

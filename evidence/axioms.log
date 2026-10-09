@@ -1,0 +1,2 @@
+'OAI.UniqueGamesTheorem.theorem11' depends on axioms: [propext, Classical.choice, Quot.sound]
+AXIOMS_EXIT=0

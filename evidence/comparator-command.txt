@@ -1,0 +1,13 @@
+cd /home/devops/Projects/unique-games-lean-public
+set -o pipefail
+ROOT=/home/devops/Projects/unique-games-lean-public
+BIN=/home/devops/Projects/math-verification-tools/bin
+L=/home/claude/.elan/toolchains/leanprover--lean4---v4.34.1
+export PATH="$BIN:$L/bin:/usr/bin"
+envs=(PATH="$PATH" HOME="$ROOT/.lake" LANG=C.UTF-8 TERM=dumb LEAN_ABORT_ON_PANIC=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null TMPDIR="$ROOT/.lake/publication-tmp")
+sandbox=("$BIN/landrun" --best-effort --ro "$ROOT" --rw "$ROOT/.lake" --rox "$L" --rox /usr/bin --ro /usr/lib --ro /proc --ro /etc/ld.so.cache --rw /dev/null --ro /dev/urandom --ro "$BIN" --rox "$(realpath "$BIN/comparator")" --rox "$(realpath "$BIN/lean4export")" --rox "$BIN/landrun" --ldd --add-exec)
+for p in "$ROOT"/.lake/packages/*; do [[ -d "$p" ]] && sandbox+=(--ro "$(realpath "$p")"); done
+for v in "${envs[@]}"; do sandbox+=(--env "$v"); done
+
+env -i "${envs[@]}" "$BIN/no-af-unix" "${sandbox[@]}" -- "$L/bin/lake" env comparator ComparatorChallenges/UniqueGamesTheorem.json 2>&1 | tee .git/publication-verification/comparator.log
+rc=${PIPESTATUS[0]}; echo COMPARATOR_EXIT=$rc | tee -a .git/publication-verification/comparator.log; exit "$rc"

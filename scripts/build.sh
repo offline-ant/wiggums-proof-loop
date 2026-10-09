@@ -49,4 +49,5 @@ cmd=("$BIN/landrun" --best-effort "${ro[@]}" "${rights[@]}"
   --rw "$ROOT/.lake" --rox "$L" --rox /usr/bin/git --ro /usr/lib
   --ro /etc/ld.so.cache --rw /dev/null --ro /dev/urandom --ldd --add-exec)
 for v in "${vars[@]}"; do cmd+=(--env "$v"); done
-exec env -i "${vars[@]}" "$BIN/no-af-unix" "${cmd[@]}" -- "$L/bin/lake" "${args[@]}"
+# Keep this shell alive holding flock descriptors: no-af-unix closes inherited FDs.
+env -i "${vars[@]}" "$BIN/no-af-unix" "${cmd[@]}" -- "$L/bin/lake" "${args[@]}"

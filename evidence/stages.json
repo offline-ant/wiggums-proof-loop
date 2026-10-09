@@ -1,0 +1,68 @@
+[
+  {
+    "stage": "Original",
+    "revision": "aea301ea6e3dff8103da30c5771e1f58b9debbc9",
+    "metrics": {
+      "files": 478,
+      "bytes": 8704327,
+      "physical_lines": 186782,
+      "nonblank_noncomment_lines": 151287,
+      "approximate_lexical_tokens": 1987797
+    }
+  },
+  {
+    "stage": "Rounds 18\u201319",
+    "revision": "11c141493adfd2437a007ea33829a916ed6dd208",
+    "metrics": {
+      "files": 449,
+      "bytes": 8133910,
+      "physical_lines": 174616,
+      "nonblank_noncomment_lines": 141443,
+      "approximate_lexical_tokens": 1857824
+    }
+  },
+  {
+    "stage": "Round 20",
+    "revision": "41d618eba17c07dfe0cf42f538e92d16a1d29d68",
+    "metrics": {
+      "files": 448,
+      "bytes": 6942767,
+      "physical_lines": 151280,
+      "nonblank_noncomment_lines": 120980,
+      "approximate_lexical_tokens": 1581001
+    }
+  },
+  {
+    "stage": "Round 21",
+    "revision": "f6dcd463b7c31a11807a3c9bb36e6c176bd67917",
+    "metrics": {
+      "files": 448,
+      "bytes": 6925993,
+      "physical_lines": 150824,
+      "nonblank_noncomment_lines": 120571,
+      "approximate_lexical_tokens": 1577073
+    }
+  },
+  {
+    "stage": "Round 22",
+    "revision": "a40e86e62a247bec86e96e9d61d13e235a079db5",
+    "metrics": {
+      "files": 450,
+      "bytes": 6768272,
+      "physical_lines": 147006,
+      "nonblank_noncomment_lines": 117213,
+      "approximate_lexical_tokens": 1538310
+    }
+  },
+  {
+    "stage": "Round 23",
+    "revision": "b309f70ca0e80e9b1819b3c5c9177d7726fe139f",
+    "metrics": {
+      "files": 450,
+      "bytes": 6641554,
+      "physical_lines": 143714,
+      "nonblank_noncomment_lines": 113990,
+      "approximate_lexical_tokens": 1499962
+    }
+  }
+]

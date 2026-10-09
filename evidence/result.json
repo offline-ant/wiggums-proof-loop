@@ -1,0 +1,39 @@
+{
+  "completed_at_utc": "2026-10-09T18:58:40.531534+00:00",
+  "original_minimal_commit": "aea301ea6e3dff8103da30c5771e1f58b9debbc9",
+  "simplified_commit": "b309f70ca0e80e9b1819b3c5c9177d7726fe139f",
+  "target": "OAI.UniqueGamesTheorem.theorem11",
+  "original_main_and_challenge_build_exit": 0,
+  "simplified_main_and_challenge_build_exit": 0,
+  "comparator_exit": 0,
+  "statement_comparison": "pass",
+  "permitted_axiom_check": "pass",
+  "fresh_lean_default_kernel_replay": "pass",
+  "axiom_probe_exit": 0,
+  "transitive_axioms": [
+    "propext",
+    "Classical.choice",
+    "Quot.sound"
+  ],
+  "nanoda_enabled": false,
+  "cache_publication_no_build_exit": 0,
+  "protected_sources_match_original": true,
+  "source_and_config_hashes_unchanged": true,
+  "proof_sources_match_checked_commits": true,
+  "lean_version": "4.34.1",
+  "lean_commit": "5045d0056413266e57c625dcd7c365b10e377c52",
+  "comparator_commit": "d03acab154d269c06e60e4de7e4cc85deebff94b",
+  "lean4export_commit": "076e8e57707e813375e8f9da8bf989799ace9680",
+  "landrun_commit": "811cfff51ceaf3d9843708aa6d22e9b84ccac8b4",
+  "log_sha256": {
+    "axioms.log": "9df802ec81e2ce01154518d7de9d875316bf76d7dbfe91ab71c0b50a1b398477",
+    "original-build.log": "5b0cae1a2ef91f741c62cc49d0c94855fc7b6ee5b91b1305045cea66e55d9ff5",
+    "simplified-build.log": "f1877842c83f7ac3bdb5aaaabc1f6d2c1aeb9e31c968fca5bfab2617021e82e4",
+    "cache-publish.log": "7246b2a1cf2bcf5dc9ae13431d7ef0a8978bdaedab479bf3320f141395686fd9",
+    "comparator.log": "f88537333462e2228eafcf917f4f8e2fad46cc00de72ce7b1092b21c35381104"
+  },
+  "root_modules_compiled": {
+    "original": 479,
+    "simplified": 451
+  }
+}

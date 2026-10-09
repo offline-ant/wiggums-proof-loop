@@ -1,0 +1,118 @@
+Building ComparatorChallenges.UniqueGamesTheorem
+⚠ [8924/8924] Replayed ComparatorChallenges.UniqueGamesTheorem
+warning: ComparatorChallenges/UniqueGamesTheorem.lean:231:8: declaration uses `sorry`
+Build completed successfully (8924 jobs).
+Exporting #[Quot, Quot.mk, Quot.lift, Quot.ind, OAI.UniqueGamesTheorem.theorem11, propext, Quot.sound, Classical.choice, Nat.add, Nat.sub, Nat.mul, Nat.pow, Nat.gcd, Nat.div, Nat.mod, Nat.beq, Nat.ble, Nat.land, Nat.lor, Nat.xor, Nat.shiftLeft, Nat.shiftRight, String.ofList, Char.ofNat, List, eagerReduce, Nat, String, String.mk, Char, optParam, autoParam, semiOutParam, outParam] from ComparatorChallenges.UniqueGamesTheorem
+Building OAI.Computability.UniqueGames.Main
+⚠ [8952/8981] Replayed OAI.Computability.UniqueGames.Foundations.LabelBound
+warning: OAI/Computability/UniqueGames/Foundations/LabelBound.lean:63:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.CorrelatedSampling.finite_label_diagonal_bound`:
+  [DecidableEq σ]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq σ] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+⚠ [8964/9077] Replayed OAI.Computability.UniqueGames.Analysis.Identities
+warning: OAI/Computability/UniqueGames/Analysis/Identities.lean:739:10: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: OAI/Computability/UniqueGames/Analysis/Identities.lean:740:10: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+⚠ [8991/9166] Replayed OAI.Computability.UniqueGames.PCP.AlphabetReductionLemmas
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:143:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.ConstraintGraph.minimumRejections_le`:
+  [Fintype V]
+  [Fintype A]
+  [Nonempty A]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype V] [Fintype A] [Nonempty A] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:147:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.ConstraintGraph.exists_minimizer`:
+  [Fintype V]
+  [Fintype A]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype V] [Fintype A] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:170:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.ConstraintGraph.gap_nonnegative`:
+  [Fintype V]
+  [Fintype A]
+  [Nonempty A]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype V] [Fintype A] [Nonempty A] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:246:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.ConstraintGraph.minimumRejections_reindex`:
+  [Fintype V]
+  [Fintype A]
+  [Nonempty A]
+  [Fintype W]
+  [Fintype B]
+  [Nonempty B]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype V] [Fintype A] [Nonempty A] [Fintype W] [Fintype B] [Nonempty B] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:372:8: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.FiniteGraph.Bundle.ofGraph_minimumRejections`:
+  [Fintype A]
+  [Nonempty A]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype A] [Nonempty A] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/PCP/AlphabetReductionLemmas.lean:376:8: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Foundations.PCP.FiniteGraph.Bundle.ofGraph_gap`:
+  [Fintype A]
+  [Nonempty A]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype A] [Nonempty A] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+⚠ [9014/9373] Replayed OAI.Computability.UniqueGames.Quadratic.BlockTrace
+warning: OAI/Computability/UniqueGames/Quadratic/BlockTrace.lean:24:59: Variable name `hv` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _hv
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [9055/9373] Replayed OAI.Computability.UniqueGames.Decoding.PaddedLaw
+warning: OAI/Computability/UniqueGames/Decoding/PaddedLaw.lean:58:12: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+⚠ [9080/9373] Replayed OAI.Computability.UniqueGames.Inverse.KMSAffineRestrictionPresentationLemmas
+warning: OAI/Computability/UniqueGames/Inverse/KMSAffineRestrictionPresentationLemmas.lean:421:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Inverse.KMSAnalytic.fiber_constant_energy_cross_mul`:
+  [Fintype J]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Fintype J] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: OAI/Computability/UniqueGames/Inverse/KMSAffineRestrictionPresentationLemmas.lean:422:5: Variable name `hp` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _hp
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: OAI/Computability/UniqueGames/Inverse/KMSAffineRestrictionPresentationLemmas.lean:422:34: Variable name `hq` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _hq
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [9098/9373] Replayed OAI.Computability.UniqueGames.Inverse.KMSFourthMomentMixedEnergyLemmas
+warning: OAI/Computability/UniqueGames/Inverse/KMSFourthMomentMixedEnergyLemmas.lean:46:0: automatically included section variable(s) unused in theorem `OAI.UniqueGamesTheorem.Inverse.KMSFourthMoment.coeff_translate`:
+  [FiniteDimensional F2 E]
+  [FiniteDimensional F2 F]
+  [Fintype (F →ₗ[F2] E)]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [FiniteDimensional F2 E] [FiniteDimensional F2 F] [Fintype (F →ₗ[F2] E)] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+⚠ [9355/9373] Replayed OAI.Computability.UniqueGames.Games.ProductLemmas
+warning: OAI/Computability/UniqueGames/Games/ProductLemmas.lean:184:66: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+Build completed successfully (9373 jobs).
+Exporting #[Quot, Quot.mk, Quot.lift, Quot.ind, OAI.UniqueGamesTheorem.theorem11, propext, Quot.sound, Classical.choice, Nat.add, Nat.sub, Nat.mul, Nat.pow, Nat.gcd, Nat.div, Nat.mod, Nat.beq, Nat.ble, Nat.land, Nat.lor, Nat.xor, Nat.shiftLeft, Nat.shiftRight, String.ofList, Char.ofNat, List, eagerReduce, Nat, String, String.mk, Char, optParam, autoParam, semiOutParam, outParam] from OAI.Computability.UniqueGames.Main
+Running Lean default kernel on solution.
+Lean default kernel accepts the solution
+Your solution is okay!
+COMPARATOR_EXIT=0
